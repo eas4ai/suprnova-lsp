@@ -146,7 +146,8 @@ pub fn use_it(flag: bool, byte: u8, lhs: i32, rhs: i32) {
 
 #[test]
 fn returns_types_for_references_try_and_await_wrappers() {
-    check_analysis_queries(
+    let ty = |title, marker| AnalysisQuery::ty(title, marker).in_lib("analysis_wrapper_type_at");
+    check_analysis_queries_with_fake_sysroot(
         r#"
 //- /Cargo.toml
 [package]
@@ -155,11 +156,6 @@ version = "0.1.0"
 edition = "2024"
 
 //- /src/lib.rs
-pub enum Result<T, E> {
-    Ok(T),
-    Err(E),
-}
-
 pub struct Error;
 pub struct User;
 
@@ -182,12 +178,12 @@ pub async fn use_it(mut user: User) -> Result<(), Error> {
 }
 "#,
         &[
-            AnalysisQuery::ty("type at reference wrapper", "type_ref"),
-            AnalysisQuery::ty("type at mutable reference wrapper", "type_mut_ref"),
-            AnalysisQuery::ty("type at mutable reference binding", "type_mut_binding"),
-            AnalysisQuery::ty("type at try wrapper", "type_try"),
-            AnalysisQuery::ty("type at borrowed try wrapper", "type_try_borrowed_result"),
-            AnalysisQuery::ty("type at await wrapper", "type_await"),
+            ty("type at reference wrapper", "type_ref"),
+            ty("type at mutable reference wrapper", "type_mut_ref"),
+            ty("type at mutable reference binding", "type_mut_binding"),
+            ty("type at try wrapper", "type_try"),
+            ty("type at borrowed try wrapper", "type_try_borrowed_result"),
+            ty("type at await wrapper", "type_await"),
         ],
         expect![[r#"
             type at reference wrapper
@@ -864,7 +860,8 @@ pub fn use_it() {
 
 #[test]
 fn returns_structural_tuple_array_and_slice_types() {
-    check_analysis_queries(
+    let ty = |title, marker| AnalysisQuery::ty(title, marker).in_lib("analysis_structural_type_at");
+    check_analysis_queries_with_fake_sysroot(
         r#"
 //- /Cargo.toml
 [package]
@@ -905,20 +902,20 @@ pub fn use_it(pair: (u8, bool), array: [u8; 3], slice: &[u8], value: u8) {
 }
 "#,
         &[
-            AnalysisQuery::ty("annotated tuple binding", "type_annotated_tuple"),
-            AnalysisQuery::ty("annotated array binding", "type_annotated_array"),
-            AnalysisQuery::ty("annotated slice binding", "type_annotated_slice"),
-            AnalysisQuery::ty("tuple expression", "type_tuple_expr"),
-            AnalysisQuery::ty("array expression", "type_array_expr"),
-            AnalysisQuery::ty("repeat array expression", "type_repeat_expr"),
-            AnalysisQuery::ty("named repeat array expression", "type_named_repeat"),
-            AnalysisQuery::ty("spaced repeat array expression", "type_spaced_repeat"),
-            AnalysisQuery::ty("self repeat array expression", "type_self_repeat"),
-            AnalysisQuery::ty("tuple field", "type_tuple_field"),
-            AnalysisQuery::ty("array index", "type_indexed"),
-            AnalysisQuery::ty("tuple pattern left", "type_left"),
-            AnalysisQuery::ty("tuple pattern right", "type_right"),
-            AnalysisQuery::ty("slice pattern first", "type_first"),
+            ty("annotated tuple binding", "type_annotated_tuple"),
+            ty("annotated array binding", "type_annotated_array"),
+            ty("annotated slice binding", "type_annotated_slice"),
+            ty("tuple expression", "type_tuple_expr"),
+            ty("array expression", "type_array_expr"),
+            ty("repeat array expression", "type_repeat_expr"),
+            ty("named repeat array expression", "type_named_repeat"),
+            ty("spaced repeat array expression", "type_spaced_repeat"),
+            ty("self repeat array expression", "type_self_repeat"),
+            ty("tuple field", "type_tuple_field"),
+            ty("array index", "type_indexed"),
+            ty("tuple pattern left", "type_left"),
+            ty("tuple pattern right", "type_right"),
+            ty("slice pattern first", "type_first"),
         ],
         expect![[r#"
             annotated tuple binding
@@ -968,7 +965,8 @@ pub fn use_it(pair: (u8, bool), array: [u8; 3], slice: &[u8], value: u8) {
 
 #[test]
 fn returns_index_types_through_references() {
-    check_analysis_queries(
+    let ty = |title, marker| AnalysisQuery::ty(title, marker).in_lib("analysis_ref_index_type_at");
+    check_analysis_queries_with_fake_sysroot(
         r#"
 //- /Cargo.toml
 [package]
@@ -984,9 +982,9 @@ pub fn use_it(slice: &[u8], array_ref: &[bool; 3], nested_slice: &&[u16]) {
 }
 "#,
         &[
-            AnalysisQuery::ty("slice reference index", "type_slice_item"),
-            AnalysisQuery::ty("array reference index", "type_array_item"),
-            AnalysisQuery::ty("nested slice reference index", "type_nested_item"),
+            ty("slice reference index", "type_slice_item"),
+            ty("array reference index", "type_array_item"),
+            ty("nested slice reference index", "type_nested_item"),
         ],
         expect![[r#"
             slice reference index

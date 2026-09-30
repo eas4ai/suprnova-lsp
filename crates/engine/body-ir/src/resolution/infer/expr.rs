@@ -8,13 +8,14 @@
 use anyhow::Context as _;
 use rg_def_map::DefMapSource;
 use rg_ir_model::{ExprId, FieldKey, StmtId, identity::DeclarationRef};
+use rg_item_tree::LangItem;
 use rg_package_store::PackageStoreError;
 use rg_semantic_ir::ItemStoreSource;
-use rg_ty::solver::{Ty, TyShape};
+use rg_ty::solver::{AdtTy, List, TraitApplication, Ty, TyShape};
 
 use super::{BodyInference, deferred::DeferredKind};
 use crate::body::{
-    ExprAssignOp, ExprBlockKind, ExprKind, ExprWrapperKind, LabelData, StmtKind,
+    ExprAssignOp, ExprBlockKind, ExprKind, ExprRangeKind, ExprWrapperKind, LabelData, StmtKind,
     facts::BodyResolution,
 };
 
@@ -264,8 +265,8 @@ where
                 self.infer_optional(index, &self.cx.unknown())
                     .context("infer optional expression")?;
                 self.inference.expr_slot(expr);
-                if base.is_some() {
-                    self.run_or_defer(DeferredKind::Member { expr })
+                if base.is_some() && index.is_some() {
+                    self.run_or_defer(DeferredKind::Index { expr })
                         .context("register pending inference")?;
                 }
             }
@@ -274,15 +275,50 @@ where
                     .context("infer optional expression")?;
                 self.inference.expr_slot(expr);
                 if base.is_some() {
-                    self.run_or_defer(DeferredKind::Member { expr })
+                    self.run_or_defer(DeferredKind::Field { expr })
                         .context("register pending inference")?;
                 }
             }
-            ExprKind::Range { start, end, .. } => {
-                self.infer_optional(start, &self.cx.unknown())
-                    .context("infer optional expression")?;
-                self.infer_optional(end, &self.cx.unknown())
-                    .context("infer optional expression")?;
+            ExprKind::Range { start, end, kind } => {
+                // Syntax chooses the compiler-known declaration, regardless of imports or a
+                // local type named Range. TODO: Support the experimental range families.
+                let lang_item = match (start, end, kind) {
+                    (Some(_), Some(_), Some(ExprRangeKind::Exclusive)) => Some(LangItem::Range),
+                    (Some(_), None, Some(ExprRangeKind::Exclusive)) => Some(LangItem::RangeFrom),
+                    (None, Some(_), Some(ExprRangeKind::Exclusive)) => Some(LangItem::RangeTo),
+                    (Some(_), Some(_), Some(ExprRangeKind::Inclusive)) => {
+                        Some(LangItem::RangeInclusive)
+                    }
+                    (None, Some(_), Some(ExprRangeKind::Inclusive)) => {
+                        Some(LangItem::RangeToInclusive)
+                    }
+                    (None, None, Some(ExprRangeKind::Exclusive)) => Some(LangItem::RangeFull),
+                    _ => None,
+                };
+                let endpoint_ty = if let Some(def) =
+                    lang_item.and_then(|item| self.context.item_lookup_query().lang_type(item))
+                {
+                    // Both endpoints and the range's type argument share this destination.
+                    // For `let bounds = 1..; take_range(bounds)`, a later RangeFrom<usize>
+                    // parameter can still refine the literal before numeric fallback.
+                    let (endpoint_ty, args) = if start.is_some() || end.is_some() {
+                        let endpoint_ty = self.inference.table().new_type_var();
+                        (endpoint_ty, List::new(self.cx, &[endpoint_ty.into()]))
+                    } else {
+                        (self.cx.unknown(), List::default())
+                    };
+                    self.inference
+                        .set_expr_ty(expr, self.cx.adt(AdtTy { def, args }));
+                    self.inference.constrain_expr_ty(expr, expected);
+                    endpoint_ty
+                } else {
+                    // Even incomplete syntax or missing declarations must visit the endpoints.
+                    self.cx.unknown()
+                };
+                self.infer_optional(start, &endpoint_ty)
+                    .context("infer range start")?;
+                self.infer_optional(end, &endpoint_ty)
+                    .context("infer range end")?;
             }
             ExprKind::Cast {
                 expr: inner,
@@ -569,11 +605,7 @@ where
                 };
                 self.infer_optional(inner, &inner_expected)
                     .context("infer wrapped expression")?;
-                if matches!(kind, ExprWrapperKind::Try) && inner.is_some() {
-                    self.inference.expr_slot(expr);
-                    self.run_or_defer(DeferredKind::TryOutput { expr })
-                        .context("register pending inference")?;
-                } else if let Some(inner) = inner {
+                if let Some(inner) = inner {
                     let inner_ty = self.inference.expr_slot(inner);
                     // Await is shallow: async functions expose their declared result here.
                     // TODO: Model arbitrary Future::Output when inference coverage expands.
@@ -583,7 +615,28 @@ where
                             self.cx.reference(mutability, inner_ty)
                         }
                         ExprWrapperKind::Return => self.cx.never(),
-                        ExprWrapperKind::Try => unreachable!("try operands are deferred above"),
+                        ExprWrapperKind::Try => {
+                            // `value?` yields <Value as Try>::Output. Keep Value's live slot in
+                            // that projection so a later use can refine an unknown operand too.
+                            // TODO: Relate Try::Residual to the enclosing return type through
+                            // FromResidual; output inference alone does not check that conversion.
+                            match self.context.item_lookup_query().lang_trait(LangItem::Try) {
+                                Some(def) => self
+                                    .context
+                                    .live()
+                                    .projection(
+                                        TraitApplication {
+                                            def,
+                                            args: List::new(self.cx, &[inner_ty.into()]),
+                                        },
+                                        "Output",
+                                        self.inference.table(),
+                                    )
+                                    .context("project try output")?
+                                    .unwrap_or(self.cx.unknown()),
+                                None => self.cx.unknown(),
+                            }
+                        }
                     };
                     self.inference.set_expr_ty(expr, ty);
                     if matches!(kind, ExprWrapperKind::Paren) {

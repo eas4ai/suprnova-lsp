@@ -213,6 +213,665 @@ pub fn use_it(half: f16, quad: f128, manual: Manual, derived: Derived) {
 }
 
 #[test]
+fn infers_standard_range_forms_and_shared_endpoints() {
+    let ty = |title, marker| AnalysisQuery::ty(title, marker).in_lib("analysis_ranges");
+    check_analysis_queries_with_fake_sysroot(
+        r#"
+//- /Cargo.toml
+[package]
+name = "analysis_ranges"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+pub fn use_it(end: u16) {
+    let exclusive = (1$start$..end)$exclusive$;
+    let from = (2u32..)$from$;
+    let to = (..3)$to$;
+    let inclusive = ('a'..='z')$inclusive$;
+    let to_inclusive = (..=4u64)$to_inclusive$;
+    let full = (..)$full$;
+    let reversed = (end..5$end$)$reversed$;
+}
+"#,
+        &[
+            ty("exclusive range", "exclusive"),
+            ty("range from", "from"),
+            ty("range to with numeric fallback", "to"),
+            ty("inclusive character range", "inclusive"),
+            ty("inclusive range to", "to_inclusive"),
+            ty("full range", "full"),
+            ty("start refined by end", "start"),
+            ty("end refined by start", "end"),
+            ty("range with typed start", "reversed"),
+        ],
+        expect![[r#"
+            exclusive range
+            - nominal struct core[lib]::crate::ops::Range<u16>
+
+            range from
+            - nominal struct core[lib]::crate::ops::RangeFrom<u32>
+
+            range to with numeric fallback
+            - nominal struct core[lib]::crate::ops::RangeTo<i32>
+
+            inclusive character range
+            - nominal struct core[lib]::crate::ops::RangeInclusive<char>
+
+            inclusive range to
+            - nominal struct core[lib]::crate::ops::RangeToInclusive<u64>
+
+            full range
+            - nominal struct core[lib]::crate::ops::RangeFull
+
+            start refined by end
+            - u16
+
+            end refined by start
+            - u16
+
+            range with typed start
+            - nominal struct core[lib]::crate::ops::Range<u16>
+        "#]],
+    );
+}
+
+#[test]
+fn range_expectations_and_later_uses_refine_endpoints() {
+    let ty = |title, marker| AnalysisQuery::ty(title, marker).in_lib("analysis_range_evidence");
+    check_analysis_queries_with_fake_sysroot(
+        r#"
+//- /Cargo.toml
+[package]
+name = "analysis_range_evidence"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+use std::ops::{Range, RangeFrom, RangeInclusive};
+pub type Inclusive = RangeInclusive<u8>;
+pub fn make<T>() -> T { loop {} }
+pub fn take_from(value: RangeFrom<usize>) {}
+pub fn take_inclusive(value: RangeInclusive<u64>) {}
+pub fn stop() -> ! { loop {} }
+
+pub fn use_it() {
+    let expected: Range<u32> = (make()$expected_start$..make()$expected_end$)$expected$;
+    let aliased: Inclusive = (make()$alias_start$..=1)$alias$;
+
+    let endpoint = 1$number$;
+    let bounds$refined_binding$ = (endpoint$local_endpoint$..)$local_range$;
+    take_from(bounds);
+
+    let start = make();
+    let end = make();
+    let generic = (start..=end)$generic_range$;
+    take_inclusive(generic);
+    start$generic_start$;
+    end$generic_end$;
+
+    let diverging: Range<u8> = (stop()$never_endpoint$..1)$never_range$;
+}
+"#,
+        &[
+            ty("annotated range", "expected"),
+            ty("expected start", "expected_start"),
+            ty("expected end", "expected_end"),
+            ty("alias expectation", "alias"),
+            ty("endpoint under alias expectation", "alias_start"),
+            ty("literal refined through range local", "number"),
+            ty("endpoint local", "local_endpoint"),
+            ty("range before later use", "local_range"),
+            ty("refined range binding", "refined_binding"),
+            ty("generic range before later use", "generic_range"),
+            ty("generic start after later use", "generic_start"),
+            ty("generic end after later use", "generic_end"),
+            ty("diverging endpoint", "never_endpoint"),
+            ty("range with diverging endpoint", "never_range"),
+        ],
+        expect![[r#"
+            annotated range
+            - nominal struct core[lib]::crate::ops::Range<u32>
+
+            expected start
+            - u32
+
+            expected end
+            - u32
+
+            alias expectation
+            - nominal struct core[lib]::crate::ops::RangeInclusive<u8>
+
+            endpoint under alias expectation
+            - u8
+
+            literal refined through range local
+            - usize
+
+            endpoint local
+            - usize
+
+            range before later use
+            - nominal struct core[lib]::crate::ops::RangeFrom<usize>
+
+            refined range binding
+            - nominal struct core[lib]::crate::ops::RangeFrom<usize>
+
+            generic range before later use
+            - nominal struct core[lib]::crate::ops::RangeInclusive<u64>
+
+            generic start after later use
+            - u64
+
+            generic end after later use
+            - u64
+
+            diverging endpoint
+            - !
+
+            range with diverging endpoint
+            - nominal struct core[lib]::crate::ops::Range<u8>
+        "#]],
+    );
+}
+
+#[test]
+fn identifies_range_by_language_item_instead_of_name() {
+    check_analysis_queries(
+        r#"
+//- /Cargo.toml
+[package]
+name = "analysis_range_identity"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+#[lang = "Range"]
+pub struct Interval<T> { pub start: T, pub end: T }
+
+pub fn use_it() {
+    let interval = (1u8..2)$range$;
+    interval.end$field$;
+}
+"#,
+        &[
+            AnalysisQuery::ty("renamed range declaration", "range"),
+            AnalysisQuery::ty("field on renamed range", "field"),
+        ],
+        expect![[r#"
+            renamed range declaration
+            - nominal struct analysis_range_identity[lib]::crate::Interval<u8>
+
+            field on renamed range
+            - u8
+        "#]],
+    );
+}
+
+#[test]
+fn infers_standard_index_outputs_from_the_index_type() {
+    let ty = |title, marker| AnalysisQuery::ty(title, marker).in_lib("analysis_index_outputs");
+    check_analysis_queries_with_fake_sysroot(
+        r#"
+//- /Cargo.toml
+[package]
+name = "analysis_index_outputs"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+pub const LENGTH: usize = 4;
+pub fn symbolic_lengths<const N: usize>() {
+    let named = [1_u8; LENGTH][0$named_length_index$]$named_length_output$;
+    let generic = [1_u16; N][0$generic_length_index$]$generic_length_output$;
+}
+
+pub fn use_it(mut bytes: [u8; 4], slice: &[u16], text: &str) {
+    let index = 1$scalar_index$;
+    let element = (&bytes[index])$element$;
+    let array_ranges = (
+        &bytes[1..3], &bytes[1..], &bytes[..3],
+        &bytes[1..=2], &bytes[..=2], &bytes[..],
+    )$array_ranges$;
+    let slice_ranges = (
+        &slice[1..3], &slice[1..], &slice[..3],
+        &slice[1..=2], &slice[..=2], &slice[..],
+    )$slice_ranges$;
+    let string_ranges = (
+        &text[1..3], &text[1..], &text[..3],
+        &text[1..=2], &text[..=2], &text[..],
+    )$string_ranges$;
+    let mutable = (&mut bytes[1..])$mutable$;
+    let start = 1$endpoint$;
+    let bounds = (start..)$bounds$;
+    let indirect = (&slice[bounds])$indirect$;
+}
+"#,
+        &[
+            ty("scalar index", "scalar_index"),
+            ty("element reference", "element"),
+            ty("all array range forms", "array_ranges"),
+            ty("all slice range forms", "slice_ranges"),
+            ty("all string range forms", "string_ranges"),
+            ty("mutable slice reference", "mutable"),
+            ty("endpoint inferred from indexing", "endpoint"),
+            ty("stored range", "bounds"),
+            ty("indexing with stored range", "indirect"),
+            ty("named array length output", "named_length_output"),
+            ty("named array length index", "named_length_index"),
+            ty("generic array length output", "generic_length_output"),
+            ty("generic array length index", "generic_length_index"),
+        ],
+        expect![[r#"
+            scalar index
+            - usize
+
+            element reference
+            - &u8
+
+            all array range forms
+            - (&[u8], &[u8], &[u8], &[u8], &[u8], &[u8])
+
+            all slice range forms
+            - (&[u16], &[u16], &[u16], &[u16], &[u16], &[u16])
+
+            all string range forms
+            - (&str, &str, &str, &str, &str, &str)
+
+            mutable slice reference
+            - &mut [u8]
+
+            endpoint inferred from indexing
+            - usize
+
+            stored range
+            - nominal struct core[lib]::crate::ops::RangeFrom<usize>
+
+            indexing with stored range
+            - &[u16]
+
+            named array length output
+            - u8
+
+            named array length index
+            - usize
+
+            generic array length output
+            - u16
+
+            generic array length index
+            - usize
+        "#]],
+    );
+}
+
+#[test]
+fn selects_index_receivers_with_isolated_live_evidence() {
+    let ty = |title, marker| AnalysisQuery::ty(title, marker).in_lib("analysis_index_receivers");
+    check_analysis_queries_with_fake_sysroot(
+        r#"
+//- /Cargo.toml
+[package]
+name = "analysis_index_receivers"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+use std::ops::{Deref, Index};
+pub struct Key;
+pub struct Store<T>(T);
+impl<T> Index<Key> for Store<T> {
+    type Output = T;
+    fn index(&self, _: Key) -> &T { &self.0 }
+}
+pub struct Wrapper<T>(Store<T>);
+impl<T> Deref for Wrapper<T> { type Target = Store<T>; }
+pub struct Preferred<T>(Store<T>);
+impl<T> Deref for Preferred<T> { type Target = Store<T>; }
+impl<T> Index<Key> for Preferred<T> { type Output = u32; }
+
+pub trait Marker {}
+impl Marker for u32 {}
+pub struct Bytes;
+impl Index<u16> for Bytes { type Output = u8; }
+pub struct Conditional<T>(T);
+impl<T: Marker> Index<T> for Conditional<T> { type Output = u32; }
+impl<T> Deref for Conditional<T> { type Target = Bytes; }
+pub fn make<T>() -> T { loop {} }
+
+pub fn use_it(store: Store<u8>, wrapper: Wrapper<u8>, preferred: Preferred<u8>, conditional: Conditional<u8>) {
+    let direct = store[Key]$direct$;
+    let dereferenced = wrapper[Key]$deref$;
+    let preferred = preferred[Key]$preferred$;
+    let index = make();
+    let fallback = conditional[index]$fallback$;
+    index$index$;
+}
+pub fn generic<C: Index<I, Output = T>, I, T>(container: C, index: I) -> T {
+    container[index]$generic$
+}
+pub fn deref_bound<P: Deref<Target = Store<u8>>>(pointer: P) {
+    pointer[Key]$deref_bound$;
+}
+"#,
+        &[
+            ty("custom index type", "direct"),
+            ty("index through Deref", "deref"),
+            ty("direct Index before Deref", "preferred"),
+            ty("Deref after rejected Index bound", "fallback"),
+            ty("index unaffected by rejected receiver", "index"),
+            ty("generic Index bound", "generic"),
+            ty("generic Deref bound", "deref_bound"),
+        ],
+        expect![[r#"
+            custom index type
+            - u8
+
+            index through Deref
+            - u8
+
+            direct Index before Deref
+            - u32
+
+            Deref after rejected Index bound
+            - u8
+
+            index unaffected by rejected receiver
+            - u16
+
+            generic Index bound
+            - param T
+
+            generic Deref bound
+            - u8
+        "#]],
+    );
+}
+
+#[test]
+fn coerces_index_arguments_without_changing_their_source_types() {
+    let ty = |title, marker| AnalysisQuery::ty(title, marker).in_lib("analysis_index_coercions");
+    check_analysis_queries_with_fake_sysroot(
+        r#"
+//- /Cargo.toml
+[package]
+name = "analysis_index_coercions"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+use std::ops::{Deref, Index};
+pub struct TextStore;
+impl Index<&str> for TextStore { type Output = u32; }
+pub struct SliceStore<T>(T);
+impl<T> Index<&[T]> for SliceStore<T> { type Output = T; }
+pub struct MutableStore;
+impl Index<&mut [u8]> for MutableStore { type Output = u16; }
+pub struct Preferred;
+impl Index<&String> for Preferred { type Output = u8; }
+impl Index<&str> for Preferred { type Output = u32; }
+pub fn make<T>() -> T { loop {} }
+
+pub fn use_it(text: TextStore, mut string: String, preferred: Preferred, mutable: MutableStore) {
+    let key = &string;
+    let from_string = text[key$string_key$]$string_output$;
+    let from_mutable = text[&mut string]$mutable_string_output$;
+    let preferred = preferred[&string]$preferred_output$;
+    let key = &[1_u8, 2];
+    let from_array = SliceStore(1_u8)[key$array_key$]$array_output$;
+    let from_mutable_array = mutable[&mut [1_u8, 2]]$mutable_array_output$;
+}
+pub fn from_bound<P: Deref<Target = str>>(text: TextStore, pointer: P) {
+    let value = text[&pointer]$bound_output$;
+}
+pub fn later_output() {
+    let store = make::<SliceStore<_>>()$store$;
+    let key = (&[make(), make()])$key$;
+    let value: u8 = store[key]$inferred_output$;
+}
+pub fn pending_key(text: TextStore, key: Result<&String, ()>) -> Result<(), ()> {
+    let value = text[key?$pending_key$]$pending_output$;
+    Result::Ok(())
+}
+"#,
+        &[
+            ty("string index", "string_output"),
+            ty("original string reference", "string_key"),
+            ty("mutable string reborrow", "mutable_string_output"),
+            ty("exact argument before coercion", "preferred_output"),
+            ty("array index", "array_output"),
+            ty("original array reference", "array_key"),
+            ty("mutable array unsizing", "mutable_array_output"),
+            ty("generic Deref argument", "bound_output"),
+            ty("receiver refined by output", "store"),
+            ty("array elements refined by output", "key"),
+            ty("output expectation", "inferred_output"),
+            ty("argument supplied by a pending projection", "pending_key"),
+            ty("indexing after the argument projection", "pending_output"),
+        ],
+        expect![[r#"
+            string index
+            - u32
+
+            original string reference
+            - &nominal struct alloc[lib]::crate::string::String
+
+            mutable string reborrow
+            - u32
+
+            exact argument before coercion
+            - u8
+
+            array index
+            - u8
+
+            original array reference
+            - &[u8; 2]
+
+            mutable array unsizing
+            - u16
+
+            generic Deref argument
+            - u32
+
+            receiver refined by output
+            - nominal struct analysis_index_coercions[lib]::crate::SliceStore<u8>
+
+            array elements refined by output
+            - &[u8; 2]
+
+            output expectation
+            - u8
+
+            argument supplied by a pending projection
+            - &nominal struct alloc[lib]::crate::string::String
+
+            indexing after the argument projection
+            - u32
+        "#]],
+    );
+}
+
+#[test]
+fn indexes_arrays_through_slice_impls_of_the_identified_trait() {
+    // Only the slice implements the operator here, so this exercises the unsizing alternative
+    // independently of core's blanket array impl. The renamed trait checks language identity.
+    check_analysis_queries(
+        r#"
+//- /Cargo.toml
+[package]
+name = "analysis_index_unsizing"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+#[lang = "index"]
+pub trait Project<I> { type Output; }
+impl<T> Project<usize> for [T] { type Output = T; }
+pub fn use_it(array: [u8; 3]) {
+    let value = array[0$index$]$output$;
+}
+"#,
+        &[
+            AnalysisQuery::ty("array through slice implementation", "output"),
+            AnalysisQuery::ty("index argument", "index"),
+        ],
+        expect![[r#"
+            array through slice implementation
+            - u8
+
+            index argument
+            - usize
+        "#]],
+    );
+}
+
+#[test]
+fn refines_indexing_from_later_operand_and_output_evidence() {
+    let ty = |title, marker| AnalysisQuery::ty(title, marker).in_lib("analysis_index_evidence");
+    check_analysis_queries_with_fake_sysroot(
+        r#"
+//- /Cargo.toml
+[package]
+name = "analysis_index_evidence"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+use std::ops::Index;
+pub struct User { pub id: u32 }
+impl User { pub fn id(&self) -> u32 { self.id } }
+pub trait Marker {}
+impl Marker for User {}
+impl Marker for u8 {}
+pub struct Bag<T>(T);
+impl<T: Marker> Index<usize> for Bag<T> {
+    type Output = T;
+    fn index(&self, _: usize) -> &T { &self.0 }
+}
+pub fn consume<T: Marker>(value: &T) -> u32 { 0 }
+pub struct Store;
+impl Index<bool> for Store { type Output = User; }
+impl Index<usize> for Store { type Output = u8; }
+pub struct Stop;
+impl Index<usize> for Stop { type Output = !; }
+pub fn make<T>() -> T { loop {} }
+pub fn require_index(index: bool) {}
+pub fn require_base(base: &Store) {}
+pub fn require_stop(base: &Stop) {}
+
+pub fn later_index(store: Store) {
+    let index = make();
+    let user = &store[index]$index_output$;
+    let field = user.id$field$;
+    let method = user.id()$method$;
+    let consumed = consume(user)$obligation$;
+    require_index(index);
+    index$index$;
+}
+pub fn later_base() {
+    let base = make()$base$;
+    let user = &base[true]$base_output$;
+    require_base(&base);
+}
+pub fn later_output(user: User) {
+    let mut array = [Vec::new()]$array_initializer$;
+    array[0]$array_output$.push(user);
+    array$array$;
+}
+pub fn later_never() {
+    let base = make();
+    let value$value$: u8 = base[0]$never$;
+    require_stop(&base);
+}
+pub fn output_drives_bound() {
+    let bag$bag$ = Bag(make());
+    let value: u8 = bag[0$bound_index$]$bound_output$;
+    let via_method$method_bag$ = Bag(make());
+    let value: &u8 = via_method.index(0)$method_output$;
+}
+"#,
+        &[
+            ty("output after later index evidence", "index_output"),
+            ty("dependent field", "field"),
+            ty("dependent method", "method"),
+            ty("dependent trait obligation", "obligation"),
+            ty("refined index", "index"),
+            ty("refined base", "base"),
+            ty("output after later base evidence", "base_output"),
+            ty(
+                "array initializer refined by output use",
+                "array_initializer",
+            ),
+            ty(
+                "indexed collection refined by method argument",
+                "array_output",
+            ),
+            ty("refined array binding", "array"),
+            ty("diverging output", "never"),
+            ty("coerced binding", "value"),
+            ty("receiver refined through pending bound", "bag"),
+            ty("index refined through pending bound", "bound_index"),
+            ty("output refining pending bound", "bound_output"),
+            ty("equivalent method receiver", "method_bag"),
+            ty("equivalent method output", "method_output"),
+        ],
+        expect![[r#"
+            output after later index evidence
+            - nominal struct analysis_index_evidence[lib]::crate::User
+
+            dependent field
+            - u32
+
+            dependent method
+            - u32
+
+            dependent trait obligation
+            - u32
+
+            refined index
+            - bool
+
+            refined base
+            - nominal struct analysis_index_evidence[lib]::crate::Store
+
+            output after later base evidence
+            - nominal struct analysis_index_evidence[lib]::crate::User
+
+            array initializer refined by output use
+            - [nominal struct alloc[lib]::crate::vec::Vec<nominal struct analysis_index_evidence[lib]::crate::User, nominal struct alloc[lib]::crate::vec::Global>; 1]
+
+            indexed collection refined by method argument
+            - nominal struct alloc[lib]::crate::vec::Vec<nominal struct analysis_index_evidence[lib]::crate::User, nominal struct alloc[lib]::crate::vec::Global>
+
+            refined array binding
+            - [nominal struct alloc[lib]::crate::vec::Vec<nominal struct analysis_index_evidence[lib]::crate::User, nominal struct alloc[lib]::crate::vec::Global>; 1]
+
+            diverging output
+            - !
+
+            coerced binding
+            - u8
+
+            receiver refined through pending bound
+            - nominal struct analysis_index_evidence[lib]::crate::Bag<u8>
+
+            index refined through pending bound
+            - usize
+
+            output refining pending bound
+            - u8
+
+            equivalent method receiver
+            - nominal struct analysis_index_evidence[lib]::crate::Bag<u8>
+
+            equivalent method output
+            - &u8
+        "#]],
+    );
+}
+
+#[test]
 fn propagates_let_annotation_expected_types_through_tuple_expressions() {
     check_analysis_queries(
         r#"
@@ -685,13 +1344,9 @@ pub struct Result<T, E> {
     err: E,
 }
 
-pub type AliasResult<T> = Result<T, Error>;
-
 pub fn make_vec<T>() -> Vec<T> {}
 pub fn make_option<T>() -> Option<T> {}
 pub fn make_result<T, E>() -> Result<T, E> {}
-pub fn make_result_with_error<T>() -> Result<T, Error> {}
-pub fn make_alias_result<T>() -> AliasResult<T> {}
 
 pub struct Factory;
 
@@ -711,10 +1366,6 @@ pub fn use_it(builder: Builder) {
     let method: Vec<User> = builder.build_vec()$type_method$;
     let option: Option<User> = make_option()$type_option$;
     let result: Result<User, Error> = make_result()$type_result$;
-    let try_user: User = make_result_with_error()$type_try_inner$?$type_try_output$;
-    let alias_try_user: User = make_alias_result()$type_alias_try_inner$?$type_alias_try_output$;
-    let explicit_alias_try_user: User =
-        make_alias_result::<_>()$type_explicit_alias_try_inner$?$type_explicit_alias_try_output$;
     let unconstrained = make_vec()$type_unconstrained$;
 }
 "#,
@@ -727,21 +1378,6 @@ pub fn use_it(builder: Builder) {
             AnalysisQuery::ty("method generic return shape", "type_method"),
             AnalysisQuery::ty("single-param generic return shape", "type_option"),
             AnalysisQuery::ty("multi-param generic return shape", "type_result"),
-            AnalysisQuery::ty("try inner generic result", "type_try_inner"),
-            AnalysisQuery::ty("try output from generic result", "type_try_output"),
-            AnalysisQuery::ty("alias try inner generic result", "type_alias_try_inner"),
-            AnalysisQuery::ty(
-                "alias try output from generic result",
-                "type_alias_try_output",
-            ),
-            AnalysisQuery::ty(
-                "explicit wildcard alias try inner generic result",
-                "type_explicit_alias_try_inner",
-            ),
-            AnalysisQuery::ty(
-                "explicit wildcard alias try output from generic result",
-                "type_explicit_alias_try_output",
-            ),
             AnalysisQuery::ty("unconstrained generic return shape", "type_unconstrained"),
         ],
         expect![[r#"
@@ -759,24 +1395,6 @@ pub fn use_it(builder: Builder) {
 
             multi-param generic return shape
             - nominal struct analysis_generic_call_result_shape_inference[lib]::crate::Result<nominal struct analysis_generic_call_result_shape_inference[lib]::crate::User, nominal struct analysis_generic_call_result_shape_inference[lib]::crate::Error>
-
-            try inner generic result
-            - nominal struct analysis_generic_call_result_shape_inference[lib]::crate::Result<nominal struct analysis_generic_call_result_shape_inference[lib]::crate::User, nominal struct analysis_generic_call_result_shape_inference[lib]::crate::Error>
-
-            try output from generic result
-            - nominal struct analysis_generic_call_result_shape_inference[lib]::crate::User
-
-            alias try inner generic result
-            - nominal struct analysis_generic_call_result_shape_inference[lib]::crate::Result<nominal struct analysis_generic_call_result_shape_inference[lib]::crate::User, nominal struct analysis_generic_call_result_shape_inference[lib]::crate::Error>
-
-            alias try output from generic result
-            - nominal struct analysis_generic_call_result_shape_inference[lib]::crate::User
-
-            explicit wildcard alias try inner generic result
-            - nominal struct analysis_generic_call_result_shape_inference[lib]::crate::Result<nominal struct analysis_generic_call_result_shape_inference[lib]::crate::User, nominal struct analysis_generic_call_result_shape_inference[lib]::crate::Error>
-
-            explicit wildcard alias try output from generic result
-            - nominal struct analysis_generic_call_result_shape_inference[lib]::crate::User
 
             unconstrained generic return shape
             - nominal struct analysis_generic_call_result_shape_inference[lib]::crate::Vec<<unknown>>
@@ -1262,23 +1880,12 @@ edition = "2024"
 //- /src/lib.rs
 pub struct Attr;
 
-pub struct AttrVec;
-
-impl AttrVec {
-    pub fn push(&mut self, attr: Attr) {}
-}
-
 pub struct Id;
 
 pub struct Factory;
 
 pub struct User;
 pub struct Name;
-
-pub enum Option<T> {
-    Some(T),
-    None,
-}
 
 impl Factory {
     type Id = Id;
@@ -1290,7 +1897,7 @@ impl User {
     pub fn name(&self) -> Name {}
 }
 
-pub fn with_attrs(f: impl FnOnce(&mut AttrVec)) {}
+pub fn with_attrs(f: impl FnOnce(&mut Vec<Attr>)) {}
 pub fn with_user(f: impl FnOnce() -> User) {}
 
 pub fn visit<T, F: FnOnce(T)>(value: T, f: F) {}
@@ -1363,7 +1970,7 @@ pub fn use_it(flag: bool, attr: Attr, user: User, users: &[User], seed: Id) {
         ],
         expect![[r#"
             direct callable closure param
-            - &mut nominal struct analysis_callable_closure_bound_inference[lib]::crate::AttrVec
+            - &mut nominal struct alloc[lib]::crate::vec::Vec<nominal struct analysis_callable_closure_bound_inference[lib]::crate::Attr, nominal struct alloc[lib]::crate::vec::Global>
 
             direct callable closure method call
             - ()
@@ -1393,7 +2000,7 @@ pub fn use_it(flag: bool, attr: Attr, user: User, users: &[User], seed: Id) {
             - nominal struct analysis_callable_closure_bound_inference[lib]::crate::User
 
             nested generic closure return result
-            - nominal enum analysis_callable_closure_bound_inference[lib]::crate::Option<nominal struct analysis_callable_closure_bound_inference[lib]::crate::User>
+            - nominal enum core[lib]::crate::option::Option<nominal struct analysis_callable_closure_bound_inference[lib]::crate::User>
 
             conflicting generic closure return result
             - nominal struct analysis_callable_closure_bound_inference[lib]::crate::User
@@ -2309,12 +2916,6 @@ pub fn tuple_field(user: User) {
     pair.0$type_pair_field$.push(user);
     pair$type_pair_read$;
 }
-
-pub fn array_index(user: User) {
-    let array = [Vec::new()]$type_array_initializer$;
-    array[0]$type_array_index$.push(user);
-    array$type_array_read$;
-}
 "#,
         &[
             AnalysisQuery::ty("declared field owner initializer", "type_boxed_initializer"),
@@ -2329,9 +2930,6 @@ pub fn array_index(user: User) {
             AnalysisQuery::ty("tuple owner initializer", "type_pair_initializer"),
             AnalysisQuery::ty("tuple field projection", "type_pair_field"),
             AnalysisQuery::ty("tuple owner read", "type_pair_read"),
-            AnalysisQuery::ty("array owner initializer", "type_array_initializer"),
-            AnalysisQuery::ty("array index projection", "type_array_index"),
-            AnalysisQuery::ty("array owner read", "type_array_read"),
         ],
         expect![[r#"
             declared field owner initializer
@@ -2360,15 +2958,6 @@ pub fn array_index(user: User) {
 
             tuple owner read
             - (nominal struct analysis_member_projection_generic_inference[lib]::crate::Vec<nominal struct analysis_member_projection_generic_inference[lib]::crate::User>,)
-
-            array owner initializer
-            - [nominal struct analysis_member_projection_generic_inference[lib]::crate::Vec<nominal struct analysis_member_projection_generic_inference[lib]::crate::User>; 1]
-
-            array index projection
-            - nominal struct analysis_member_projection_generic_inference[lib]::crate::Vec<nominal struct analysis_member_projection_generic_inference[lib]::crate::User>
-
-            array owner read
-            - [nominal struct analysis_member_projection_generic_inference[lib]::crate::Vec<nominal struct analysis_member_projection_generic_inference[lib]::crate::User>; 1]
         "#]],
     );
 }
@@ -2855,6 +3444,244 @@ pub fn use_it() {
 
             destructured binding
             - nominal struct analysis_late_projection[lib]::crate::User
+        "#]],
+    );
+}
+
+#[test]
+fn infers_try_output_with_a_residual_default_in_its_supertrait() {
+    check_analysis_queries(
+        r#"
+//- /Cargo.toml
+[package]
+name = "analysis_try_supertrait"
+version = "0.1.0"
+edition = "2024"
+//- /src/lib.rs
+#[lang = "Try"]
+pub trait Extract: FromResidual {
+    type Output;
+    type Residual;
+}
+pub trait FromResidual<R = <Self as Extract>::Residual> {}
+pub struct Fallible<T>(T);
+impl<T> Extract for Fallible<T> {
+    type Output = T;
+    type Residual = ();
+}
+impl<T> FromResidual<()> for Fallible<T> {}
+
+pub fn use_it(input: Fallible<u16>) -> Fallible<()> {
+    let output = input?$output$;
+    Fallible(())
+}
+"#,
+        &[AnalysisQuery::ty(
+            "output through residual supertrait",
+            "output",
+        )],
+        expect![[r#"
+            output through residual supertrait
+            - u16
+        "#]],
+    );
+}
+
+#[test]
+fn infers_try_outputs_from_trait_implementations_and_bounds() {
+    let ty = |title, marker| AnalysisQuery::ty(title, marker).in_lib("analysis_try_outputs");
+    check_analysis_queries_with_fake_sysroot(
+        r#"
+//- /Cargo.toml
+[package]
+name = "analysis_try_outputs"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+pub struct Error;
+pub struct Packet<E, T>(E, T);
+impl<E, T> core::ops::Try for Packet<E, T> { type Output = T; }
+pub type Alias<T> = Result<T, Error>;
+pub fn result<T>() -> Result<T, Error> { loop {} }
+pub fn option<T>() -> Option<T> { loop {} }
+pub fn alias<T>() -> Alias<T> { loop {} }
+pub fn packet<T>() -> Packet<Error, T> { loop {} }
+
+pub fn use_result() -> Result<(), Error> {
+    let value: u16 = result()$result_operand$?$result_output$;
+    let aliased: u16 = alias()$alias_operand$?$alias_output$;
+    let wildcard: u16 = alias::<_>()$wildcard_alias_operand$?$wildcard_alias_output$;
+    Result::Ok(())
+}
+
+pub fn use_option() -> Option<()> {
+    let value: u16 = option()$option_operand$?$option_output$;
+    Option::Some(())
+}
+
+pub fn use_custom() -> Packet<Error, ()> {
+    let value: u16 = packet()$custom_operand$?$custom_output$;
+    Packet(Error, ())
+}
+
+pub fn generic<T: core::ops::Try<Output = U>, U>(value: T) -> T {
+    let output = value?$generic_output$;
+    loop {}
+}
+"#,
+        &[
+            ty("Result operand", "result_operand"),
+            ty("Result output", "result_output"),
+            ty("Option operand", "option_operand"),
+            ty("Option output", "option_output"),
+            ty("alias operand", "alias_operand"),
+            ty("alias output", "alias_output"),
+            ty("explicit wildcard alias operand", "wildcard_alias_operand"),
+            ty("explicit wildcard alias output", "wildcard_alias_output"),
+            ty("custom operand", "custom_operand"),
+            ty("custom output", "custom_output"),
+            ty("output under generic bound", "generic_output"),
+        ],
+        expect![[r#"
+            Result operand
+            - nominal enum core[lib]::crate::result::Result<u16, nominal struct analysis_try_outputs[lib]::crate::Error>
+
+            Result output
+            - u16
+
+            Option operand
+            - nominal enum core[lib]::crate::option::Option<u16>
+
+            Option output
+            - u16
+
+            alias operand
+            - nominal enum core[lib]::crate::result::Result<u16, nominal struct analysis_try_outputs[lib]::crate::Error>
+
+            alias output
+            - u16
+
+            explicit wildcard alias operand
+            - nominal enum core[lib]::crate::result::Result<u16, nominal struct analysis_try_outputs[lib]::crate::Error>
+
+            explicit wildcard alias output
+            - u16
+
+            custom operand
+            - nominal struct analysis_try_outputs[lib]::crate::Packet<nominal struct analysis_try_outputs[lib]::crate::Error, u16>
+
+            custom output
+            - u16
+
+            output under generic bound
+            - param U
+        "#]],
+    );
+}
+
+#[test]
+fn late_try_operand_evidence_reaches_output_members_and_obligations() {
+    let ty = |title, marker| AnalysisQuery::ty(title, marker).in_lib("analysis_late_try_operand");
+    check_analysis_queries_with_fake_sysroot(
+        r#"
+//- /Cargo.toml
+[package]
+name = "analysis_late_try_operand"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+pub struct User { pub id: u32 }
+impl User { pub fn id(&self) -> u32 { self.id } }
+pub trait Marker {}
+impl Marker for User {}
+pub trait Source { type Item; }
+pub struct UserSource;
+impl Source for UserSource { type Item = User; }
+pub struct Carrier<S>(S);
+impl<S: Source> core::ops::Try for Carrier<S> { type Output = S::Item; }
+pub fn make<T>() -> T { loop {} }
+pub fn require_source(value: Carrier<UserSource>) {}
+pub fn consume<T: Marker>(value: T) -> T { value }
+
+pub fn use_it() -> Carrier<UserSource> {
+    let source = make();
+    let user = source?$output$;
+    let field = user.id$field$;
+    let method = user.id()$method$;
+    let consumed = consume(user)$consumed$;
+    require_source(source);
+    source$operand$;
+    loop {}
+}
+"#,
+        &[
+            ty("output after later operand evidence", "output"),
+            ty("field on pending output", "field"),
+            ty("method on pending output", "method"),
+            ty("dependent trait obligation", "consumed"),
+            ty("refined operand", "operand"),
+        ],
+        expect![[r#"
+            output after later operand evidence
+            - nominal struct analysis_late_try_operand[lib]::crate::User
+
+            field on pending output
+            - u32
+
+            method on pending output
+            - u32
+
+            dependent trait obligation
+            - nominal struct analysis_late_try_operand[lib]::crate::User
+
+            refined operand
+            - nominal struct analysis_late_try_operand[lib]::crate::Carrier<nominal struct analysis_late_try_operand[lib]::crate::UserSource>
+        "#]],
+    );
+}
+
+#[test]
+fn coerces_try_output_after_later_evidence_reveals_never() {
+    let ty = |title, marker| AnalysisQuery::ty(title, marker).in_lib("analysis_try_never");
+    check_analysis_queries_with_fake_sysroot(
+        r#"
+//- /Cargo.toml
+[package]
+name = "analysis_try_never"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+pub struct Stop;
+impl core::ops::Try for Stop { type Output = !; }
+pub fn make<T>() -> T { loop {} }
+pub fn require_stop(value: Stop) {}
+
+pub fn use_it() -> Stop {
+    let source = make();
+    let value: u8 = source?$output$;
+    require_stop(source);
+    value$binding$;
+    source$operand$;
+    loop {}
+}
+"#,
+        &[
+            ty("diverging try output", "output"),
+            ty("coerced binding", "binding"),
+            ty("refined operand", "operand"),
+        ],
+        expect![[r#"
+            diverging try output
+            - !
+
+            coerced binding
+            - u8
+
+            refined operand
+            - nominal struct analysis_try_never[lib]::crate::Stop
         "#]],
     );
 }
