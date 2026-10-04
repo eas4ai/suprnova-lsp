@@ -3,6 +3,7 @@
 """Run bounded editor queries against rust-glancer's real LSP."""
 
 import asyncio
+import contextlib
 from contextlib import suppress
 from dataclasses import dataclass
 import json
@@ -111,7 +112,9 @@ Notes:
   - agent-debug supplies its managed binary; direct invocation defaults to target/release/rust-glancer.
   - Use --workspace-root for an ad-hoc Cargo project under target/agent-debug/fixtures.
   - Set deferredBarrier to before-queries or after-queries when deferred indexing is relevant.
-  - A plan may contain bounded inline "text" instead of an overlay file.
+    - A plan may contain bounded inline "text" instead of an overlay file.
+    - "idleMemory": true records five Linux RSS samples for the LSP server and engines
+      after queries and a deferred indexing barrier; peaks belong to agent-debug metrics.
   - --line/--col are 1-based for human ergonomics.
 """.strip()
 
@@ -490,6 +493,11 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
     deferred_barrier = plan.get("deferredBarrier", "none")
     if deferred_barrier not in {"none", "before-queries", "after-queries"}:
         fail("deferredBarrier must be none, before-queries, or after-queries")
+    idle_memory = plan.get("idleMemory", False)
+    if type(idle_memory) is not bool:
+        fail("idleMemory must be a boolean")
+    if idle_memory and (not sys.platform.startswith("linux") or deferred_barrier == "none"):
+        fail("idleMemory requires Linux and an explicit deferred indexing barrier")
     if "cfgTest" in plan and plan["cfgTest"] is not None and not isinstance(plan["cfgTest"], bool):
         fail("cfgTest must be a boolean")
 
@@ -522,6 +530,7 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
         "initializationOptions": initialization_options,
         "readinessBarrier": readiness_barrier,
         "deferredBarrier": deferred_barrier,
+        "idleMemory": idle_memory,
     }
 
 
@@ -579,6 +588,66 @@ class LspClient:
     @property
     def stderr(self) -> str:
         return bytes(self.stderr_tail).decode("utf-8", errors="replace")
+
+    def owned_rss(self, settled: bool) -> Dict[str, int]:
+        # Walk only this server's descendants. Count server/engine RSS alone during startup,
+        # and require that no metadata or compiler work remains during idle observation.
+        pending, seen, processes = [self.process.pid], set(), {}
+        while pending:
+            pid = pending.pop()
+            if pid in seen or len(seen) >= 256:
+                fail("RSS process tree is cyclic or exceeds its observation bound")
+            seen.add(pid)
+            directory = Path("/proc") / str(pid)
+            try:
+                command = (directory / "cmdline").read_bytes().split(b"\0")
+                executable = Path(os.fsdecode(command[0])).name
+                if executable in {"rust-glancer", "rust-glancer.exe"}:
+                    values = (directory / "statm").read_text().split()
+                    processes[str(pid)] = int(values[1]) * os.sysconf("SC_PAGE_SIZE")
+                elif settled:
+                    fail("idle RSS observed a non-LSP descendant")
+                children = set()
+                # A subprocess can have been created by any Tokio worker thread.
+                for task in (directory / "task").iterdir():
+                    try:
+                        children.update(int(child) for child in (task / "children").read_text().split())
+                    except FileNotFoundError:
+                        if settled:
+                            raise
+                pending.extend(children)
+            except FileNotFoundError:
+                # Startup children can exit between reads. Settled samples require a full tree.
+                if settled:
+                    raise
+        return processes
+
+    async def indexing_memory(self, finished: asyncio.Event) -> Dict[str, Any]:
+        peak, samples, engines = 0, 0, False
+        while not finished.is_set():
+            processes = self.owned_rss(settled=False)
+            peak = max(peak, sum(processes.values()))
+            samples += 1
+            engines |= len(processes) >= 2
+            await asyncio.sleep(0.1)
+        if not engines or samples < 5:
+            fail("indexing peak needs at least five samples and an observed engine")
+        return {"indexingPeakRssBytes": peak, "indexingSamples": samples, "samplingIntervalMs": 100}
+
+    async def idle_memory(self) -> Dict[str, Any]:
+        samples = []
+        identity = None
+        for _ in range(5):
+            processes = self.owned_rss(settled=True)
+            if len(processes) < 2:
+                fail("idle RSS needs a live server and at least one engine")
+            current = sorted(processes)
+            if identity is not None and identity != current:
+                fail("idle RSS process membership changed between samples")
+            identity = current
+            samples.append({"processRssBytes": processes, "aggregateRssBytes": sum(processes.values())})
+            await asyncio.sleep(0.1)
+        return {"indexingComplete": True, "metric": "sum-of-process-RSS", "samples": samples}
 
     def _fail_waiting(self, error: Exception) -> None:
         for future in self.pending.values():
@@ -1025,6 +1094,10 @@ async def run(argv: Sequence[str]) -> None:
     uri = file_path.as_uri()
     client = await LspClient.start(binary, root, options.timeout_ms, options.show_logs)
     results = []
+    idle_memory = None
+    indexing_finished = asyncio.Event()
+    memory_task = asyncio.create_task(client.indexing_memory(indexing_finished)) if plan["idleMemory"] else None
+    indexing_memory = None
 
     try:
         initialized = await client.request(
@@ -1084,6 +1157,9 @@ async def run(argv: Sequence[str]) -> None:
             await wait_until_ready(client, options.timeout_ms)
         if plan["deferredBarrier"] == "before-queries":
             await wait_until_indexing_settled(client, options.timeout_ms)
+            if memory_task is not None:
+                indexing_finished.set()
+                indexing_memory = await memory_task
 
         for query in plan["queries"]:
             if query["kind"] == "hover":
@@ -1226,12 +1302,24 @@ async def run(argv: Sequence[str]) -> None:
                 )
         if plan["deferredBarrier"] == "after-queries":
             await wait_until_indexing_settled(client, options.timeout_ms)
+            if memory_task is not None:
+                indexing_finished.set()
+                indexing_memory = await memory_task
+        if plan["idleMemory"]:
+            idle_memory = await client.idle_memory()
+            idle_memory.update(indexing_memory)
     except Exception:
         if not options.show_logs and client.stderr.strip():
             print("lsp-query: server stderr tail:\n{}".format(client.stderr), file=sys.stderr)
         raise
     finally:
-        await client.close()
+        try:
+            if memory_task is not None:
+                memory_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await memory_task
+        finally:
+            await client.close()
 
     output = {
         "file": os.path.relpath(str(file_path), str(root)),
@@ -1241,6 +1329,7 @@ async def run(argv: Sequence[str]) -> None:
             "deferred": plan["deferredBarrier"],
         },
         "results": results,
+        "idleMemory": idle_memory,
     }
 
     if options.json_output or plan["format"] == "json":

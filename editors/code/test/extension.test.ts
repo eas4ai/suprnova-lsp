@@ -5,6 +5,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 
 import { EXTENSION_COMMANDS } from "../src/commands";
+import { ExtensionConfig } from "../src/config";
 import { waitFor, withTimeout } from "./async";
 import { completeInEditor } from "./completion-scenario";
 import { inspectDocumentation } from "./documentation-scenario";
@@ -124,5 +125,85 @@ suite("Rust Glancer extension", () => {
     );
     await waitForReadyWorkspace("moderate_crate");
     await completeInEditor(document);
+  });
+
+  test("EDT-001 sends a configured compiler model through the editor client", async () => {
+    const root = path.resolve(projects.fsPath, "../crates/engine/rustdoc/fixtures/model-default");
+    const inputs = [
+      {
+        workspaceRoot: root,
+        manifestPath: "Cargo.toml",
+        targetName: "rustdoc_macro_support",
+        targetKind: "lib",
+        exportPath: "export.json",
+        itemPath: "rustdoc_macro_support::Post",
+      },
+    ];
+    const settings = vscode.workspace.getConfiguration("rust-glancer");
+    const previous = settings.get<unknown>("rustdoc.inputs");
+    let document: vscode.TextDocument | undefined;
+    try {
+      await settings.update("rustdoc.inputs", inputs, vscode.ConfigurationTarget.Global);
+      const config = ExtensionConfig.read() as unknown as { rustdoc?: { inputs?: unknown } };
+      assert.deepEqual(
+        config.rustdoc?.inputs,
+        inputs,
+        "the extension dropped its configured input",
+      );
+      await withTimeout(
+        vscode.commands.executeCommand(EXTENSION_COMMANDS.restartServer),
+        "restart configured editor server",
+        30_000,
+      );
+      document = await vscode.workspace.openTextDocument(
+        vscode.Uri.file(path.join(root, "src/lib.rs")),
+      );
+      const editor = await vscode.window.showTextDocument(document);
+      await waitForReadyWorkspace("model-default");
+      const offset = document.getText().indexOf("        self.id");
+      assert.ok(offset >= 0, "genuine fixture source method must exist");
+      assert.ok(
+        await editor.edit((edit) =>
+          edit.insert(document!.positionAt(offset), "        let edt_query = Post::query();\n"),
+        ),
+      );
+      const queryOffset = document.getText().indexOf("edt_query");
+      const hovers = await withTimeout(
+        vscode.commands.executeCommand<vscode.Hover[]>(
+          "vscode.executeHoverProvider",
+          document.uri,
+          document.positionAt(queryOffset),
+        ),
+        "hover configured generated model",
+      );
+      assert.ok(
+        JSON.stringify(hovers).includes("Builder<Post>"),
+        `trait default query missing: ${JSON.stringify(hovers)}`,
+      );
+      const completionOffset = document.getText().indexOf("Post::query") + "Post::".length;
+      const completions = await withTimeout(
+        vscode.commands.executeCommand<vscode.CompletionList>(
+          "vscode.executeCompletionItemProvider",
+          document.uri,
+          document.positionAt(completionOffset),
+        ),
+        "complete configured generated model",
+      );
+      assert.ok(completions, "completion provider returned no result");
+      const queries = completions.items.filter((item) =>
+        (typeof item.label === "string" ? item.label : item.label.label).startsWith("query"),
+      );
+      assert.equal(
+        queries.length,
+        1,
+        `query completion missing or duplicated: ${JSON.stringify(completions)}`,
+      );
+    } finally {
+      if (document?.isDirty) {
+        await vscode.window.showTextDocument(document);
+        await vscode.commands.executeCommand("workbench.action.files.revert");
+      }
+      await settings.update("rustdoc.inputs", previous, vscode.ConfigurationTarget.Global);
+    }
   });
 });
