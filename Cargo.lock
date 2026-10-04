@@ -2249,11 +2249,15 @@ name = "rust-glancer"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "cargo_metadata",
  "clap",
  "futures",
  "gen-lsp-types",
  "libmimalloc-sys",
  "mimalloc",
+ "rg_cfg_eval",
+ "rg_ir_view",
+ "rg_item_tree",
  "rg_lsp_engine",
  "rg_lsp_proto",
  "rg_lsp_server",

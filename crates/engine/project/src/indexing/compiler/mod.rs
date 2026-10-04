@@ -11,6 +11,9 @@ use rg_workspace::WorkspaceMetadata;
 use super::builder::RustdocInput;
 use crate::{PackageResidency, PackageResidencyPlan};
 
+#[cfg(test)]
+mod tests;
+
 /// Replayable declaration facts for this saved generation. The original JSON and compiler IDs
 /// are dropped immediately; rebuilding never rereads a mutable external export.
 #[derive(Debug, Clone, Default, MemorySize)]
