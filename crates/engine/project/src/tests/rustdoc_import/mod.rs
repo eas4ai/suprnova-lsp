@@ -625,6 +625,54 @@ fn compiler_child_nominals_cannot_replace_missing_items_in_a_source_module() {
 }
 
 #[test]
+fn compiler_child_nominals_reconcile_only_type_namespace_owners() {
+    for preference in [
+        IndexingPerformancePreference::FasterBuilds,
+        IndexingPerformancePreference::LowerPeakMemory,
+    ] {
+        for (storage, expected_error) in [
+            ("pub struct Storage { pub id: StorageId }", None),
+            ("pub enum Storage { Id }", Some("wrong source kind")),
+            (
+                "pub struct Storage { pub id: StorageId } pub struct Storage { pub id: StorageId }",
+                Some("cannot be mapped uniquely"),
+            ),
+        ] {
+            let fixture = Fixture::new(
+                CHILD_MODEL,
+                Some(&format!(
+                    r#"
+impl Post {{ pub fn source_method(&self) -> u64 {{ self.id }} }}
+pub mod generated {{
+    mod storage_types {{ pub type Id = i64; }}
+    pub type StorageId = storage_types::Id;
+    {storage}
+    pub struct Entity;
+    pub enum Column {{ Id, Email }}
+    pub fn Storage() {{}}
+    macro_rules! Storage {{ () => {{}}; }}
+}}
+"#
+                )),
+            );
+            let result = fixture.build(Some(fixture.input()), preference);
+            if let Some(expected_error) = expected_error {
+                let Err(error) = result else {
+                    panic!("invalid type owner must be rejected");
+                };
+                assert!(format!("{error:#}").contains(expected_error), "{error:#}");
+            } else {
+                let project =
+                    result.expect("same-name values and macros do not compete with types");
+                fixture.assert_type(&project, "query", "expected_query");
+                fixture.assert_type(&project, "child_entity", "expected_child_entity");
+                fixture.assert_type(&project, "child_field", "expected_child_field");
+            }
+        }
+    }
+}
+
+#[test]
 fn compiler_child_nominals_require_the_actual_parent_module_membership() {
     for (kind, path, parent) in [
         (
