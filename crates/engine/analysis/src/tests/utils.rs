@@ -1,0 +1,1657 @@
+use std::{
+    fmt::Write as _,
+    path::{Path, PathBuf},
+};
+
+use expect_test::Expect;
+use rg_body_ir::{ExprData, ExprKind};
+use rg_def_map::testonly::DefMapFixture;
+use rg_ir_model::{BodySource, CrateRef, FileId, PackageSlot, Span};
+use rg_ir_view::testonly::ViewFixture;
+use rg_parse::ParseDb;
+use rg_semantic_ir::testonly::SemanticIrFixture;
+use rg_workspace::{SysrootSources, TargetKind, WorkspaceLoweringConfig, WorkspaceMetadata};
+use test_fixture::{
+    CrateFixture, FixtureMarkers, fixture_crate, fixture_crate_with_markers,
+    fixture_path_for_snapshot,
+};
+
+use crate::{
+    Analysis, CodeAction, CodeActionKind, CodeActionQuery, CodeActionTrigger,
+    CompletionApplicability, CompletionClientCapabilities, CompletionInsertText, CompletionItem,
+    CompletionKind, CompletionQuery, DocumentSymbol, HoverInfo, InlayHint, NavigationTarget,
+    ReferenceLocation, ReferenceQuery as AnalysisReferenceQuery, ReferenceSearchFile, RenameEdit,
+    RenameResult, RenameTarget, SavedSourceView, SymbolAt, WorkspaceSymbol,
+};
+
+pub(super) fn check_analysis_queries(fixture: &str, queries: &[AnalysisQuery], expect: Expect) {
+    let (fixture, markers) = fixture_crate_with_markers(fixture);
+    let db = AnalysisFixtureDb::build_from_crate(fixture);
+    let renderer = AnalysisQuerySnapshot::new(&db, markers, queries);
+    let actual = format!("{}\n", renderer.render().trim_end());
+    expect.assert_eq(&actual);
+}
+
+pub(super) fn check_analysis_queries_with_fake_sysroot(
+    fixture: &str,
+    queries: &[AnalysisQuery],
+    expect: Expect,
+) {
+    let (fixture, markers) = fixture_crate_with_markers(fixture);
+    let db = AnalysisFixtureDb::build_with_fake_sysroot(fixture);
+    let renderer = AnalysisQuerySnapshot::new(&db, markers, queries);
+    let actual = format!("{}\n", renderer.render().trim_end());
+    expect.assert_eq(&actual);
+}
+
+pub(super) fn check_document_symbols(fixture: &str, query: DocumentSymbolsQuery, expect: Expect) {
+    check_document_symbol_queries(fixture, &[query], expect);
+}
+
+pub(super) fn check_document_symbol_queries(
+    fixture: &str,
+    queries: &[DocumentSymbolsQuery],
+    expect: Expect,
+) {
+    let fixture = fixture_crate(fixture);
+    let db = AnalysisFixtureDb::build_from_crate(fixture);
+    let renderer = AnalysisSymbolSnapshot::new(&db);
+    let actual = queries
+        .iter()
+        .map(|query| renderer.render_document_symbols(query))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let actual = format!("{}\n", actual.trim_end());
+    expect.assert_eq(&actual);
+}
+
+pub(super) fn check_workspace_symbols(fixture: &str, query: &str, expect: Expect) {
+    let fixture = fixture_crate(fixture);
+    let db = AnalysisFixtureDb::build_from_crate(fixture);
+    let renderer = AnalysisSymbolSnapshot::new(&db);
+    let actual = format!("{}\n", renderer.render_workspace_symbols(query).trim_end());
+    expect.assert_eq(&actual);
+}
+
+pub(super) fn check_inlay_hints(fixture: &str, query: InlayHintsQuery, expect: Expect) {
+    let fixture = fixture_crate(fixture);
+    let db = AnalysisFixtureDb::build_from_crate(fixture);
+    assert_inlay_hints(&db, &query, expect);
+}
+
+pub(super) fn check_inlay_hints_with_fake_sysroot(
+    fixture: &str,
+    query: InlayHintsQuery,
+    expect: Expect,
+) {
+    let db = AnalysisFixtureDb::build_with_fake_sysroot(fixture_crate(fixture));
+    assert_inlay_hints(&db, &query, expect);
+}
+
+fn assert_inlay_hints(db: &AnalysisFixtureDb, query: &InlayHintsQuery, expect: Expect) {
+    let renderer = AnalysisSymbolSnapshot::new(db);
+    let actual = format!("{}\n", renderer.render_inlay_hints(query).trim_end());
+    expect.assert_eq(&actual);
+}
+
+pub(super) struct AnalysisQuery {
+    title: &'static str,
+    marker: &'static str,
+    target: AnalysisTarget,
+    kind: AnalysisQueryKind,
+    completion_label_prefix: Option<&'static str>,
+}
+
+impl AnalysisQuery {
+    pub(super) fn symbol(title: &'static str, marker: &'static str) -> Self {
+        Self::new(title, marker, AnalysisQueryKind::SymbolAt)
+    }
+
+    pub(super) fn resolve(title: &'static str, marker: &'static str) -> Self {
+        Self::new(title, marker, AnalysisQueryKind::ResolveSymbol)
+    }
+
+    pub(super) fn goto(title: &'static str, marker: &'static str) -> Self {
+        Self::new(title, marker, AnalysisQueryKind::GotoDefinition)
+    }
+
+    pub(super) fn goto_type(title: &'static str, marker: &'static str) -> Self {
+        Self::new(title, marker, AnalysisQueryKind::GotoTypeDefinition)
+    }
+
+    pub(super) fn goto_impl(title: &'static str, marker: &'static str) -> Self {
+        Self::new(title, marker, AnalysisQueryKind::GotoImplementation)
+    }
+
+    pub(super) fn ty(title: &'static str, marker: &'static str) -> Self {
+        Self::new(title, marker, AnalysisQueryKind::TypeAt)
+    }
+
+    pub(super) fn complete(title: &'static str, marker: &'static str) -> Self {
+        Self::new(title, marker, AnalysisQueryKind::CompletionsAt)
+    }
+
+    pub(super) fn code_actions(title: &'static str, marker: &'static str) -> Self {
+        Self::new(
+            title,
+            marker,
+            AnalysisQueryKind::CodeActions(CodeActionTrigger::Invoked),
+        )
+    }
+
+    pub(super) fn automatic_code_actions(title: &'static str, marker: &'static str) -> Self {
+        Self::new(
+            title,
+            marker,
+            AnalysisQueryKind::CodeActions(CodeActionTrigger::Automatic),
+        )
+    }
+
+    pub(super) fn complete_verbose(title: &'static str, marker: &'static str) -> Self {
+        Self::new(title, marker, AnalysisQueryKind::CompletionsAtVerbose)
+    }
+
+    /// Run completion as if the saved fixture text were the document captured for this request.
+    pub(super) fn complete_with_source(title: &'static str, marker: &'static str) -> Self {
+        Self::new(title, marker, AnalysisQueryKind::CompletionsAtWithSource)
+    }
+
+    pub(super) fn complete_verbose_with_source(title: &'static str, marker: &'static str) -> Self {
+        Self::new(
+            title,
+            marker,
+            AnalysisQueryKind::CompletionsAtVerboseWithSource,
+        )
+    }
+
+    /// Render only keyword rows from a full request-local completion query.
+    pub(super) fn complete_keywords_with_source(title: &'static str, marker: &'static str) -> Self {
+        Self::new(
+            title,
+            marker,
+            AnalysisQueryKind::CompletionKeywordsAtWithSource,
+        )
+    }
+
+    pub(super) fn complete_keywords_verbose_with_source(
+        title: &'static str,
+        marker: &'static str,
+    ) -> Self {
+        Self::new(
+            title,
+            marker,
+            AnalysisQueryKind::CompletionKeywordsAtVerboseWithSource,
+        )
+    }
+
+    pub(super) fn hover(title: &'static str, marker: &'static str) -> Self {
+        Self::new(title, marker, AnalysisQueryKind::Hover)
+    }
+
+    pub(super) fn references(
+        title: &'static str,
+        marker: &'static str,
+        query: ReferenceQuery,
+    ) -> Self {
+        Self::new(title, marker, AnalysisQueryKind::References(query))
+    }
+
+    pub(super) fn prepare_rename(title: &'static str, marker: &'static str) -> Self {
+        Self::new(title, marker, AnalysisQueryKind::PrepareRename)
+    }
+
+    pub(super) fn rename(
+        title: &'static str,
+        marker: &'static str,
+        new_name: &'static str,
+    ) -> Self {
+        Self::new(title, marker, AnalysisQueryKind::Rename(new_name))
+    }
+
+    pub(super) fn in_bin(mut self, package_name: &'static str) -> Self {
+        self.target = AnalysisTarget::bin(package_name);
+        self
+    }
+
+    pub(super) fn in_lib(mut self, package_name: &'static str) -> Self {
+        self.target = AnalysisTarget::lib_package(package_name);
+        self
+    }
+
+    /// Restrict a completion snapshot to the rows that an editor would keep for this prefix.
+    pub(super) fn matching(mut self, label_prefix: &'static str) -> Self {
+        self.completion_label_prefix = Some(label_prefix);
+        self
+    }
+
+    fn new(title: &'static str, marker: &'static str, kind: AnalysisQueryKind) -> Self {
+        Self {
+            title,
+            marker,
+            target: AnalysisTarget::lib(),
+            kind,
+            completion_label_prefix: None,
+        }
+    }
+}
+
+pub(super) struct DocumentSymbolsQuery {
+    title: &'static str,
+    path: &'static str,
+    target: AnalysisTarget,
+}
+
+impl DocumentSymbolsQuery {
+    pub(super) fn new(title: &'static str, path: &'static str) -> Self {
+        Self {
+            title,
+            path,
+            target: AnalysisTarget::lib(),
+        }
+    }
+
+    pub(super) fn in_bin(mut self, package_name: &'static str) -> Self {
+        self.target = AnalysisTarget::bin(package_name);
+        self
+    }
+}
+
+pub(super) struct InlayHintsQuery {
+    title: &'static str,
+    path: &'static str,
+    target: AnalysisTarget,
+}
+
+impl InlayHintsQuery {
+    pub(super) fn new(title: &'static str, path: &'static str) -> Self {
+        Self {
+            title,
+            path,
+            target: AnalysisTarget::lib(),
+        }
+    }
+
+    pub(super) fn in_bin(mut self, package_name: &'static str) -> Self {
+        self.target = AnalysisTarget::bin(package_name);
+        self
+    }
+
+    pub(super) fn in_lib(mut self, package_name: &'static str) -> Self {
+        self.target = AnalysisTarget::lib_package(package_name);
+        self
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AnalysisTarget {
+    package_name: Option<&'static str>,
+    kind: TargetKind,
+}
+
+impl AnalysisTarget {
+    fn lib() -> Self {
+        Self {
+            package_name: None,
+            kind: TargetKind::Lib,
+        }
+    }
+
+    fn lib_package(package_name: &'static str) -> Self {
+        Self {
+            package_name: Some(package_name),
+            kind: TargetKind::Lib,
+        }
+    }
+
+    fn bin(package_name: &'static str) -> Self {
+        Self {
+            package_name: Some(package_name),
+            kind: TargetKind::Bin,
+        }
+    }
+
+    fn matches_package(&self, package_name: &str) -> bool {
+        self.package_name
+            .is_none_or(|expected| expected == package_name)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AnalysisQueryKind {
+    SymbolAt,
+    ResolveSymbol,
+    GotoDefinition,
+    GotoTypeDefinition,
+    GotoImplementation,
+    References(ReferenceQuery),
+    PrepareRename,
+    Rename(&'static str),
+    TypeAt,
+    CodeActions(CodeActionTrigger),
+    CompletionsAt,
+    CompletionsAtVerbose,
+    CompletionsAtWithSource,
+    CompletionsAtVerboseWithSource,
+    CompletionKeywordsAtWithSource,
+    CompletionKeywordsAtVerboseWithSource,
+    Hover,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ReferenceQuery {
+    include_declaration: bool,
+    scope: ReferenceQueryScope,
+}
+
+impl ReferenceQuery {
+    pub(super) fn all() -> Self {
+        Self {
+            include_declaration: true,
+            scope: ReferenceQueryScope::AllIncludedTargets,
+        }
+    }
+
+    pub(super) fn current_target() -> Self {
+        Self {
+            include_declaration: true,
+            scope: ReferenceQueryScope::CurrentTarget,
+        }
+    }
+
+    pub(super) fn current_file() -> Self {
+        Self {
+            include_declaration: true,
+            scope: ReferenceQueryScope::CurrentFile,
+        }
+    }
+
+    pub(super) fn files(paths: &'static [&'static str]) -> Self {
+        Self {
+            include_declaration: true,
+            scope: ReferenceQueryScope::Files(paths),
+        }
+    }
+
+    pub(super) fn libs(packages: &'static [&'static str]) -> Self {
+        Self {
+            include_declaration: true,
+            scope: ReferenceQueryScope::LibTargets(packages),
+        }
+    }
+
+    pub(super) fn without_declaration(mut self) -> Self {
+        self.include_declaration = false;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ReferenceQueryScope {
+    AllIncludedTargets,
+    CurrentTarget,
+    CurrentFile,
+    Files(&'static [&'static str]),
+    LibTargets(&'static [&'static str]),
+}
+
+struct AnalysisFixtureDb {
+    fixture: ViewFixture,
+    package_roots: Vec<PathBuf>,
+}
+
+impl AnalysisFixtureDb {
+    fn build_from_crate(fixture: CrateFixture) -> Self {
+        let workspace =
+            WorkspaceMetadata::for_tests(fixture.metadata(), WorkspaceLoweringConfig::default())
+                .expect("fixture workspace metadata should build");
+        Self::build_from_crate_with_workspace(fixture, workspace)
+    }
+
+    fn build_with_fake_sysroot(fixture: CrateFixture) -> Self {
+        let fixture = fixture.with_fake_sysroot();
+        let sysroot = SysrootSources::from_library_root(fixture.path("sysroot/library"))
+            .expect("fake sysroot should be complete");
+        let workspace =
+            WorkspaceMetadata::for_tests(fixture.metadata(), WorkspaceLoweringConfig::default())
+                .expect("fixture workspace metadata should build")
+                .with_sysroot_sources(Some(sysroot));
+        Self::build_from_crate_with_workspace(fixture, workspace)
+    }
+
+    fn build_from_crate_with_workspace(
+        fixture: CrateFixture,
+        workspace: WorkspaceMetadata,
+    ) -> Self {
+        let package_roots = workspace
+            .packages()
+            .iter()
+            .map(|package| package.root_dir().to_path_buf())
+            .collect();
+        let def_map = DefMapFixture::build_from_crate(fixture, workspace);
+        let semantic_ir = SemanticIrFixture::build_from_def_map(def_map);
+        Self {
+            fixture: ViewFixture::build_from_semantic_ir(semantic_ir),
+            package_roots,
+        }
+    }
+
+    fn analysis(&self) -> Analysis<'_> {
+        Analysis::new(
+            self.fixture.view_db(),
+            SavedSourceView::new(self.fixture.parse_db()),
+        )
+    }
+
+    fn parse_db(&self) -> &ParseDb {
+        self.fixture.parse_db()
+    }
+
+    /// Renders source locations relative to their Cargo package instead of exposing temporary
+    /// fixture roots or host-native path separators in snapshots.
+    fn render_file_path(&self, package: PackageSlot, file_id: FileId) -> String {
+        let parsed_package = self
+            .parse_db()
+            .packages()
+            .get(package.0)
+            .expect("snapshot package should exist while rendering a file path");
+        let path = parsed_package
+            .file_path(file_id)
+            .expect("snapshot file should exist while rendering a file path");
+        let package_root = self
+            .package_roots
+            .get(package.0)
+            .expect("snapshot package root should exist while rendering a file path");
+
+        // Cargo-generated sources may sit outside their package root. Their build directory is
+        // temporary and does not help a query snapshot, so preserve the old filename-only shape.
+        let relative = path.strip_prefix(package_root).unwrap_or_else(|_| {
+            Path::new(
+                path.file_name()
+                    .expect("snapshot source path should have a file name"),
+            )
+        });
+        fixture_path_for_snapshot(relative)
+    }
+
+    fn target_and_file_for_path(
+        &self,
+        selected: &AnalysisTarget,
+        path: &str,
+    ) -> (CrateRef, FileId) {
+        let mut matches = Vec::new();
+        let normalized_path = path.trim_start_matches('/');
+
+        for (package_slot, package) in self.parse_db().packages().iter().enumerate() {
+            if !selected.matches_package(package.package_name()) {
+                continue;
+            }
+
+            for target in package
+                .targets()
+                .iter()
+                .filter(|target| target.kind == selected.kind)
+            {
+                let Some(file_id) = package
+                    .parsed_files()
+                    .find(|file| file.path().ends_with(normalized_path))
+                    .map(|file| file.file_id())
+                else {
+                    continue;
+                };
+
+                let crate_ref = CrateRef {
+                    package: PackageSlot(package_slot),
+                    crate_id: rg_ir_model::CrateId(target.id.0),
+                };
+                if self.crate_owns_file(crate_ref, file_id) {
+                    matches.push((crate_ref, file_id));
+                }
+            }
+        }
+
+        assert_eq!(
+            matches.len(),
+            1,
+            "path `{path}` should identify exactly one file owned by one {} target",
+            selected.kind
+        );
+        matches.pop().expect("one match should be present")
+    }
+
+    fn target_for(&self, selected: &AnalysisTarget) -> CrateRef {
+        let mut matches = Vec::new();
+
+        for (package_slot, package) in self.parse_db().packages().iter().enumerate() {
+            if !selected.matches_package(package.package_name()) {
+                continue;
+            }
+
+            for target in package
+                .targets()
+                .iter()
+                .filter(|target| target.kind == selected.kind)
+            {
+                matches.push(CrateRef {
+                    package: PackageSlot(package_slot),
+                    crate_id: rg_ir_model::CrateId(target.id.0),
+                });
+            }
+        }
+
+        assert_eq!(
+            matches.len(),
+            1,
+            "target selection should identify exactly one {} target",
+            selected.kind
+        );
+        matches.pop().expect("one match should be present")
+    }
+
+    fn all_targets(&self) -> Vec<CrateRef> {
+        self.parse_db()
+            .packages()
+            .iter()
+            .enumerate()
+            .flat_map(|(package_slot, package)| {
+                package.targets().iter().map(move |target| CrateRef {
+                    package: PackageSlot(package_slot),
+                    crate_id: rg_ir_model::CrateId(target.id.0),
+                })
+            })
+            .collect()
+    }
+
+    fn crate_owns_file(&self, target: CrateRef, file_id: FileId) -> bool {
+        self.fixture.crate_owns_file(target, file_id)
+    }
+}
+
+struct AnalysisQuerySnapshot<'a> {
+    db: &'a AnalysisFixtureDb,
+    markers: FixtureMarkers,
+    queries: &'a [AnalysisQuery],
+}
+
+impl<'a> AnalysisQuerySnapshot<'a> {
+    fn new(
+        db: &'a AnalysisFixtureDb,
+        markers: FixtureMarkers,
+        queries: &'a [AnalysisQuery],
+    ) -> Self {
+        Self {
+            db,
+            markers,
+            queries,
+        }
+    }
+
+    fn render(&self) -> String {
+        self.queries
+            .iter()
+            .map(|query| self.render_query(query).trim_end().to_string())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    fn render_query(&self, query: &AnalysisQuery) -> String {
+        let (target, file_id, offset) = self.query_location(query);
+        let mut dump = query.title.to_string();
+        match query.kind {
+            AnalysisQueryKind::SymbolAt => {
+                self.render_symbol(
+                    self.db
+                        .analysis()
+                        .symbol_at(target, file_id, offset)
+                        .expect("fixture symbol query should resolve"),
+                    target.package,
+                    file_id,
+                    &mut dump,
+                );
+            }
+            AnalysisQueryKind::ResolveSymbol => {
+                let Some(symbol) = self
+                    .db
+                    .analysis()
+                    .symbol_at(target, file_id, offset)
+                    .expect("fixture symbol query should resolve")
+                else {
+                    self.render_targets(Vec::new(), &mut dump);
+                    return dump;
+                };
+                self.render_targets(
+                    self.db
+                        .analysis()
+                        .resolve_symbol(symbol)
+                        .expect("fixture symbol resolution should resolve"),
+                    &mut dump,
+                );
+            }
+            AnalysisQueryKind::GotoDefinition => {
+                self.render_targets(
+                    self.db
+                        .analysis()
+                        .goto_definition(target, file_id, offset)
+                        .expect("fixture goto query should resolve"),
+                    &mut dump,
+                );
+            }
+            AnalysisQueryKind::GotoTypeDefinition => {
+                self.render_targets(
+                    self.db
+                        .analysis()
+                        .goto_type_definition(target, file_id, offset)
+                        .expect("fixture goto type query should resolve"),
+                    &mut dump,
+                );
+            }
+            AnalysisQueryKind::GotoImplementation => {
+                self.render_targets(
+                    self.db
+                        .analysis()
+                        .goto_implementation(target, file_id, offset)
+                        .expect("fixture goto implementation query should resolve"),
+                    &mut dump,
+                );
+            }
+            AnalysisQueryKind::References(reference_options) => {
+                let references = match reference_options.scope {
+                    ReferenceQueryScope::AllIncludedTargets => {
+                        let use_site_targets = self.db.all_targets();
+                        let reference_query = AnalysisReferenceQuery::find_references(
+                            &use_site_targets,
+                            reference_options.include_declaration,
+                        );
+                        self.db
+                            .analysis()
+                            .references(target, file_id, offset, reference_query)
+                            .expect("fixture references query should resolve")
+                    }
+                    ReferenceQueryScope::CurrentTarget => {
+                        let use_site_targets = [target];
+                        let reference_query = AnalysisReferenceQuery::find_references(
+                            &use_site_targets,
+                            reference_options.include_declaration,
+                        );
+                        self.db
+                            .analysis()
+                            .references(target, file_id, offset, reference_query)
+                            .expect("fixture scoped references query should resolve")
+                    }
+                    ReferenceQueryScope::CurrentFile => {
+                        let reference_query = AnalysisReferenceQuery::file_scoped(target, file_id);
+                        let reference_query = if reference_options.include_declaration {
+                            reference_query
+                        } else {
+                            reference_query.without_declarations()
+                        };
+                        self.db
+                            .analysis()
+                            .references(target, file_id, offset, reference_query)
+                            .expect("fixture file-scoped references query should resolve")
+                    }
+                    ReferenceQueryScope::Files(paths) => {
+                        let search_files = paths
+                            .iter()
+                            .map(|path| {
+                                let (target, file_id) =
+                                    self.db.target_and_file_for_path(&query.target, path);
+                                ReferenceSearchFile {
+                                    crate_ref: target,
+                                    file_id,
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        let reference_query = AnalysisReferenceQuery::find_references_in_files(
+                            &search_files,
+                            reference_options.include_declaration,
+                        );
+                        self.db
+                            .analysis()
+                            .references(target, file_id, offset, reference_query)
+                            .expect("fixture file-list references query should resolve")
+                    }
+                    ReferenceQueryScope::LibTargets(packages) => {
+                        let use_site_targets = packages
+                            .iter()
+                            .map(|package| {
+                                self.db.target_for(&AnalysisTarget::lib_package(package))
+                            })
+                            .collect::<Vec<_>>();
+                        let reference_query = AnalysisReferenceQuery::find_references(
+                            &use_site_targets,
+                            reference_options.include_declaration,
+                        );
+                        self.db
+                            .analysis()
+                            .references(target, file_id, offset, reference_query)
+                            .expect("fixture scoped references query should resolve")
+                    }
+                };
+                self.render_references(references, &mut dump);
+            }
+            AnalysisQueryKind::PrepareRename => {
+                let rename_target = self
+                    .db
+                    .analysis()
+                    .prepare_rename(target, file_id, offset)
+                    .expect("fixture prepare rename query should resolve");
+                self.render_rename_target(rename_target, target.package, &mut dump);
+            }
+            AnalysisQueryKind::Rename(new_name) => {
+                let use_site_targets = self.db.all_targets();
+                let reference_query =
+                    AnalysisReferenceQuery::find_references(&use_site_targets, true);
+                let rename_result = self
+                    .db
+                    .analysis()
+                    .rename(target, file_id, offset, new_name, reference_query)
+                    .expect("fixture rename query should resolve");
+                self.render_rename_result(rename_result, target.package, &mut dump);
+            }
+            AnalysisQueryKind::TypeAt => {
+                let ty = self
+                    .db
+                    .analysis()
+                    .type_at(target, file_id, offset)
+                    .expect("fixture type query should resolve");
+                writeln!(
+                    dump,
+                    "\n- {}",
+                    ty.as_ref()
+                        .map(|ty| self.db.fixture.render_indexed_type(ty))
+                        .unwrap_or_else(|| "<none>".to_string())
+                )
+                .expect("string writes should not fail");
+            }
+            AnalysisQueryKind::CodeActions(trigger) => {
+                let source_text = self
+                    .db
+                    .parse_db()
+                    .package(target.package.0)
+                    .expect("code action package should exist")
+                    .parsed_file(file_id)
+                    .expect("code action file should exist")
+                    .source_text()
+                    .expect("code action source text should load");
+                let actions = self
+                    .db
+                    .analysis()
+                    .code_actions(
+                        CodeActionQuery::new(
+                            target,
+                            file_id,
+                            Span {
+                                start: offset,
+                                end: offset,
+                            },
+                            &source_text,
+                        )
+                        .with_trigger(trigger),
+                    )
+                    .expect("fixture code action query should resolve");
+                self.render_code_actions(actions, &source_text, &mut dump);
+            }
+            AnalysisQueryKind::CompletionsAt => {
+                let completion_query = CompletionQuery::new(target, file_id, offset)
+                    .with_client_capabilities(
+                        CompletionClientCapabilities::default().with_snippet_support(true),
+                    );
+                let mut completions = self
+                    .db
+                    .analysis()
+                    .completions_at(completion_query)
+                    .expect("fixture completion query should resolve");
+                Self::filter_completion_labels(query, &mut completions);
+                self.render_completions(completions, &mut dump);
+            }
+            AnalysisQueryKind::CompletionsAtVerbose => {
+                let completion_query = CompletionQuery::new(target, file_id, offset)
+                    .with_client_capabilities(
+                        CompletionClientCapabilities::default().with_snippet_support(true),
+                    );
+                let mut completions = self
+                    .db
+                    .analysis()
+                    .completions_at(completion_query)
+                    .expect("fixture completion query should resolve");
+                Self::filter_completion_labels(query, &mut completions);
+                self.render_completions_verbose(completions, &mut dump);
+            }
+            AnalysisQueryKind::CompletionsAtWithSource
+            | AnalysisQueryKind::CompletionsAtVerboseWithSource
+            | AnalysisQueryKind::CompletionKeywordsAtWithSource
+            | AnalysisQueryKind::CompletionKeywordsAtVerboseWithSource => {
+                let source_text = self
+                    .db
+                    .parse_db()
+                    .package(target.package.0)
+                    .expect("completion package should exist")
+                    .parsed_file(file_id)
+                    .expect("completion file should exist")
+                    .source_text()
+                    .expect("completion source text should load");
+                let completion_query = CompletionQuery::new(target, file_id, offset)
+                    .with_source_text(&source_text)
+                    .with_client_capabilities(
+                        CompletionClientCapabilities::default().with_snippet_support(true),
+                    );
+                let mut completions = self
+                    .db
+                    .analysis()
+                    .completions_at(completion_query)
+                    .expect("fixture completion query should resolve");
+                Self::filter_completion_labels(query, &mut completions);
+                if matches!(
+                    query.kind,
+                    AnalysisQueryKind::CompletionKeywordsAtWithSource
+                        | AnalysisQueryKind::CompletionKeywordsAtVerboseWithSource
+                ) {
+                    completions.retain(|completion| completion.kind == CompletionKind::Keyword);
+                }
+                if matches!(
+                    query.kind,
+                    AnalysisQueryKind::CompletionsAtVerboseWithSource
+                        | AnalysisQueryKind::CompletionKeywordsAtVerboseWithSource
+                ) {
+                    self.render_completions_verbose(completions, &mut dump);
+                } else {
+                    self.render_completions(completions, &mut dump);
+                }
+            }
+            AnalysisQueryKind::Hover => {
+                self.render_hover(
+                    self.db
+                        .analysis()
+                        .hover(target, file_id, offset)
+                        .expect("fixture hover query should resolve"),
+                    target.package,
+                    file_id,
+                    &mut dump,
+                );
+            }
+        }
+
+        dump
+    }
+
+    fn filter_completion_labels(query: &AnalysisQuery, completions: &mut Vec<CompletionItem>) {
+        if let Some(prefix) = query.completion_label_prefix {
+            completions.retain(|completion| completion.label.starts_with(prefix));
+        }
+    }
+
+    fn query_location(&self, query: &AnalysisQuery) -> (CrateRef, FileId, u32) {
+        let marker = self.markers.position(query.marker);
+        let (target, file_id) = self
+            .db
+            .target_and_file_for_path(&query.target, &marker.path);
+
+        (target, file_id, marker.offset)
+    }
+
+    fn render_symbol(
+        &self,
+        symbol: Option<SymbolAt>,
+        package: PackageSlot,
+        file_id: FileId,
+        dump: &mut String,
+    ) {
+        let Some(symbol) = symbol else {
+            writeln!(dump, "\n- <none>").expect("string writes should not fail");
+            return;
+        };
+
+        match symbol {
+            SymbolAt::FunctionBody { body } => {
+                let body = body.body_ir();
+                let source = self
+                    .db
+                    .fixture
+                    .resident_body_source(body)
+                    .expect("body source should exist while rendering analysis symbol");
+                writeln!(
+                    dump,
+                    "\n- body @ {}",
+                    self.render_source_span(body.crate_ref.package, source.file_id, source.span)
+                )
+                .expect("string writes should not fail");
+            }
+            SymbolAt::Declaration { declaration, span } => {
+                let targets = self
+                    .db
+                    .analysis()
+                    .resolve_symbol(SymbolAt::Declaration { declaration, span })
+                    .expect("fixture symbol resolution should resolve");
+                let label = targets
+                    .first()
+                    .map(|target| format!("{} {}", target.kind, target.name))
+                    .unwrap_or_else(|| "declaration <unresolved>".to_string());
+                writeln!(
+                    dump,
+                    "\n- {label} @ {}",
+                    self.render_source_span(package, file_id, span)
+                )
+                .expect("string writes should not fail");
+            }
+            SymbolAt::Expr { expr } => {
+                let body = expr.body_ir();
+                let expr_data = self
+                    .db
+                    .fixture
+                    .resident_expr(body, expr.expr_id())
+                    .expect("expr id should exist while rendering analysis symbol");
+                writeln!(
+                    dump,
+                    "\n- {}",
+                    self.render_expr_symbol(body.crate_ref.package, expr_data)
+                )
+                .expect("string writes should not fail");
+            }
+            SymbolAt::TypePath {
+                ref type_path,
+                span,
+            } => {
+                writeln!(
+                    dump,
+                    "\n- type path {} @ {}",
+                    type_path.path(),
+                    self.render_source_span(package, file_id, span)
+                )
+                .expect("string writes should not fail");
+            }
+            SymbolAt::ValuePath { ref path, span, .. } => {
+                writeln!(
+                    dump,
+                    "\n- value path {path} @ {}",
+                    self.render_source_span(package, file_id, span)
+                )
+                .expect("string writes should not fail");
+            }
+            SymbolAt::RecordField {
+                ref owner,
+                ref key,
+                span,
+                ..
+            } => {
+                writeln!(
+                    dump,
+                    "\n- record field {owner}::{} @ {}",
+                    key.declaration_label(),
+                    self.render_source_span(package, file_id, span)
+                )
+                .expect("string writes should not fail");
+            }
+            SymbolAt::UsePath { ref path, span, .. } => {
+                writeln!(
+                    dump,
+                    "\n- path {path} @ {}",
+                    self.render_source_span(package, file_id, span)
+                )
+                .expect("string writes should not fail");
+            }
+        }
+    }
+
+    fn render_expr_symbol(&self, package: PackageSlot, expr: &ExprData) -> String {
+        let label = match &expr.kind {
+            ExprKind::Block { .. } => "block".to_string(),
+            ExprKind::Path { path } => format!("path {path}"),
+            ExprKind::Call { .. } => "call".to_string(),
+            ExprKind::Tuple { .. } => "tuple".to_string(),
+            ExprKind::Array { .. } => "array".to_string(),
+            ExprKind::RepeatArray { .. } => "repeat_array".to_string(),
+            ExprKind::Index { .. } => "index".to_string(),
+            ExprKind::Range { kind, .. } => {
+                let kind = kind
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<missing>".to_string());
+                format!("range {kind}")
+            }
+            ExprKind::Cast { ty, .. } => {
+                let ty = ty
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<missing>".to_string());
+                format!("cast as {ty}")
+            }
+            ExprKind::Unary { op, .. } => {
+                let op = op
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<missing>".to_string());
+                format!("unary {op}")
+            }
+            ExprKind::Binary { op, .. } => {
+                let op = op
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<missing>".to_string());
+                format!("binary {op}")
+            }
+            ExprKind::Assign { op, .. } => {
+                let op = op
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<missing>".to_string());
+                format!("assign {op}")
+            }
+            ExprKind::Match { .. } => "match".to_string(),
+            ExprKind::If { .. } => "if".to_string(),
+            ExprKind::Let { .. } => "let".to_string(),
+            ExprKind::Closure { .. } => "closure".to_string(),
+            ExprKind::Loop { .. } => "loop".to_string(),
+            ExprKind::While { .. } => "while".to_string(),
+            ExprKind::For { .. } => "for".to_string(),
+            ExprKind::Break { .. } => "break".to_string(),
+            ExprKind::Continue { .. } => "continue".to_string(),
+            ExprKind::MethodCall { method_name, .. } => {
+                format!("method_call {method_name}")
+            }
+            ExprKind::Field { field, .. } => {
+                let field = field
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<missing>".to_string());
+                format!("field {field}")
+            }
+            ExprKind::Record { path, .. } => {
+                let path = path
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<missing>".to_string());
+                format!("record {path}")
+            }
+            ExprKind::Wrapper { kind, .. } => format!("wrapper {kind}"),
+            ExprKind::BuiltinMacro { kind } => format!("builtin_macro {kind}"),
+            ExprKind::Literal { kind } => {
+                format!(
+                    "literal {kind} {}",
+                    self.render_source_text(package, expr.source)
+                )
+            }
+            ExprKind::Underscore => "underscore".to_string(),
+            ExprKind::Yield { .. } => "yield".to_string(),
+            ExprKind::Yeet { .. } => "yeet".to_string(),
+            ExprKind::Become { .. } => "become".to_string(),
+            ExprKind::Unknown { .. } => {
+                format!("unknown {}", self.render_source_text(package, expr.source))
+            }
+        };
+
+        format!(
+            "expr {label} @ {}",
+            self.render_source_span(package, expr.source.file_id, expr.source.span)
+        )
+    }
+
+    fn render_targets(&self, mut targets: Vec<NavigationTarget>, dump: &mut String) {
+        targets.sort_by_key(|target| {
+            (
+                target.kind,
+                target.name.clone(),
+                target.crate_ref.package.0,
+                target.crate_ref.crate_id.0,
+                target.file_id.0,
+                target.span.map(|span| span.start),
+            )
+        });
+
+        if targets.is_empty() {
+            writeln!(dump, "\n- <none>").expect("string writes should not fail");
+            return;
+        }
+
+        writeln!(dump).expect("string writes should not fail");
+        for target in targets {
+            let label = if target.kind == crate::NavigationTargetKind::Impl {
+                target.name
+            } else {
+                format!("{} {}", target.kind, target.name)
+            };
+            writeln!(
+                dump,
+                "- {label} @ {}",
+                self.render_optional_span(target.crate_ref.package, target.file_id, target.span)
+            )
+            .expect("string writes should not fail");
+        }
+    }
+
+    fn render_completions(&self, mut completions: Vec<CompletionItem>, dump: &mut String) {
+        completions.sort_by_key(|completion| {
+            (
+                completion.label.clone(),
+                completion.kind,
+                completion.applicability,
+            )
+        });
+
+        if completions.is_empty() {
+            writeln!(dump, "\n- <none>").expect("string writes should not fail");
+            return;
+        }
+
+        writeln!(dump).expect("string writes should not fail");
+        for completion in completions {
+            if completion.applicability == CompletionApplicability::Known {
+                writeln!(dump, "- {} {}", completion.kind, completion.label)
+                    .expect("string writes should not fail");
+            } else {
+                writeln!(
+                    dump,
+                    "- {} {} ({})",
+                    completion.kind, completion.label, completion.applicability
+                )
+                .expect("string writes should not fail");
+            }
+        }
+    }
+
+    fn render_code_actions(&self, actions: Vec<CodeAction>, source: &str, dump: &mut String) {
+        for action in actions {
+            let kind = match action.kind {
+                CodeActionKind::QuickFix => "quickfix",
+                CodeActionKind::RefactorRewrite => "refactor.rewrite",
+            };
+            writeln!(dump, "\n- {kind} {}", action.title).expect("string writes should not fail");
+            writeln!(dump, "  preferred: {}", action.is_preferred)
+                .expect("string writes should not fail");
+
+            // Apply from the end so every span remains in the captured source coordinate space.
+            let mut edits = action.edits.iter().collect::<Vec<_>>();
+            edits.sort_by_key(|edit| std::cmp::Reverse(edit.replace.start));
+            let mut result = source.to_string();
+            for edit in edits {
+                result.replace_range(
+                    usize::try_from(edit.replace.start)
+                        .expect("fixture edit start should fit usize")
+                        ..usize::try_from(edit.replace.end)
+                            .expect("fixture edit end should fit usize"),
+                    &edit.new_text,
+                );
+            }
+            writeln!(dump, "  result:").expect("string writes should not fail");
+            for line in result.lines() {
+                if line.is_empty() {
+                    writeln!(dump).expect("string writes should not fail");
+                } else {
+                    writeln!(dump, "    {line}").expect("string writes should not fail");
+                }
+            }
+        }
+    }
+
+    fn render_completions_verbose(&self, mut completions: Vec<CompletionItem>, dump: &mut String) {
+        completions.sort_by_key(|completion| completion.sort_text.clone());
+
+        if completions.is_empty() {
+            writeln!(dump, "\n- <none>").expect("string writes should not fail");
+            return;
+        }
+
+        writeln!(dump).expect("string writes should not fail");
+        for completion in completions {
+            writeln!(dump, "- {} {}", completion.kind, completion.label)
+                .expect("string writes should not fail");
+            if let Some(detail) = &completion.detail {
+                writeln!(dump, "  detail: {detail}").expect("string writes should not fail");
+            }
+            if let Some(docs) = &completion.documentation {
+                writeln!(dump, "  docs: {docs}").expect("string writes should not fail");
+            }
+            if let Some(filter_text) = &completion.filter_text {
+                writeln!(dump, "  filter: {filter_text}").expect("string writes should not fail");
+            }
+            writeln!(dump, "  sort: {}", completion.sort_text)
+                .expect("string writes should not fail");
+            if let Some(edit) = completion.edit {
+                let span = edit.replace;
+                writeln!(dump, "  replace: {}..{}", span.start, span.end)
+                    .expect("string writes should not fail");
+            }
+            for edit in &completion.additional_edits {
+                writeln!(
+                    dump,
+                    "  additional: {}..{} => {:?}",
+                    edit.replace.start, edit.replace.end, edit.new_text
+                )
+                .expect("string writes should not fail");
+            }
+            match &completion.insert_text {
+                CompletionInsertText::Plain => {}
+                CompletionInsertText::Text(text) => {
+                    writeln!(dump, "  insert: {text}").expect("string writes should not fail");
+                }
+                CompletionInsertText::Snippet(snippet) => {
+                    writeln!(dump, "  snippet: {snippet}").expect("string writes should not fail");
+                }
+            }
+        }
+    }
+
+    fn render_references(&self, references: Vec<ReferenceLocation>, dump: &mut String) {
+        if references.is_empty() {
+            writeln!(dump, "\n- <none>").expect("string writes should not fail");
+            return;
+        }
+
+        writeln!(dump).expect("string writes should not fail");
+        for reference in references {
+            writeln!(
+                dump,
+                "- `{}` @ {}",
+                self.render_source_text_for_span(
+                    reference.crate_ref.package,
+                    reference.file_id,
+                    reference.span,
+                ),
+                self.render_file_span(
+                    reference.crate_ref.package,
+                    reference.file_id,
+                    reference.span,
+                )
+            )
+            .expect("string writes should not fail");
+        }
+    }
+
+    fn render_rename_target(
+        &self,
+        target: Option<RenameTarget>,
+        package: PackageSlot,
+        dump: &mut String,
+    ) {
+        let Some(target) = target else {
+            writeln!(dump, "\n- <none>").expect("string writes should not fail");
+            return;
+        };
+
+        writeln!(
+            dump,
+            "\n- `{}` @ {}",
+            target.placeholder,
+            self.render_file_span(package, target.file_id, target.span)
+        )
+        .expect("string writes should not fail");
+    }
+
+    fn render_rename_result(
+        &self,
+        result: Option<RenameResult>,
+        package: PackageSlot,
+        dump: &mut String,
+    ) {
+        let Some(result) = result else {
+            writeln!(dump, "\n- <none>").expect("string writes should not fail");
+            return;
+        };
+
+        writeln!(
+            dump,
+            "\n- target `{}` @ {}",
+            result.target.placeholder,
+            self.render_file_span(package, result.target.file_id, result.target.span)
+        )
+        .expect("string writes should not fail");
+
+        let mut edits = result.edits;
+        edits.sort_by_key(|edit| {
+            (
+                edit.crate_ref.package.0,
+                edit.crate_ref.crate_id.0,
+                edit.file_id.0,
+                edit.span.start,
+            )
+        });
+
+        for edit in edits {
+            self.render_rename_edit(edit, dump);
+        }
+    }
+
+    fn render_rename_edit(&self, edit: RenameEdit, dump: &mut String) {
+        writeln!(
+            dump,
+            "- `{}` -> `{}` @ {}",
+            edit.old_text,
+            edit.new_text,
+            self.render_file_span(edit.crate_ref.package, edit.file_id, edit.span)
+        )
+        .expect("string writes should not fail");
+    }
+
+    fn render_hover(
+        &self,
+        hover: Option<HoverInfo>,
+        package: PackageSlot,
+        file_id: FileId,
+        dump: &mut String,
+    ) {
+        let Some(hover) = hover else {
+            writeln!(dump, "\n- <none>").expect("string writes should not fail");
+            return;
+        };
+
+        writeln!(
+            dump,
+            "\n- range: {}",
+            self.render_optional_span(package, file_id, hover.range)
+        )
+        .expect("string writes should not fail");
+        for block in hover.blocks {
+            writeln!(dump, "- block:").expect("string writes should not fail");
+            writeln!(dump, "  kind: {}", block.kind).expect("string writes should not fail");
+            if let Some(path) = block.path {
+                writeln!(dump, "  path: {path}").expect("string writes should not fail");
+            }
+            if let Some(signature) = block.signature {
+                writeln!(dump, "  signature:").expect("string writes should not fail");
+                for line in signature.lines() {
+                    writeln!(dump, "    {line}").expect("string writes should not fail");
+                }
+            }
+            if let Some(ty) = block.ty {
+                writeln!(dump, "  type: {ty}").expect("string writes should not fail");
+            }
+            if let Some(docs) = block.docs {
+                writeln!(dump, "  docs:").expect("string writes should not fail");
+                for line in docs.lines() {
+                    writeln!(dump, "    {line}").expect("string writes should not fail");
+                }
+            }
+        }
+    }
+
+    fn render_optional_span(
+        &self,
+        package: PackageSlot,
+        file_id: FileId,
+        span: Option<Span>,
+    ) -> String {
+        span.map(|span| self.render_source_span(package, file_id, span))
+            .unwrap_or_else(|| "<root>".to_string())
+    }
+
+    fn render_source_span(&self, package: PackageSlot, file_id: FileId, span: Span) -> String {
+        let line_column = self
+            .db
+            .parse_db()
+            .package(package.0)
+            .expect("span package should exist while rendering analysis query")
+            .parsed_file(file_id)
+            .expect("span file should exist while rendering analysis query")
+            .line_index()
+            .expect("span file line index should load while rendering analysis query")
+            .line_column_span(span);
+        format!(
+            "{}:{}-{}:{}",
+            line_column.start.line + 1,
+            line_column.start.column + 1,
+            line_column.end.line + 1,
+            line_column.end.column + 1,
+        )
+    }
+
+    fn render_source_text(&self, package: PackageSlot, source: BodySource) -> String {
+        self.render_source_text_for_span(package, source.file_id, source.span)
+    }
+
+    fn render_source_text_for_span(
+        &self,
+        package: PackageSlot,
+        file_id: FileId,
+        span: Span,
+    ) -> String {
+        let parsed_file = self
+            .db
+            .parse_db()
+            .package(package.0)
+            .expect("span package should exist while rendering analysis query text")
+            .parsed_file(file_id)
+            .expect("span file should exist while rendering analysis query text");
+
+        parsed_file
+            .text_for_span(span)
+            .expect("analysis source text should load")
+            .unwrap_or_else(|| "<invalid>".to_string())
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn render_file_span(&self, package: PackageSlot, file_id: FileId, span: Span) -> String {
+        format!(
+            "{}:{}",
+            self.render_file_path(package, file_id),
+            self.render_source_span(package, file_id, span)
+        )
+    }
+
+    fn render_file_path(&self, package: PackageSlot, file_id: FileId) -> String {
+        let parsed_package = self
+            .db
+            .parse_db()
+            .packages()
+            .get(package.0)
+            .expect("reference package should exist while rendering file path");
+        let relative_path = self.db.render_file_path(package, file_id);
+
+        if self.db.parse_db().packages().len() > 1 {
+            format!("{}/{relative_path}", parsed_package.package_name())
+        } else {
+            relative_path
+        }
+    }
+}
+
+struct AnalysisSymbolSnapshot<'a> {
+    db: &'a AnalysisFixtureDb,
+}
+
+impl<'a> AnalysisSymbolSnapshot<'a> {
+    fn new(db: &'a AnalysisFixtureDb) -> Self {
+        Self { db }
+    }
+
+    fn render_document_symbols(&self, query: &DocumentSymbolsQuery) -> String {
+        let (target, file_id) = self.db.target_and_file_for_path(&query.target, query.path);
+        let outline = self
+            .db
+            .analysis()
+            .document_symbols(target, file_id)
+            .expect("fixture document symbols should resolve");
+        let mut dump = query.title.to_string();
+
+        if outline.symbols.is_empty() {
+            writeln!(dump, "\n- <none>").expect("string writes should not fail");
+            return dump;
+        }
+
+        writeln!(dump).expect("string writes should not fail");
+        self.render_document_symbol_list(
+            target.package,
+            outline.file_id,
+            &outline.symbols,
+            0,
+            &mut dump,
+        );
+        dump
+    }
+
+    fn render_workspace_symbols(&self, query: &str) -> String {
+        let symbols = self
+            .db
+            .analysis()
+            .workspace_symbols(query)
+            .expect("fixture workspace symbols should resolve");
+        let mut dump = format!("workspace symbols `{query}`");
+
+        if symbols.is_empty() {
+            writeln!(dump, "\n- <none>").expect("string writes should not fail");
+            return dump;
+        }
+
+        writeln!(dump).expect("string writes should not fail");
+        for symbol in symbols {
+            self.render_workspace_symbol(&symbol, &mut dump);
+        }
+        dump
+    }
+
+    fn render_inlay_hints(&self, query: &InlayHintsQuery) -> String {
+        let (target, file_id) = self.db.target_and_file_for_path(&query.target, query.path);
+        let hints = self
+            .db
+            .analysis()
+            .inlay_hints(target, file_id, None)
+            .expect("fixture inlay hints should resolve");
+        let mut dump = query.title.to_string();
+
+        if hints.is_empty() {
+            writeln!(dump, "\n- <none>").expect("string writes should not fail");
+            return dump;
+        }
+
+        writeln!(dump).expect("string writes should not fail");
+        for hint in hints {
+            self.render_inlay_hint(target.package, &hint, &mut dump);
+        }
+        dump
+    }
+
+    fn render_document_symbol_list(
+        &self,
+        package: PackageSlot,
+        file_id: FileId,
+        symbols: &[DocumentSymbol],
+        depth: usize,
+        dump: &mut String,
+    ) {
+        for symbol in symbols {
+            self.render_document_symbol(package, file_id, symbol, depth, dump);
+        }
+    }
+
+    fn render_document_symbol(
+        &self,
+        package: PackageSlot,
+        file_id: FileId,
+        symbol: &DocumentSymbol,
+        depth: usize,
+        dump: &mut String,
+    ) {
+        let indent = "  ".repeat(depth);
+        let selection = if symbol.selection_span == symbol.span {
+            String::new()
+        } else {
+            format!(
+                " selection {}",
+                self.render_source_span(package, file_id, symbol.selection_span)
+            )
+        };
+        let label = if symbol.kind == crate::SymbolKind::Impl {
+            symbol.name.clone()
+        } else {
+            format!("{} {}", symbol.kind, symbol.name)
+        };
+
+        writeln!(
+            dump,
+            "{indent}- {label} @ {}{}",
+            self.render_source_span(package, file_id, symbol.span),
+            selection
+        )
+        .expect("string writes should not fail");
+
+        self.render_document_symbol_list(package, file_id, &symbol.children, depth + 1, dump);
+    }
+
+    fn render_workspace_symbol(&self, symbol: &WorkspaceSymbol, dump: &mut String) {
+        let container = symbol
+            .container_name
+            .as_ref()
+            .map(|container| format!(" in {container}"))
+            .unwrap_or_default();
+
+        writeln!(
+            dump,
+            "- {} {}{} @ {} {}",
+            symbol.kind,
+            symbol.name,
+            container,
+            self.render_crate_ref(symbol.crate_ref),
+            self.render_file_span(symbol.crate_ref.package, symbol.file_id, symbol.span)
+        )
+        .expect("string writes should not fail");
+    }
+
+    fn render_inlay_hint(&self, package: PackageSlot, hint: &InlayHint, dump: &mut String) {
+        writeln!(
+            dump,
+            "- `{}` @ {}",
+            hint.label,
+            self.render_source_span(package, hint.file_id, hint.span)
+        )
+        .expect("string writes should not fail");
+    }
+
+    fn render_crate_ref(&self, crate_ref: CrateRef) -> String {
+        let package = self
+            .db
+            .parse_db()
+            .packages()
+            .get(crate_ref.package.0)
+            .expect("target package should exist while rendering workspace symbol");
+        let cargo_target = self
+            .db
+            .fixture
+            .def_map_db()
+            .resident_package(crate_ref.package)
+            .and_then(|package| package.crate_data(crate_ref.crate_id))
+            .expect("semantic crate should exist while rendering workspace symbol")
+            .cargo_target();
+        let target = package
+            .target(cargo_target)
+            .expect("target should exist while rendering workspace symbol");
+
+        format!("{}[{}]", package.package_name(), target.kind)
+    }
+
+    fn render_file_span(
+        &self,
+        package: PackageSlot,
+        file_id: FileId,
+        span: Option<Span>,
+    ) -> String {
+        let file = self.render_file_path(package, file_id);
+        match span {
+            Some(span) => format!("{file}:{}", self.render_source_span(package, file_id, span)),
+            None => format!("{file}:<root>"),
+        }
+    }
+
+    fn render_file_path(&self, package: PackageSlot, file_id: FileId) -> String {
+        self.db.render_file_path(package, file_id)
+    }
+
+    fn render_source_span(&self, package: PackageSlot, file_id: FileId, span: Span) -> String {
+        let line_column = self
+            .db
+            .parse_db()
+            .package(package.0)
+            .expect("span package should exist while rendering analysis symbol")
+            .parsed_file(file_id)
+            .expect("span file should exist while rendering analysis symbol")
+            .line_index()
+            .expect("span file line index should load while rendering analysis symbol")
+            .line_column_span(span);
+        format!(
+            "{}:{}-{}:{}",
+            line_column.start.line + 1,
+            line_column.start.column + 1,
+            line_column.end.line + 1,
+            line_column.end.column + 1,
+        )
+    }
+}
