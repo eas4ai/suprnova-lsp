@@ -160,11 +160,27 @@ impl CompilerImport {
                     !existing_items.contains(&(incoming.name.clone(), incoming.kind.tag()))
                 })
                 .collect::<Vec<_>>();
-            if let Some((source, _)) = matching.first() {
+            // Adding a method to a broader source impl would erase its compiler-established bounds:
+            // `impl<T: Gate> Post<T>` must not extend an unconditional `impl<T> Post<T>`.
+            // Exact syntax equality is conservative; a different spelling keeps its own header.
+            let extension = matching.iter().find(|(_, written)| {
+                imported.generics == written.generics && imported.is_unsafe == written.is_unsafe
+            });
+            if let Some((source, _)) = extension {
                 if !missing.is_empty() {
                     extensions.push((*source, missing));
                 }
-            } else {
+            } else if matching.is_empty() || !missing.is_empty() {
+                ensure!(
+                    imported.trait_ref.is_none() || matching.is_empty(),
+                    "rustdoc trait impl applicability differs from its source impl"
+                );
+                // Keep written members on their original source impl. Only the missing declarations
+                // need a generated impl, which retains its original generics and where predicates.
+                let ItemKind::Impl(header) = &mut declarations.items[*impl_id].kind else {
+                    unreachable!("validated impl kind");
+                };
+                header.items = missing;
                 new_impls.push(*impl_id);
             }
         }
