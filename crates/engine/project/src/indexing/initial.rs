@@ -27,6 +27,7 @@ pub(crate) fn build_resident_state(
     package_batch_size: PackageBatchSize,
     package_residency_policy: PackageResidencyPolicy,
     startup_cache_load: StartupCacheLoad,
+    compiler_imports: super::compiler::CompilerImports,
     memory_hooks: Arc<dyn ProjectMemoryHooks>,
     memory_sampler: &mut BuildMemorySampler,
 ) -> anyhow::Result<ProjectState> {
@@ -85,7 +86,8 @@ pub(crate) fn build_resident_state(
     metric::CARGO_BUILD_OUTPUT_GENERATED_BYTES.add(cargo_build_outputs.generated_bytes());
     metric::CARGO_BUILD_OUTPUT_SCAN.record(cargo_build_outputs.scan_duration());
 
-    let package_residency = PackageResidencyPlan::build(&workspace, package_residency_policy);
+    let mut package_residency = PackageResidencyPlan::build(&workspace, package_residency_policy);
+    compiler_imports.retain_affected_packages(&mut package_residency);
     let cache_plan = WorkspaceCachePlan::build(&workspace);
     let cache_store =
         PackageCacheStore::for_instance(&cache_plan, package_residency_policy, &cache_instance);
@@ -101,6 +103,7 @@ pub(crate) fn build_resident_state(
         &cache_plan,
         &cache_store,
         startup_cache_load,
+        &compiler_imports,
         split_indexing_mode,
         memory_hooks.as_ref(),
         memory_sampler,
@@ -108,6 +111,7 @@ pub(crate) fn build_resident_state(
 
     Ok(ProjectState {
         generation_id: ProjectGenerationId::fresh(),
+        compiler_imports,
         workspace,
         workspace_lowering_config,
         cargo_metadata_config,

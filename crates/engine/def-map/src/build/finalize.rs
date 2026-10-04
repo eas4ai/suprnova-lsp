@@ -1004,6 +1004,31 @@ fn freeze_resolved_scopes(
     current_scopes: ScopeMatrix,
     unresolved_imports: UnresolvedImports,
 ) -> anyhow::Result<()> {
+    // Compiler declarations name existing nominal owners. Reconcile all of them against the same
+    // stable scopes before allocating any imported impl identity into this candidate generation.
+    let mut imports = Vec::new();
+    for package in states.iter_dirty_mut() {
+        for state in package {
+            for declarations in std::mem::take(&mut state.compiler_declarations) {
+                imports.push((state.crate_ref, declarations));
+            }
+        }
+    }
+    let imports = imports
+        .into_iter()
+        .map(|(crate_ref, declarations)| {
+            super::compiler::CompilerImport::prepare(
+                &FinalizeResolutionEnv::new(old, states, &current_scopes),
+                states.crate_state(crate_ref).expect("import crate exists"),
+                item_tree,
+                declarations,
+            )
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    for import in imports {
+        import.apply(states);
+    }
+
     // Builtin derives add impls, but no imports or module bindings. Once normal expansion has
     // settled, synthesize them once, including derives on declarations produced by macros.
     let derives = BuiltinDeriveExpansion::collect(

@@ -105,6 +105,7 @@ fn try_rebuild_packages(state: &mut ProjectState, packages: &[PackageSlot]) -> a
         &mut state.names,
         state.indexing_preference.macro_expansion_preference(),
         memory_hooks.as_ref(),
+        &state.compiler_imports,
     )
     .context("while attempting to rebuild affected def-map packages")?;
     let (def_map, generated_items) = def_map_output.into_parts();

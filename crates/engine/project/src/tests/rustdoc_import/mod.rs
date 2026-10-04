@@ -382,3 +382,63 @@ fn mac_006_query_without_compiler_servers() {
         .expect("valid candidate builds without compiler servers");
     fixture.assert_type(&project, "query", "expected_query");
 }
+
+#[test]
+fn imported_declarations_survive_cache_recovery_without_rereading_export() {
+    let fixture = Fixture::new(false);
+    let mut project = fixture
+        .build(
+            Some(fixture.input()),
+            IndexingPerformancePreference::FasterBuilds,
+        )
+        .unwrap();
+    fs::remove_file(&fixture.export_path).unwrap();
+    project
+        .recover_after_cache_load_failure()
+        .expect("captured declarations survive recovery");
+    fixture.assert_type(&project, "query", "expected_query");
+    fixture.assert_type(&project, "generic", "expected_generic");
+    fixture.assert_type(&project, "key", "expected_key");
+}
+
+#[test]
+fn rejects_signature_paths_missing_from_source() {
+    let fixture = Fixture::new(false);
+    let mut export: serde_json::Value =
+        serde_json::from_slice(&fs::read(&fixture.export_path).unwrap()).unwrap();
+    for summary in export["paths"].as_object_mut().unwrap().values_mut() {
+        if summary["path"] == serde_json::json!(["rustdoc_macro_support", "Builder"]) {
+            summary["path"] = serde_json::json!(["rustdoc_macro_support", "MissingBuilder"]);
+        }
+    }
+    fs::write(&fixture.export_path, serde_json::to_vec(&export).unwrap()).unwrap();
+    let error = fixture
+        .build(
+            Some(fixture.input()),
+            IndexingPerformancePreference::FasterBuilds,
+        )
+        .expect_err("unmappable signature rejects candidate");
+    assert!(format!("{error:#}").contains("MissingBuilder"));
+}
+
+#[test]
+fn imported_declarations_survive_source_rebuild_without_rereading_export() {
+    let fixture = Fixture::new(false);
+    let mut project = fixture
+        .build(
+            Some(fixture.input()),
+            IndexingPerformancePreference::FasterBuilds,
+        )
+        .unwrap();
+    fs::remove_file(&fixture.export_path).unwrap();
+    let path = fixture.source.path("src/lib.rs");
+    let mut source = fs::read_to_string(&path).unwrap();
+    source.push_str("\npub fn extra() {}\n");
+    fs::write(&path, source).unwrap();
+    project
+        .apply_change(crate::SavedFileChange::fs_path(&path))
+        .expect("captured declarations survive source rebuild");
+    fixture.assert_type(&project, "query", "expected_query");
+    fixture.assert_type(&project, "generic", "expected_generic");
+    fixture.assert_type(&project, "key", "expected_key");
+}

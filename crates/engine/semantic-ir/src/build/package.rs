@@ -117,6 +117,10 @@ impl<'a, 'db> ItemStoreSourceReader<'a> for CrateLowering<'a, 'db> {
         Ok(item)
     }
 
+    fn imported_associated_items(&self, source: ItemSource) -> &[ItemSource] {
+        self.generated_items.imported_associated_items(source)
+    }
+
     fn associated_macro_expansion(&self, source: ItemSource) -> Option<&[ItemSource]> {
         self.generated_items.associated_macro_expansion(source)
     }

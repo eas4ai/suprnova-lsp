@@ -3,6 +3,8 @@
 //! Rustdoc identifiers belong to one export. Consumers must resolve them before lowering into
 //! project identities, and release this export before keeping resident analysis state.
 
+mod lowering;
+
 use std::{collections::BTreeMap, io::Read};
 
 use anyhow::{Context as _, bail, ensure};
@@ -321,39 +323,47 @@ impl RustdocExport {
         value: &serde_json::Value,
         paths: &mut BTreeMap<u32, &'a rustdoc_types::ItemSummary>,
     ) -> anyhow::Result<()> {
-        match value {
-            serde_json::Value::Object(object) => {
-                if object.get("path").is_some_and(serde_json::Value::is_string)
-                    && object.contains_key("args")
-                {
-                    let id = rustdoc_types::Id(serde_json::from_value(object["id"].clone())?);
-                    let summary = self.resolve_path(id)?;
-                    if summary.crate_id == self.data.index[&self.data.root].crate_id {
-                        let declaration = self
-                            .data
-                            .index
-                            .get(&id)
-                            .context("rustdoc local signature declaration is missing")?;
-                        ensure!(
-                            declaration.crate_id == summary.crate_id
-                                && declaration.inner.item_kind() == summary.kind,
-                            "rustdoc signature path disagrees with its declaration"
-                        );
-                    }
-                    paths.insert(id.0, summary);
-                }
-                for child in object.values() {
-                    self.collect_paths(child, paths)?;
-                }
+        for id in Self::path_ids(value)? {
+            let summary = self.resolve_path(id)?;
+            if summary.crate_id == self.data.index[&self.data.root].crate_id {
+                let declaration = self
+                    .data
+                    .index
+                    .get(&id)
+                    .context("rustdoc local signature declaration is missing")?;
+                ensure!(
+                    declaration.crate_id == summary.crate_id
+                        && declaration.inner.item_kind() == summary.kind,
+                    "rustdoc signature path disagrees with its declaration"
+                );
             }
-            serde_json::Value::Array(array) => {
-                for child in array {
-                    self.collect_paths(child, paths)?;
-                }
-            }
-            _ => {}
+            paths.insert(id.0, summary);
         }
         Ok(())
+    }
+
+    // The pinned schema's only `path` + `id` + `args` object is rustdoc_types::Path. Share this
+    // traversal between export validation and per-declaration reference tracking during lowering.
+    pub(crate) fn path_ids(value: &serde_json::Value) -> anyhow::Result<Vec<rustdoc_types::Id>> {
+        let mut pending = vec![value];
+        let mut ids = Vec::new();
+        while let Some(value) = pending.pop() {
+            match value {
+                serde_json::Value::Object(object) => {
+                    if object.get("path").is_some_and(serde_json::Value::is_string)
+                        && object.contains_key("args")
+                    {
+                        ids.push(rustdoc_types::Id(serde_json::from_value(
+                            object["id"].clone(),
+                        )?));
+                    }
+                    pending.extend(object.values());
+                }
+                serde_json::Value::Array(array) => pending.extend(array),
+                _ => {}
+            }
+        }
+        Ok(ids)
     }
 
     /// Resolve export-local type references before translating them into project identities.

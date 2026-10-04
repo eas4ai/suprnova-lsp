@@ -46,11 +46,14 @@ where
         let paths = self.context.item_paths();
         let query = TypeLoweringQuery::new(&paths, &self.context);
         let owner = self.context.body().owner().generic_def();
-        query.lower_inference_type(
+        let ty = query.lower_inference_type(
             ty,
             TypeLoweringEnv::new(owner, TypeLoweringAnchor::Scope(scope)),
             table,
-        )
+        )?;
+        // An annotation such as `<Post as Model>::Key` must learn the impl's assignment even when
+        // its initializer is `loop {}` and contributes no ordinary value-type constraint.
+        Ok(table.normalize(ty))
     }
 
     pub(crate) fn generic_args<'s>(

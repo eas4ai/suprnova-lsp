@@ -2096,7 +2096,11 @@ name = "rg_rustdoc"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "rg_arena",
+ "rg_ir_model",
+ "rg_item_tree",
  "rg_std",
+ "rg_text",
  "rustdoc-types",
  "serde",
  "serde_json",

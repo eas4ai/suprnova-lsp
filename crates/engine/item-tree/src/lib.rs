@@ -1,3 +1,4 @@
+mod compiler;
 mod db;
 mod item;
 mod lower;
@@ -14,6 +15,7 @@ pub use rg_ir_model::Mutability;
 pub use rg_text::{Name, PackageNameInterners};
 
 pub use self::{
+    compiler::CompilerTypeDeclarations,
     db::{IncrementalItemTreeLowering, ItemTreeDb},
     item::{
         BuiltinDeriveKind, BuiltinMacroItem, BuiltinMacroKind, CfgAttrMacroUse, CfgSelectArmItem,

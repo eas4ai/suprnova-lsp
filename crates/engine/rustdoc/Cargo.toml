@@ -12,6 +12,10 @@ description.workspace = true
 [dependencies]
 anyhow.workspace = true
 rg_std.workspace = true
+rg_arena.workspace = true
+rg_ir_model.workspace = true
+rg_item_tree.workspace = true
+rg_text.workspace = true
 rustdoc-types.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

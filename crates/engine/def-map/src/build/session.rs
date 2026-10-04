@@ -135,6 +135,21 @@ impl DefMapBuildSession {
         })
     }
 
+    /// Queue compiler-derived impls for reconciliation after source scopes reach their fixed point.
+    pub fn import_declarations(
+        &mut self,
+        crate_ref: rg_ir_model::CrateRef,
+        declarations: rg_item_tree::CompilerTypeDeclarations,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.complete, "DefMap build session is already complete");
+        self.crate_states
+            .crate_state_mut(crate_ref)
+            .context("compiler import target is not a source-built crate")?
+            .compiler_declarations
+            .push(declarations);
+        Ok(())
+    }
+
     /// Records a module file after Parse captured it and ItemTree lowered it in its child context.
     pub fn record_module_file(
         &mut self,

@@ -54,6 +54,7 @@ pub(super) fn build(
     cache_plan: &WorkspaceCachePlan,
     cache_store: &PackageCacheStore,
     startup_cache_load: StartupCacheLoad,
+    compiler_imports: &crate::indexing::compiler::CompilerImports,
     split_indexing_mode: SplitIndexingMode,
     memory_hooks: &dyn ProjectMemoryHooks,
     sampler: &mut BuildMemorySampler,
@@ -204,6 +205,7 @@ pub(super) fn build(
             &mut names,
             indexing_preference.macro_expansion_preference(),
             memory_hooks,
+            compiler_imports,
         )
         .context("while attempting to build package batch def maps")?;
         drop(baseline_def_map_txn);
