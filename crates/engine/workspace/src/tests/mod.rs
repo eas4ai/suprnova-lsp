@@ -11,6 +11,30 @@ use crate::{
 };
 
 #[test]
+fn normalizes_mixed_library_crate_types_to_one_analysis_target() {
+    let fixture = fixture_crate(
+        r#"
+//- /Cargo.toml
+[package]
+name = "mixed_library"
+version = "0.1.0"
+edition = "2024"
+[lib]
+crate-type = ["cdylib", "rlib"]
+//- /src/lib.rs
+pub struct Exported;
+"#,
+    );
+    let metadata = fixture.metadata();
+    let workspace =
+        WorkspaceMetadata::for_tests(metadata, WorkspaceLoweringConfig::default()).unwrap();
+    let package = workspace.workspace_packages().next().unwrap();
+    assert_eq!(package.targets.len(), 1);
+    assert_eq!(package.targets[0].kind, TargetKind::Lib);
+    assert!(package.targets[0].kind.is_primary_analysis_target());
+}
+
+#[test]
 fn dumps_normalized_workspace_metadata() {
     utils::check_workspace_metadata(
         r#"

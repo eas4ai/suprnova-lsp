@@ -85,11 +85,13 @@ impl CompilerImports {
                 "rustdoc owner {} belongs to another crate target",
                 input.item_path
             );
-            declarations.push((
-                crate_ref,
-                view.lower()
-                    .with_context(|| format!("lower rustdoc owner {}", input.item_path))?,
-            ));
+            declarations.extend(
+                export
+                    .lower_type(&input.item_path)
+                    .with_context(|| format!("lower rustdoc owner {}", input.item_path))?
+                    .into_iter()
+                    .map(|declarations| (crate_ref, declarations)),
+            );
             affected_ids.insert(package.id.clone());
         }
         // Cached dependent payloads can refer to the imported package's arena IDs. Rebuild and

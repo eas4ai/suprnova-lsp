@@ -5,7 +5,10 @@
 
 mod lowering;
 
-use std::{collections::BTreeMap, io::Read};
+use std::{
+    collections::{BTreeMap, HashSet},
+    io::Read,
+};
 
 use anyhow::{Context as _, bail, ensure};
 use rg_std::ExpectedUnique;
@@ -38,6 +41,99 @@ pub struct RustdocExport {
 }
 
 impl RustdocExport {
+    /// Lower the selected API and the concrete declarations it references in child modules.
+    /// Source owners in the selected module still have to exist; this closure supplies generated
+    /// storage types such as `user::Entity`, not replacements for missing source declarations.
+    pub fn lower_type(
+        &self,
+        path: &str,
+    ) -> anyhow::Result<Vec<rg_item_tree::CompilerTypeDeclarations>> {
+        let primary = self.type_api(path)?;
+        let origin = primary.path.to_vec();
+        let mut seen = HashSet::from([primary.declaration.id]);
+        let mut pending = vec![primary];
+        let mut declarations = Vec::new();
+        while let Some(view) = pending.pop() {
+            for (id, summary) in &view.type_paths {
+                if summary.crate_id == view.declaration.crate_id
+                    && matches!(
+                        summary.kind,
+                        ItemKind::Struct | ItemKind::Enum | ItemKind::Union
+                    )
+                    && summary.path.starts_with(&origin[..origin.len() - 1])
+                    && summary.path.len() > origin.len()
+                    && seen.insert(rustdoc_types::Id(*id))
+                {
+                    pending.push(self.type_api(&summary.path.join("::"))?);
+                }
+            }
+            let mut lowered = view.lower()?;
+            if view.path != origin {
+                let node = rg_item_tree::ItemNode::source(
+                    view.nominal()?,
+                    view.declaration.name.as_ref().map(rg_text::Name::new),
+                    None,
+                    TypeApiView::visibility(&view.declaration.visibility),
+                    None,
+                    rg_ir_model::Span { start: 0, end: 0 },
+                    rg_ir_model::FileId(0),
+                );
+                let nominal = lowered.items.alloc(node);
+                lowered
+                    .references
+                    .extend(view.references(view.declaration, nominal)?);
+                for member in &view.members {
+                    lowered.references.extend(view.references(member, nominal)?);
+                }
+                lowered.nominal = Some(nominal);
+                lowered.origin = Some(origin.clone());
+                // A path summary alone does not establish a generated module. Validate the actual
+                // module declarations and child membership, walking from the nominal to the anchor.
+                let mut child = view.declaration.id;
+                for depth in (origin.len()..view.path.len()).rev() {
+                    let mut modules = ExpectedUnique::new();
+                    for (id, summary) in &self.data.paths {
+                        if summary.crate_id == view.declaration.crate_id
+                            && summary.kind == ItemKind::Module
+                            && summary.path == view.path[..depth]
+                        {
+                            modules.push(*id);
+                        }
+                    }
+                    let ExpectedUnique::One(id) = modules else {
+                        bail!("rustdoc supporting parent module is missing or ambiguous")
+                    };
+                    let item = self
+                        .data
+                        .index
+                        .get(&id)
+                        .context("rustdoc supporting module declaration missing")?;
+                    ensure!(
+                        item.crate_id == view.declaration.crate_id,
+                        "rustdoc supporting module belongs to another crate"
+                    );
+                    let ItemEnum::Module(module) = &item.inner else {
+                        bail!("rustdoc supporting module has the wrong kind")
+                    };
+                    ensure!(
+                        module.items.contains(&child),
+                        "rustdoc supporting declaration is not a child of its module"
+                    );
+                    lowered.modules.push((
+                        view.path[..depth].to_vec(),
+                        TypeApiView::visibility(&item.visibility),
+                    ));
+                    child = id;
+                }
+                lowered.modules.reverse();
+            }
+            declarations.push(lowered);
+        }
+        // Keep the source anchor first and make the remaining candidate order deterministic.
+        declarations[1..].sort_by(|left, right| left.path.cmp(&right.path));
+        Ok(declarations)
+    }
+
     /// Check the format before decoding declarations, so a newer schema gets a useful error.
     pub fn read(reader: impl Read) -> anyhow::Result<Self> {
         let mut bytes = Vec::new();

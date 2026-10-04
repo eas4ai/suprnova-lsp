@@ -16,6 +16,11 @@ const DEFAULT_MODEL: &str = concat!(
     "/../rustdoc/fixtures/model-default"
 );
 
+const CHILD_MODEL: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../rustdoc/fixtures/child-model"
+);
+
 const PROBES: &str = r#"
 pub fn acceptance(post: Post) {
     let query$query$ = Post::query();
@@ -36,8 +41,9 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn new(default_method: bool, source_method: Option<&str>) -> Self {
-        let root = Path::new(if default_method { DEFAULT_MODEL } else { MODEL });
+    fn new(root: &str, source_method: Option<&str>) -> Self {
+        let child_model = root == CHILD_MODEL;
+        let root = Path::new(root);
         let mut spec = String::new();
         for path in [
             "Cargo.toml",
@@ -58,6 +64,23 @@ impl Fixture {
             spec.push_str(&text);
             if path == "src/lib.rs" {
                 spec.push_str(PROBES);
+                if child_model {
+                    spec.push_str(
+                        r#"
+pub fn child_acceptance() {
+    let entity$child_entity$: <Post as Model>::Entity = loop {};
+    let expected_entity$expected_child_entity$: Entity = loop {};
+    let column$child_column$: <Post as Model>::Column = loop {};
+    let expected_column$expected_child_column$: Column = loop {};
+    let key$child_key$: <Post as Model>::Key = loop {};
+    let expected_key$expected_child_key$: i64 = 0;
+    let storage$child_storage$: generated::Storage = loop {};
+    let field$child_field$ = storage.id;
+    let expected_field$expected_child_field$: i64 = 0;
+}
+"#,
+                    );
+                }
             }
         }
         // Cargo targets and a second package exercise identities that share only a short name.
@@ -160,7 +183,7 @@ pub fn use_it() { let value$package$ = Post.generated_method(7u64); }
 
 #[test]
 fn mac_001_initial_query() {
-    let fixture = Fixture::new(false, None);
+    let fixture = Fixture::new(MODEL, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -172,7 +195,7 @@ fn mac_001_initial_query() {
 
 #[test]
 fn mac_001_batched_query() {
-    let fixture = Fixture::new(false, None);
+    let fixture = Fixture::new(MODEL, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -184,7 +207,7 @@ fn mac_001_batched_query() {
 
 #[test]
 fn mac_001_trait_default() {
-    let fixture = Fixture::new(true, None);
+    let fixture = Fixture::new(DEFAULT_MODEL, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -196,7 +219,7 @@ fn mac_001_trait_default() {
 
 #[test]
 fn mac_001_batched_trait_default() {
-    let fixture = Fixture::new(true, None);
+    let fixture = Fixture::new(DEFAULT_MODEL, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -208,7 +231,7 @@ fn mac_001_batched_trait_default() {
 
 #[test]
 fn mac_002_generic_and_associated_type() {
-    let fixture = Fixture::new(false, None);
+    let fixture = Fixture::new(MODEL, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -221,7 +244,7 @@ fn mac_002_generic_and_associated_type() {
 
 #[test]
 fn mac_003_owner_namespaces_and_overlap() {
-    let fixture = Fixture::new(false, None);
+    let fixture = Fixture::new(MODEL, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -239,7 +262,7 @@ fn mac_003_owner_namespaces_and_overlap() {
 #[test]
 fn imported_methods_do_not_duplicate_associated_macro_output() {
     let fixture = Fixture::new(
-        false,
+        MODEL,
         Some(
             r#"
 macro_rules! leaf_methods {
@@ -313,7 +336,7 @@ pub fn acceptance(allowed: Post<Allowed>, denied: Post<Denied>) {
 
 #[test]
 fn mac_004_source_artifact_before_import() {
-    let fixture = Fixture::new(false, None);
+    let fixture = Fixture::new(MODEL, None);
     let baseline = fixture
         .build(None, IndexingPerformancePreference::FasterBuilds)
         .expect("source-only candidate builds");
@@ -348,7 +371,7 @@ fn mac_004_source_artifact_before_import() {
 
 #[test]
 fn mac_004_import_does_not_leak_into_source_artifact() {
-    let fixture = Fixture::new(false, None);
+    let fixture = Fixture::new(MODEL, None);
     let imported = fixture
         .build(
             Some(fixture.input()),
@@ -365,7 +388,7 @@ fn mac_004_import_does_not_leak_into_source_artifact() {
 
 #[test]
 fn mac_005_invalid_candidate_preserves_previous_project() {
-    let fixture = Fixture::new(false, None);
+    let fixture = Fixture::new(MODEL, None);
     let previous = fixture
         .build(None, IndexingPerformancePreference::FasterBuilds)
         .expect("previous source generation builds");
@@ -432,7 +455,7 @@ fn mac_005_invalid_candidate_preserves_previous_project() {
 
 #[test]
 fn mac_005_previous_import_survives_failed_candidate() {
-    let fixture = Fixture::new(false, None);
+    let fixture = Fixture::new(MODEL, None);
     let previous = fixture
         .build(
             Some(fixture.input()),
@@ -457,7 +480,7 @@ fn mac_005_previous_import_survives_failed_candidate() {
 
 #[test]
 fn mac_006_query_without_compiler_servers() {
-    let fixture = Fixture::new(false, None);
+    let fixture = Fixture::new(MODEL, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -469,7 +492,7 @@ fn mac_006_query_without_compiler_servers() {
 
 #[test]
 fn imported_declarations_survive_cache_recovery_without_rereading_export() {
-    let fixture = Fixture::new(false, None);
+    let fixture = Fixture::new(MODEL, None);
     let mut project = fixture
         .build(
             Some(fixture.input()),
@@ -487,7 +510,7 @@ fn imported_declarations_survive_cache_recovery_without_rereading_export() {
 
 #[test]
 fn rejects_signature_paths_missing_from_source() {
-    let fixture = Fixture::new(false, None);
+    let fixture = Fixture::new(MODEL, None);
     let mut export: serde_json::Value =
         serde_json::from_slice(&fs::read(&fixture.export_path).unwrap()).unwrap();
     for summary in export["paths"].as_object_mut().unwrap().values_mut() {
@@ -507,7 +530,7 @@ fn rejects_signature_paths_missing_from_source() {
 
 #[test]
 fn rejects_empty_signature_path_without_changing_previous_generation() {
-    let fixture = Fixture::new(false, None);
+    let fixture = Fixture::new(MODEL, None);
     let previous = fixture
         .build(
             Some(fixture.input()),
@@ -534,7 +557,7 @@ fn rejects_empty_signature_path_without_changing_previous_generation() {
 
 #[test]
 fn imported_declarations_survive_source_rebuild_without_rereading_export() {
-    let fixture = Fixture::new(false, None);
+    let fixture = Fixture::new(MODEL, None);
     let mut project = fixture
         .build(
             Some(fixture.input()),
@@ -552,4 +575,101 @@ fn imported_declarations_survive_source_rebuild_without_rereading_export() {
     fixture.assert_type(&project, "query", "expected_query");
     fixture.assert_type(&project, "generic", "expected_generic");
     fixture.assert_type(&project, "key", "expected_key");
+}
+
+#[test]
+fn compiler_child_nominals_supply_default_queries_reexports_and_fields() {
+    for preference in [
+        IndexingPerformancePreference::FasterBuilds,
+        IndexingPerformancePreference::LowerPeakMemory,
+    ] {
+        let fixture = Fixture::new(CHILD_MODEL, None);
+        let project = fixture
+            .build(Some(fixture.input()), preference)
+            .expect("child declarations reconcile");
+        for (actual, expected) in [
+            ("query", "expected_query"),
+            ("source", "expected_source"),
+            ("child_entity", "expected_child_entity"),
+            ("child_column", "expected_child_column"),
+            ("child_key", "expected_child_key"),
+            ("child_field", "expected_child_field"),
+        ] {
+            fixture.assert_type(&project, actual, expected);
+        }
+        fixture.assert_unknown(&project, "other");
+    }
+}
+
+#[test]
+fn compiler_child_nominals_cannot_replace_missing_items_in_a_source_module() {
+    let fixture = Fixture::new(
+        CHILD_MODEL,
+        Some("impl Post { pub fn source_method(&self) -> u64 { self.id } }\npub mod generated {}"),
+    );
+    let previous = fixture
+        .build(None, IndexingPerformancePreference::FasterBuilds)
+        .unwrap();
+    let error = fixture
+        .build(
+            Some(fixture.input()),
+            IndexingPerformancePreference::FasterBuilds,
+        )
+        .err()
+        .unwrap();
+    assert!(
+        format!("{error:#}").contains("cannot replace a missing source declaration"),
+        "{error:#}"
+    );
+    fixture.assert_type(&previous, "source", "expected_source");
+}
+
+#[test]
+fn compiler_child_nominals_require_the_actual_parent_module_membership() {
+    let fixture = Fixture::new(CHILD_MODEL, None);
+    let previous = fixture
+        .build(
+            Some(fixture.input()),
+            IndexingPerformancePreference::FasterBuilds,
+        )
+        .unwrap();
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&fs::read(&fixture.export_path).unwrap()).unwrap();
+    let id = value["paths"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .find(|(_, summary)| {
+            summary["kind"] == "struct"
+                && summary["path"]
+                    == serde_json::json!(["rustdoc_macro_support", "generated", "Entity"])
+        })
+        .unwrap()
+        .0
+        .parse::<u64>()
+        .unwrap();
+    let module = value["index"]
+        .as_object_mut()
+        .unwrap()
+        .values_mut()
+        .find(|item| item["name"] == "generated" && item["inner"].get("module").is_some())
+        .unwrap();
+    module["inner"]["module"]["items"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|item| item.as_u64() != Some(id));
+    fs::write(&fixture.export_path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let error = fixture
+        .build(
+            Some(fixture.input()),
+            IndexingPerformancePreference::FasterBuilds,
+        )
+        .err()
+        .unwrap();
+    assert!(
+        format!("{error:#}").contains("not a child of its module"),
+        "{error:#}"
+    );
+    fixture.assert_type(&previous, "query", "expected_query");
+    fixture.assert_type(&previous, "child_entity", "expected_child_entity");
 }

@@ -42,6 +42,9 @@ pub enum PathRoot {
     /// The defining crate of a declarative macro expansion.
     #[memsize(skip)]
     DollarCrate(CrateRef),
+    /// A compiler signature's defining crate, including transitive dependencies hidden from source.
+    #[memsize(skip)]
+    ResolvedCrate(CrateRef),
 }
 
 impl PathRoot {
@@ -60,7 +63,7 @@ impl PathRoot {
     pub fn written_component_count(self) -> usize {
         match self {
             Self::Relative | Self::Absolute => 0,
-            Self::Crate | Self::SelfModule | Self::DollarCrate(_) => 1,
+            Self::Crate | Self::SelfModule | Self::DollarCrate(_) | Self::ResolvedCrate(_) => 1,
             Self::Super(depth) => usize::from(depth),
         }
     }
@@ -271,7 +274,7 @@ impl Path {
 
     fn root_label(&self) -> Option<&'static str> {
         match self.root {
-            PathRoot::Relative | PathRoot::Absolute => None,
+            PathRoot::Relative | PathRoot::Absolute | PathRoot::ResolvedCrate(_) => None,
             PathRoot::Crate => Some("crate"),
             PathRoot::SelfModule => Some("self"),
             PathRoot::Super(_) => Some("super"),

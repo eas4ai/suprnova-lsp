@@ -1,5 +1,7 @@
 //! Translate validated compiler signatures into the existing declaration pipeline.
 
+mod nominal;
+
 use anyhow::{Context as _, bail, ensure};
 use rg_arena::Arena;
 use rg_ir_model::{FileId, Mutability, Span};
@@ -188,11 +190,14 @@ impl TypeApiView<'_> {
             kind: Self::item_tag(self.declaration.inner.item_kind())?,
             items,
             impls,
+            nominal: None,
+            origin: None,
+            modules: Vec::new(),
             references,
         })
     }
 
-    fn references(
+    pub(super) fn references(
         &self,
         item: &rd::Item,
         lowered: ItemTreeId,
@@ -226,7 +231,7 @@ impl TypeApiView<'_> {
         })
     }
 
-    fn visibility(visibility: &rd::Visibility) -> VisibilityLevel {
+    pub(super) fn visibility(visibility: &rd::Visibility) -> VisibilityLevel {
         match visibility {
             rd::Visibility::Public => VisibilityLevel::Public,
             rd::Visibility::Crate => VisibilityLevel::Crate,

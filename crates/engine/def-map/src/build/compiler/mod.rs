@@ -1,14 +1,18 @@
 //! Reconcile supplied declarations with one exact crate's collected source identities.
 
 use anyhow::{Context as _, ensure};
-use rg_ir_model::{CrateRef, DefId, ModuleRef};
+use rg_ir_model::{CrateRef, DefId, DefMapRef, LocalDefRef, ModuleId, ModuleRef};
 use rg_item_tree::{CompilerTypeDeclarations, GenericArg, ItemKind, ItemNode, ItemTreeDb, TypeRef};
 use rg_std::ExpectedUnique;
 
-use super::{collect::CrateState, finalize::FinalizeCrateStates};
+use super::{
+    collect::CrateState,
+    finalize::{FinalizeCrateStates, ScopeMatrix},
+};
 use crate::{
-    GeneratedItemRef, ItemSource, ItemSourceKind, LocalDefKind, LocalImplData, NamespaceSet,
-    ScopeResolver, query::CrateResolutionEnv, source::GeneratedSourceData,
+    GeneratedItemRef, ItemSource, ItemSourceKind, LocalDefData, LocalDefKind, LocalImplData,
+    ModuleData, ModuleOrigin, ModuleScope, Namespace, NamespaceSet, ScopeBinding,
+    ScopeBindingProvenance, ScopeResolver, query::CrateResolutionEnv, source::GeneratedSourceData,
 };
 
 /// Prepared imports allocate no persistent identities until every owner and reference is valid.
@@ -21,6 +25,232 @@ pub(super) struct CompilerImport {
 }
 
 impl CompilerImport {
+    /// Add only supporting declarations beneath new compiler-established child modules. Existing
+    /// source namespaces still reject a missing nominal instead of silently inventing its owner.
+    pub(super) fn install_nominals(
+        states: &mut FinalizeCrateStates,
+        scopes: &mut ScopeMatrix,
+        item_tree: &ItemTreeDb,
+        imports: &mut [(CrateRef, CompilerTypeDeclarations)],
+    ) -> anyhow::Result<bool> {
+        let mut anchors = std::collections::HashMap::new();
+        for (crate_ref, declarations) in imports
+            .iter()
+            .filter(|(_, declarations)| declarations.origin.is_none())
+        {
+            let state = states
+                .crate_state(*crate_ref)
+                .context("compiler anchor crate missing")?;
+            Self::source_owner(state, item_tree, &declarations.path, declarations.kind)?;
+            anchors.insert((*crate_ref, declarations.path.clone()), declarations.kind);
+        }
+        let mut created = std::collections::HashSet::new();
+        let mut changed = false;
+        for (crate_ref, declarations) in imports {
+            let Some(origin) = &declarations.origin else {
+                continue;
+            };
+            let kind = anchors
+                .get(&(*crate_ref, origin.clone()))
+                .context("compiler nominal has no selected source anchor")?;
+            ensure!(
+                declarations.path.len() > origin.len()
+                    && declarations.path.starts_with(&origin[..origin.len() - 1]),
+                "compiler nominal escapes its source anchor"
+            );
+            ensure!(
+                declarations.modules.len() == declarations.path.len() - origin.len(),
+                "compiler nominal module chain is incomplete"
+            );
+            let state = states
+                .crate_state_mut(*crate_ref)
+                .context("compiler nominal crate missing")?;
+            let (mut module, owner, origin_source) =
+                Self::source_owner(state, item_tree, origin, *kind)?;
+            let file_id = owner.file_id;
+            let span = owner.span;
+            for (offset, (path, visibility)) in declarations.modules.iter().enumerate() {
+                let depth = origin.len() + offset;
+                ensure!(
+                    path == &declarations.path[..depth],
+                    "compiler nominal module chain disagrees with its path"
+                );
+                let name = rg_text::Name::new(&path[depth - 1]);
+                let mut children = ExpectedUnique::new();
+                for (child_name, child) in &state
+                    .def_map_builder
+                    .partial()
+                    .module(module)
+                    .context("compiler parent module missing")?
+                    .children
+                {
+                    if child_name == &name {
+                        children.push(*child);
+                    }
+                }
+                match children {
+                    ExpectedUnique::One(child) => module = child,
+                    ExpectedUnique::Ambiguous => {
+                        anyhow::bail!("compiler child module is ambiguous")
+                    }
+                    ExpectedUnique::Empty => {
+                        let visibility =
+                            state.def_map_builder.resolve_visibility(module, visibility);
+                        let child = state.def_map_builder.alloc_module(ModuleData {
+                            name: Some(name.clone()),
+                            name_span: None,
+                            docs: None,
+                            user_facing_attrs: Default::default(),
+                            visibility,
+                            parent: Some(module),
+                            children: Vec::new(),
+                            local_defs: Vec::new(),
+                            impls: Vec::new(),
+                            imports: Vec::new(),
+                            unresolved_imports: Vec::new(),
+                            scope: ModuleScope::default(),
+                            origin: ModuleOrigin::Inline {
+                                declaration_file: file_id,
+                                declaration_span: span,
+                            },
+                        });
+                        state.base_scopes.push(Default::default());
+                        scopes
+                            .push_module_scope(*crate_ref, Default::default())
+                            .context("compiler scope crate missing")?;
+                        state
+                            .def_map_builder
+                            .module_mut(module)
+                            .expect("checked compiler parent")
+                            .children
+                            .push((name.clone(), child));
+                        let binding = ScopeBinding::new(
+                            DefId::Module(ModuleRef::krate(*crate_ref, child)),
+                            visibility,
+                            ScopeBindingProvenance::Direct,
+                        );
+                        state.base_scopes[module.0].insert_binding(
+                            &name,
+                            Namespace::Types,
+                            binding.clone(),
+                        );
+                        scopes
+                            .module_scope_mut(*crate_ref, module)
+                            .expect("checked compiler scope")
+                            .insert_binding(&name, Namespace::Types, binding);
+                        created.insert((*crate_ref, child));
+                        module = child;
+                        changed = true;
+                    }
+                }
+            }
+            let nominal = declarations
+                .nominal
+                .context("compiler supporting nominal missing")?;
+            let mut node = declarations.items[nominal].clone();
+            let name = node.name.clone().context("compiler nominal has no name")?;
+            ensure!(
+                name.as_str()
+                    == declarations
+                        .path
+                        .last()
+                        .context("compiler nominal path empty")?,
+                "compiler nominal name disagrees with its path"
+            );
+            let kind = LocalDefKind::from_item_tag(declarations.kind)
+                .context("compiler nominal kind invalid")?;
+            ensure!(
+                node.kind.tag() == declarations.kind,
+                "compiler nominal payload has the wrong kind"
+            );
+            let mut existing = ExpectedUnique::new();
+            for declaration in state.def_map_builder.partial().local_defs() {
+                if declaration.module == module && declaration.name == name {
+                    existing.push(declaration.kind);
+                }
+            }
+            match existing {
+                ExpectedUnique::One(existing) => {
+                    ensure!(
+                        existing == kind,
+                        "compiler nominal has the wrong source kind"
+                    );
+                    declarations.nominal = None;
+                    continue;
+                }
+                ExpectedUnique::Ambiguous => {
+                    anyhow::bail!("compiler nominal source identity is ambiguous")
+                }
+                ExpectedUnique::Empty => ensure!(
+                    created.contains(&(*crate_ref, module)),
+                    "compiler nominal cannot replace a missing source declaration"
+                ),
+            }
+            // The selected source item is provenance, not editable syntax for these declarations.
+            node.file_id = file_id;
+            let namespaces = kind.scope_namespaces(&node.kind);
+            let visibilities = state.def_map_builder.resolve_local_def_visibilities(
+                module,
+                &node.kind,
+                &node.visibility,
+            );
+            let mut items = rg_arena::Arena::new();
+            let item = items.alloc(node.clone());
+            let source = state
+                .def_map_builder
+                .alloc_generated_source(GeneratedSourceData {
+                    origin_file_id: file_id,
+                    origin_span: span,
+                    origin_source,
+                    top_level: vec![item],
+                    items,
+                });
+            let local_def = state.def_map_builder.alloc_local_def(LocalDefData {
+                module,
+                name: name.clone(),
+                kind,
+                namespaces,
+                visibility: node.visibility.clone(),
+                source: ItemSource::synthetic(file_id, GeneratedItemRef { source, item }),
+                file_id,
+                name_span: None,
+                span: node.span,
+                user_facing_attrs: node.user_facing_attrs,
+            });
+            state
+                .def_map_builder
+                .module_mut(module)
+                .expect("checked compiler module")
+                .local_defs
+                .push(local_def);
+            if let ItemKind::Enum(data) = &node.kind {
+                let visibility = state
+                    .def_map_builder
+                    .resolve_visibility(module, &node.visibility);
+                state
+                    .def_map_builder
+                    .alloc_local_enum_variants(module, local_def, data, visibility, file_id);
+            }
+            for namespace in namespaces.iter() {
+                let binding = ScopeBinding::new(
+                    DefId::Local(LocalDefRef {
+                        origin: DefMapRef::Crate(*crate_ref),
+                        local_def,
+                    }),
+                    *visibilities.get(namespace),
+                    ScopeBindingProvenance::Direct,
+                );
+                state.base_scopes[module.0].insert_binding(&name, namespace, binding.clone());
+                scopes
+                    .module_scope_mut(*crate_ref, module)
+                    .expect("checked compiler scope")
+                    .insert_binding(&name, namespace, binding);
+            }
+            changed = true;
+        }
+        Ok(changed)
+    }
+
     pub(super) fn prepare<E>(
         env: &E,
         state: &CrateState,
@@ -30,54 +260,9 @@ impl CompilerImport {
     where
         E: CrateResolutionEnv<Error = rg_package_store::PackageStoreError>,
     {
-        ensure!(
-            declarations
-                .path
-                .first()
-                .is_some_and(|name| name == &state.crate_name.replace('-', "_")),
-            "rustdoc crate identity does not match {}",
-            state.crate_name
-        );
-        let (name, modules) = declarations.path[1..]
-            .split_last()
-            .context("rustdoc owner path is empty")?;
+        let (module, owner_item, origin_source) =
+            Self::source_owner(state, item_tree, &declarations.path, declarations.kind)?;
         let map = state.def_map_builder.partial();
-        let mut module = state.root_module;
-        for name in modules {
-            let mut children = ExpectedUnique::new();
-            for (child_name, child) in &map
-                .module(module)
-                .context("rustdoc parent module missing")?
-                .children
-            {
-                if child_name.as_str() == name {
-                    children.push(*child);
-                }
-            }
-            let ExpectedUnique::One(child) = children else {
-                anyhow::bail!(
-                    "rustdoc module {} cannot be mapped to source",
-                    declarations.path.join("::")
-                );
-            };
-            module = child;
-        }
-        let kind = LocalDefKind::from_item_tag(declarations.kind)
-            .context("invalid rustdoc nominal kind")?;
-        let mut owners = ExpectedUnique::new();
-        for owner in map.local_defs() {
-            if owner.module == module && owner.kind == kind && owner.name.as_str() == name {
-                owners.push(owner);
-            }
-        }
-        let ExpectedUnique::One(owner) = owners else {
-            anyhow::bail!(
-                "rustdoc owner {} cannot be mapped uniquely to source",
-                declarations.path.join("::")
-            );
-        };
-        let (owner_item, origin_source) = Self::source_item(state, item_tree, owner.source)?;
-        let origin_source = origin_source.context("rustdoc owner has no source provenance")?;
         let context = ModuleRef::krate(state.crate_ref, module);
         let resolver = ScopeResolver::new(env);
         let mut new_impls = Vec::new();
@@ -187,6 +372,9 @@ impl CompilerImport {
         // Referenced declarations must exist in this candidate's graph with the compiler's item
         // kind. An export-local ID or a coincidentally matching value name is insufficient.
         let mut needed = std::collections::HashSet::new();
+        if let Some(nominal) = declarations.nominal {
+            needed.insert(nominal);
+        }
         for impl_id in &new_impls {
             needed.insert(*impl_id);
             if let ItemKind::Impl(header) = &declarations.items[*impl_id].kind {
@@ -266,6 +454,61 @@ impl CompilerImport {
                     .collect(),
             );
         }
+    }
+
+    /// Resolve the exact nominal source anchor before any supporting identity is allocated.
+    fn source_owner<'a>(
+        state: &'a CrateState,
+        item_tree: &'a ItemTreeDb,
+        path: &[String],
+        kind: rg_item_tree::ItemTag,
+    ) -> anyhow::Result<(ModuleId, &'a ItemNode, rg_item_tree::ItemTreeRef)> {
+        ensure!(
+            path.first()
+                .is_some_and(|name| name == &state.crate_name.replace('-', "_")),
+            "rustdoc crate identity does not match {}",
+            state.crate_name
+        );
+        let (name, modules) = path[1..]
+            .split_last()
+            .context("rustdoc owner path is empty")?;
+        let map = state.def_map_builder.partial();
+        let mut module = state.root_module;
+        for name in modules {
+            let mut children = ExpectedUnique::new();
+            for (child_name, child) in &map
+                .module(module)
+                .context("rustdoc parent module missing")?
+                .children
+            {
+                if child_name.as_str() == name {
+                    children.push(*child);
+                }
+            }
+            let ExpectedUnique::One(child) = children else {
+                anyhow::bail!(
+                    "rustdoc module {} cannot be mapped to source",
+                    path.join("::")
+                );
+            };
+            module = child;
+        }
+        let kind = LocalDefKind::from_item_tag(kind).context("invalid rustdoc nominal kind")?;
+        let mut owners = ExpectedUnique::new();
+        for owner in map.local_defs() {
+            if owner.module == module && owner.kind == kind && owner.name.as_str() == name {
+                owners.push(owner);
+            }
+        }
+        let ExpectedUnique::One(owner) = owners else {
+            anyhow::bail!(
+                "rustdoc owner {} cannot be mapped uniquely to source",
+                path.join("::")
+            );
+        };
+        let (owner_item, origin_source) = Self::source_item(state, item_tree, owner.source)?;
+        let origin_source = origin_source.context("rustdoc owner has no source provenance")?;
+        Ok((module, owner_item, origin_source))
     }
 
     fn source_item<'a>(
