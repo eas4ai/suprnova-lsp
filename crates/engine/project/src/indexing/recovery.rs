@@ -53,6 +53,7 @@ fn rebuild_resident_from_source(state: &mut ProjectState) -> anyhow::Result<()> 
         package_batch_size,
         package_residency_policy,
         StartupCacheLoad::Disabled,
+        state.compiler_imports.clone(),
         memory_hooks,
         &mut memory_sampler,
     )

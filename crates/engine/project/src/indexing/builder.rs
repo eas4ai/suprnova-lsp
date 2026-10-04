@@ -127,16 +127,8 @@ impl ProjectBuilder {
     }
 
     pub fn build(self) -> anyhow::Result<Project> {
-        // Validate compiler declarations before constructing a candidate saved project.
-        for input in &self.rustdoc_inputs {
-            let file = std::fs::File::open(&input.export_path)
-                .with_context(|| format!("open rustdoc export {}", input.export_path.display()))?;
-            let export = rg_rustdoc::RustdocExport::read(file)
-                .with_context(|| format!("read rustdoc export {}", input.export_path.display()))?;
-            export
-                .type_api(&input.item_path)
-                .with_context(|| format!("select rustdoc owner {}", input.item_path))?;
-        }
+        let compiler_imports =
+            super::compiler::CompilerImports::read(&self.workspace, &self.rustdoc_inputs)?;
         let mut memory_sampler = self.memory_sampler;
         // Claim an instance before startup probing so all cache reads and writes belong to this
         // project/LSP owner.
@@ -153,6 +145,7 @@ impl ProjectBuilder {
             self.package_batch_size,
             self.package_residency_policy,
             self.startup_cache_load,
+            compiler_imports,
             Arc::clone(&self.memory_hooks),
             &mut memory_sampler,
         )

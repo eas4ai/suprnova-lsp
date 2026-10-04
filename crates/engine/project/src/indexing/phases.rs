@@ -59,6 +59,7 @@ pub(super) fn build(
     cache_plan: &WorkspaceCachePlan,
     cache_store: &PackageCacheStore,
     startup_cache_load: StartupCacheLoad,
+    compiler_imports: &crate::indexing::compiler::CompilerImports,
     split_indexing_mode: SplitIndexingMode,
     memory_hooks: &dyn ProjectMemoryHooks,
     sampler: &mut BuildMemorySampler,
@@ -72,6 +73,7 @@ pub(super) fn build(
             cache_plan,
             cache_store,
             startup_cache_load,
+            compiler_imports,
             split_indexing_mode,
             memory_hooks,
             sampler,
@@ -182,6 +184,7 @@ pub(super) fn build(
         &mut names,
         indexing_preference.macro_expansion_preference(),
         memory_hooks,
+        compiler_imports,
     )
     .context("while attempting to build def map db")?;
     let (def_map, generated_items) = def_map_output.into_parts();

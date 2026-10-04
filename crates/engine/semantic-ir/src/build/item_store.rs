@@ -28,6 +28,10 @@ use crate::item::{
 pub trait ItemStoreSourceReader<'item> {
     fn item(&self, source: ItemSource) -> anyhow::Result<&'item ItemNode>;
 
+    fn imported_associated_items(&self, _source: ItemSource) -> &[ItemSource] {
+        &[]
+    }
+
     fn associated_macro_expansion(&self, _source: ItemSource) -> Option<&[ItemSource]> {
         None
     }
@@ -269,6 +273,15 @@ where
             self.lower_assoc_source(source, owner, &mut assoc_items, &mut active_expansions);
         }
 
+        // Compiler imports add only missing declarations to an existing source impl. Keep written
+        // members and their source provenance, then lower the import under the same semantic owner.
+        for source in self
+            .reader
+            .imported_associated_items(parent_source)
+            .to_vec()
+        {
+            self.lower_assoc_source(source, owner, &mut assoc_items, &mut active_expansions);
+        }
         assoc_items
     }
 

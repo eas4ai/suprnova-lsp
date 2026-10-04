@@ -12,6 +12,7 @@
 //! alternates source discovery with session advances until the fixed point can be frozen.
 
 mod collect;
+mod compiler;
 mod finalize;
 mod implicit_roots;
 mod imports;

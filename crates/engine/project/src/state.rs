@@ -53,6 +53,7 @@ impl ProjectGenerationId {
 #[derive(Debug, Clone, MemorySize)]
 pub(crate) struct ProjectState {
     pub(crate) generation_id: ProjectGenerationId,
+    pub(crate) compiler_imports: crate::indexing::compiler::CompilerImports,
     pub(crate) workspace: WorkspaceMetadata,
     #[memsize(skip)]
     pub(crate) workspace_lowering_config: WorkspaceLoweringConfig,

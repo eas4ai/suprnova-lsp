@@ -169,11 +169,14 @@ pub struct GeneratedItemStore {
     /// For `impl User { methods!(); }`, the call source maps to its generated functions, types,
     /// consts, and any retained nested macro calls.
     associated_macro_expansions: HashMap<ItemSource, Vec<ItemSource>>,
+    imported_associated_items: HashMap<ItemSource, Vec<ItemSource>>,
 }
 
 impl GeneratedItemStore {
     pub(crate) fn is_empty(&self) -> bool {
-        self.sources.is_empty() && self.associated_macro_expansions.is_empty()
+        self.sources.is_empty()
+            && self.associated_macro_expansions.is_empty()
+            && self.imported_associated_items.is_empty()
     }
 
     pub(crate) fn alloc_source(&mut self, source: GeneratedSourceData) -> GeneratedSourceId {
@@ -191,6 +194,24 @@ impl GeneratedItemStore {
     ) {
         self.associated_macro_expansions
             .insert(call, generated_items);
+    }
+
+    pub(crate) fn extend_imported_associated_items(
+        &mut self,
+        owner: ItemSource,
+        items: Vec<ItemSource>,
+    ) {
+        self.imported_associated_items
+            .entry(owner)
+            .or_default()
+            .extend(items);
+    }
+
+    pub fn imported_associated_items(&self, owner: ItemSource) -> &[ItemSource] {
+        self.imported_associated_items
+            .get(&owner)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 
     pub fn item(&self, item: GeneratedItemRef) -> Option<&ItemNode> {

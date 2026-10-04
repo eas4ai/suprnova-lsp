@@ -10,6 +10,7 @@ pub mod bench_support;
 mod builder;
 mod cache_probe;
 mod checkpoint_memory;
+pub(crate) mod compiler;
 mod config;
 mod initial;
 mod macro_source_files;

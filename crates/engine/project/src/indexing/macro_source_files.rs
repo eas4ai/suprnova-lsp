@@ -65,6 +65,7 @@ pub(super) fn build_packages(
     names: &mut PackageNameInterners,
     performance_preference: MacroExpansionPerformancePreference,
     memory_hooks: &dyn ProjectMemoryHooks,
+    compiler_imports: &super::compiler::CompilerImports,
 ) -> anyhow::Result<DefMapBuildOutput> {
     // Different requests can resolve to the same package-local file, even in different waves. The
     // session coalesces request identity; this separate map coalesces captured path identity.
@@ -83,6 +84,8 @@ pub(super) fn build_packages(
             performance_preference,
         )
         .context("while attempting to start resumable DefMap construction")?;
+
+    compiler_imports.queue(&mut session, packages.as_slice())?;
 
     loop {
         // Advance owns all semantic work. It either freezes the finished DefMap or hands this

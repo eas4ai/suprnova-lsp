@@ -59,6 +59,7 @@ pub fn build_def_map(
         names,
         IndexingPerformancePreference::default().macro_expansion_preference(),
         &NoopProjectMemoryHooks,
+        &super::compiler::CompilerImports::default(),
     )
     .context("while attempting to build benchmark DefMap through project coordination")
 }

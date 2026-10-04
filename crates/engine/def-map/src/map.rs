@@ -127,6 +127,15 @@ impl DefMapBuilder {
         self.def_map.data.foreign_blocks.insert(local_def, block);
     }
 
+    pub(crate) fn extend_imported_associated_items(
+        &mut self,
+        owner: ItemSource,
+        items: Vec<ItemSource>,
+    ) {
+        self.generated_items
+            .extend_imported_associated_items(owner, items);
+    }
+
     pub fn alloc_local_impl(&mut self, local_impl: LocalImplData) -> LocalImplId {
         self.def_map.data.local_impls.alloc(local_impl)
     }
@@ -310,6 +319,10 @@ pub struct PartialDefMap<'a> {
 }
 
 impl<'a> PartialDefMap<'a> {
+    pub(crate) fn local_impls(&self) -> &'a [LocalImplData] {
+        self.def_map.local_impls()
+    }
+
     pub(crate) fn local_defs(&self) -> &'a [LocalDefData] {
         self.def_map.local_defs()
     }

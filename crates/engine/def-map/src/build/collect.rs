@@ -81,6 +81,7 @@ pub(super) struct CrateState {
     /// Builtin includes waiting for the project boundary to capture their source files.
     pub(super) pending_generated_includes: Vec<PendingGeneratedInclude>,
     pub(super) macro_expansion_limit: Option<PendingMacroExpansionLimitReport>,
+    pub(super) compiler_declarations: Vec<rg_item_tree::CompilerTypeDeclarations>,
 }
 
 impl CrateState {
@@ -367,6 +368,7 @@ impl<'db> CrateScopeCollector<'db> {
             pending_generated_modules: Vec::new(),
             pending_generated_includes: Vec::new(),
             macro_expansion_limit: None,
+            compiler_declarations: Vec::new(),
         })
     }
 
