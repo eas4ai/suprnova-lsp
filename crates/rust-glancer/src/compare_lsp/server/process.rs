@@ -1,0 +1,695 @@
+//! Lifecycle for one spawned LSP server process.
+//!
+//! `RunningServer` owns the OS process, its transport, and the captured stderr snippet used in
+//! error messages. The paired-server module decides which two servers run; this file keeps the
+//! single-process protocol sequence readable.
+
+use std::{
+    fs,
+    path::Path,
+    process::{ExitStatus, Stdio},
+    time::{Duration, Instant},
+};
+
+use anyhow::Context as _;
+use gen_lsp_types::{
+    ClientCapabilities, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
+    DocumentSymbolClientCapabilities, InitializeParams, InitializedParams,
+    InlayHintClientCapabilities, LanguageKind, Notification as _, RenameClientCapabilities,
+    Request as _, TextDocumentClientCapabilities, TextDocumentContentChangeWholeDocument,
+    TextDocumentIdentifier, TextDocumentItem, VersionedTextDocumentIdentifier,
+    WindowClientCapabilities, WorkDoneProgressParams, WorkspaceClientCapabilities,
+    WorkspaceEditClientCapabilities, WorkspaceFolder, WorkspaceFoldersInitializeParams,
+};
+use serde::Serialize;
+use serde_json::{Value, json};
+use tokio::process::{Child, Command};
+
+use super::{ServerReadiness, command::ServerKind, stderr::StderrCapture, uri::file_uri};
+use crate::compare_lsp::lsp_client::{RequestOutcome, ServerNotification, TowerLspTransport};
+
+const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(120);
+const READY_TIMEOUT: Duration = Duration::from_secs(120);
+const SETTLE_TIMEOUT: Duration = Duration::from_secs(120);
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+const PROCESS_EXIT_TIMEOUT: Duration = Duration::from_secs(120);
+const RUST_GLANCER_READY_METHOD: &str = "rust-glancer/activeWorkspaceChanged";
+const SERVER_STATUS_METHOD: &str = "experimental/serverStatus";
+
+/// One live LSP server with the client-side transport needed to drive it.
+#[derive(Debug)]
+pub(super) struct RunningServer {
+    kind: ServerKind,
+    command_label: String,
+    child: Child,
+    client: TowerLspTransport,
+    stderr: StderrCapture,
+    exited: bool,
+    rust_glancer_indexing_status: Option<IndexingStatus>,
+}
+
+impl RunningServer {
+    /// Spawn the executable for one side of the comparison and attach stdio transport.
+    pub(super) async fn spawn(kind: ServerKind) -> anyhow::Result<Self> {
+        let command_spec = kind.command_spec()?;
+        let command_label = command_spec.label();
+        let mut command = Command::new(&command_spec.executable);
+        command
+            .args(&command_spec.arguments)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut child = command.spawn().with_context(|| {
+            format!(
+                "Spawning {} LSP server with `{command_label}` failed",
+                kind.display_name()
+            )
+        })?;
+        let stdin = child.stdin.take().with_context(|| {
+            format!(
+                "Opening stdin for {} LSP server failed",
+                kind.display_name()
+            )
+        })?;
+        let stdout = child.stdout.take().with_context(|| {
+            format!(
+                "Opening stdout for {} LSP server failed",
+                kind.display_name()
+            )
+        })?;
+        let stderr = child.stderr.take().with_context(|| {
+            format!(
+                "Opening stderr for {} LSP server failed",
+                kind.display_name()
+            )
+        })?;
+        let client = TowerLspTransport::spawn(stdout, stdin);
+        let stderr = StderrCapture::spawn(stderr);
+
+        Ok(Self {
+            kind,
+            command_label,
+            child,
+            client,
+            stderr,
+            exited: false,
+            rust_glancer_indexing_status: None,
+        })
+    }
+
+    pub(super) async fn initialize_fixture(
+        &mut self,
+        fixture_root: &Path,
+        source_paths: &[&'static str],
+    ) -> anyhow::Result<ServerReadiness> {
+        tracing::info!(
+            server = self.kind.display_name(),
+            root = %fixture_root.display(),
+            opened_files = source_paths.len(),
+            "initializing compare-lsp server"
+        );
+        let initialize_params = self.initialize_params(fixture_root)?;
+        let started_at = Instant::now();
+        let initialize = self
+            .client
+            .request(
+                gen_lsp_types::InitializeRequest::METHOD.as_str(),
+                initialize_params,
+                INITIALIZE_TIMEOUT,
+            )
+            .await;
+        self.expect_success(
+            gen_lsp_types::InitializeRequest::METHOD.as_str(),
+            initialize,
+        )?;
+        let initialize_latency = started_at.elapsed();
+        tracing::info!(
+            server = self.kind.display_name(),
+            elapsed_ms = initialize_latency.as_millis(),
+            "compare-lsp initialize completed"
+        );
+
+        // After `initialized`, both servers should see the same in-memory document set. This keeps
+        // the later query requests about server behavior rather than file-watcher timing.
+        self.client
+            .notify(
+                gen_lsp_types::InitializedNotification::METHOD.as_str(),
+                Self::lsp_params(InitializedParams {}, "initialized notification")?,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "Sending initialized notification to {} failed",
+                    self.kind.display_name()
+                )
+            })?;
+
+        for source_path in source_paths {
+            self.open_source_file(fixture_root, source_path).await?;
+        }
+        tracing::info!(
+            server = self.kind.display_name(),
+            "waiting for compare-lsp server readiness"
+        );
+        let ready_started_at = Instant::now();
+        self.wait_until_ready().await?;
+        let ready_latency = ready_started_at.elapsed();
+        tracing::info!(
+            server = self.kind.display_name(),
+            elapsed_ms = ready_latency.as_millis(),
+            "compare-lsp server readiness observed"
+        );
+
+        Ok(ServerReadiness::new(
+            self.kind.display_name(),
+            initialize_latency,
+            ready_latency,
+        ))
+    }
+
+    /// Wait for any background work that should not be charged to measured query latency.
+    ///
+    /// Rust-glancer reports structural readiness before deferred body indexes finish. That is the
+    /// behavior users care about for editor responsiveness, so `ready_ms` stops there. The
+    /// comparison harness then waits for healthy, quiescent server status before firing measured
+    /// body-sensitive queries, and reports that extra wait as `settle_ms`. Unlike a work-finished
+    /// event, this state also covers startup that needs no background indexing. A status received
+    /// before structural readiness is retained below.
+    pub(super) async fn settle_after_readiness(&mut self) -> anyhow::Result<Duration> {
+        match self.kind {
+            ServerKind::RustAnalyzer => {
+                tracing::info!(
+                    server = self.kind.display_name(),
+                    "compare-lsp post-ready settle skipped"
+                );
+                Ok(Duration::ZERO)
+            }
+            ServerKind::RustGlancer => {
+                match &self.rust_glancer_indexing_status {
+                    Some(IndexingStatus::Idle) => {
+                        tracing::info!(
+                            server = self.kind.display_name(),
+                            "compare-lsp post-ready settle already observed"
+                        );
+                        return Ok(Duration::ZERO);
+                    }
+                    Some(IndexingStatus::Failed(message)) => {
+                        anyhow::bail!(
+                            "{} indexing failed before post-ready settle: {message}",
+                            self.kind.display_name(),
+                        );
+                    }
+                    Some(IndexingStatus::Working) | None => {}
+                }
+
+                tracing::info!(
+                    server = self.kind.display_name(),
+                    "waiting for compare-lsp post-ready settle"
+                );
+                let started_at = Instant::now();
+                self.wait_until_indexing_settled()
+                    .await
+                    .context("Waiting for rust-glancer quiescence after readiness failed")?;
+                let settle_latency = started_at.elapsed();
+                tracing::info!(
+                    server = self.kind.display_name(),
+                    elapsed_ms = settle_latency.as_millis(),
+                    "compare-lsp post-ready settle observed"
+                );
+                Ok(settle_latency)
+            }
+        }
+    }
+
+    /// Run the LSP shutdown handshake, then wait until the OS process exits.
+    pub(super) async fn shutdown(mut self) -> anyhow::Result<()> {
+        let shutdown = self
+            .client
+            .request(
+                gen_lsp_types::ShutdownRequest::METHOD.as_str(),
+                Value::Null,
+                SHUTDOWN_TIMEOUT,
+            )
+            .await;
+        self.expect_success(gen_lsp_types::ShutdownRequest::METHOD.as_str(), shutdown)?;
+        self.client
+            .notify(
+                gen_lsp_types::ExitNotification::METHOD.as_str(),
+                Self::lsp_params((), "exit notification")?,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "Sending exit notification to {} failed",
+                    self.kind.display_name()
+                )
+            })?;
+        let status = self.wait_for_exit(PROCESS_EXIT_TIMEOUT).await?;
+        if !status.success() {
+            anyhow::bail!(
+                "{} LSP server exited with status {status} after shutdown{}",
+                self.kind.display_name(),
+                self.stderr_note(),
+            );
+        }
+
+        Ok(())
+    }
+
+    pub(super) async fn request(
+        &mut self,
+        method: &'static str,
+        params: Value,
+        timeout: Duration,
+    ) -> RequestOutcome {
+        self.client.request(method, params, timeout).await
+    }
+
+    pub(super) fn command_label(&self) -> &str {
+        &self.command_label
+    }
+
+    /// Build the client capabilities and workspace identity shared by both compared servers.
+    fn initialize_params(&self, fixture_root: &Path) -> anyhow::Result<Value> {
+        let root_uri = file_uri(fixture_root)?;
+        let root_name = fixture_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("fixture");
+
+        let capabilities = ClientCapabilities {
+            window: Some(WindowClientCapabilities {
+                work_done_progress: Some(true),
+                ..WindowClientCapabilities::default()
+            }),
+            workspace: Some(WorkspaceClientCapabilities {
+                configuration: Some(true),
+                workspace_folders: Some(true),
+                workspace_edit: Some(WorkspaceEditClientCapabilities {
+                    document_changes: Some(true),
+                    ..WorkspaceEditClientCapabilities::default()
+                }),
+                ..WorkspaceClientCapabilities::default()
+            }),
+            text_document: Some(TextDocumentClientCapabilities {
+                document_symbol: Some(DocumentSymbolClientCapabilities {
+                    hierarchical_document_symbol_support: Some(true),
+                    ..DocumentSymbolClientCapabilities::default()
+                }),
+                inlay_hint: Some(InlayHintClientCapabilities::default()),
+                rename: Some(RenameClientCapabilities {
+                    prepare_support: Some(true),
+                    ..RenameClientCapabilities::default()
+                }),
+                ..TextDocumentClientCapabilities::default()
+            }),
+            experimental: Some(json!({
+                "serverStatusNotification": true,
+            })),
+            ..ClientCapabilities::default()
+        };
+
+        #[allow(deprecated)]
+        let params = InitializeParams {
+            process_id: Some(
+                i32::try_from(std::process::id())
+                    .context("process ID exceeds LSP integer range")?,
+            ),
+            root_path: None,
+            root_uri: Some(root_uri.clone()),
+            initialization_options: Some(self.kind.initialization_options()),
+            capabilities,
+            trace: None,
+            workspace_folders_initialize_params: WorkspaceFoldersInitializeParams {
+                workspace_folders: Some(
+                    vec![WorkspaceFolder {
+                        uri: root_uri,
+                        name: root_name.to_string(),
+                    }]
+                    .into(),
+                ),
+            },
+            client_info: None,
+            locale: None,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+
+        Self::lsp_params(params, "initialize params")
+    }
+
+    async fn open_source_file(
+        &mut self,
+        fixture_root: &Path,
+        source_path: &str,
+    ) -> anyhow::Result<()> {
+        let path = fixture_root.join(source_path);
+        let text = fs::read_to_string(&path).with_context(|| {
+            format!(
+                "Reading fixture source file {} for didOpen failed",
+                path.display()
+            )
+        })?;
+        let uri = file_uri(&path)?;
+
+        // The fixture file is opened by value, not discovered through the server's file watching.
+        // That makes the query vector deterministic for custom fixture paths as well as defaults.
+        self.client
+            .notify(
+                gen_lsp_types::DidOpenTextDocumentNotification::METHOD.as_str(),
+                Self::lsp_params(
+                    DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem::new(uri, LanguageKind::Rust, 1, text),
+                    },
+                    "didOpen params",
+                )?,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "Sending didOpen for {} to {} failed",
+                    path.display(),
+                    self.kind.display_name()
+                )
+            })
+    }
+
+    /// Replace one open document with the stable unsaved text used by the dirty fixture.
+    pub(super) async fn change_source_file(
+        &mut self,
+        fixture_root: &Path,
+        source_path: &str,
+        text: String,
+    ) -> anyhow::Result<()> {
+        let path = fixture_root.join(source_path);
+        let uri = file_uri(&path)?;
+        self.client
+            .notify(
+                gen_lsp_types::DidChangeTextDocumentNotification::METHOD.as_str(),
+                Self::lsp_params(
+                    DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            text_document_identifier: TextDocumentIdentifier { uri },
+                            version: 2,
+                        },
+                        content_changes: vec![
+                            TextDocumentContentChangeWholeDocument { text }.into(),
+                        ],
+                    },
+                    "didChange params",
+                )?,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "Sending dirty didChange for {} to {} failed",
+                    path.display(),
+                    self.kind.display_name(),
+                )
+            })
+    }
+
+    async fn wait_until_ready(&mut self) -> anyhow::Result<()> {
+        tokio::time::timeout(READY_TIMEOUT, async {
+            loop {
+                let notification = self.client.next_notification().await.with_context(|| {
+                    format!(
+                        "Waiting for {} readiness notification failed{}",
+                        self.kind.display_name(),
+                        self.stderr_note(),
+                    )
+                })?;
+                if let Some(IndexingStatus::Failed(message)) =
+                    self.observe_indexing_status(&notification)
+                {
+                    anyhow::bail!(
+                        "{} reported indexing failure while becoming ready: {message}",
+                        self.kind.display_name(),
+                    );
+                }
+                match self.readiness_notification(&notification) {
+                    ReadinessNotification::Ready => return Ok(()),
+                    ReadinessNotification::Failed(message) => anyhow::bail!(
+                        "{} reported readiness failure: {message}",
+                        self.kind.display_name(),
+                    ),
+                    ReadinessNotification::Ignore => {}
+                }
+            }
+        })
+        .await
+        .with_context(|| {
+            format!(
+                "Waiting for {} readiness notification timed out{}",
+                self.kind.display_name(),
+                self.stderr_note(),
+            )
+        })?
+    }
+
+    async fn wait_until_indexing_settled(&mut self) -> anyhow::Result<()> {
+        tokio::time::timeout(SETTLE_TIMEOUT, async {
+            loop {
+                let notification = self.client.next_notification().await.with_context(|| {
+                    format!(
+                        "Waiting for {} indexing status failed{}",
+                        self.kind.display_name(),
+                        self.stderr_note(),
+                    )
+                })?;
+                match self.observe_indexing_status(&notification) {
+                    Some(IndexingStatus::Idle) => return Ok(()),
+                    Some(IndexingStatus::Failed(message)) => anyhow::bail!(
+                        "{} reported indexing failure: {message}",
+                        self.kind.display_name(),
+                    ),
+                    Some(IndexingStatus::Working) | None => {}
+                }
+                if let ReadinessNotification::Failed(message) =
+                    self.readiness_notification(&notification)
+                {
+                    anyhow::bail!(
+                        "{} reported readiness failure while indexing was settling: {message}",
+                        self.kind.display_name(),
+                    );
+                }
+            }
+        })
+        .await
+        .with_context(|| {
+            format!(
+                "Waiting for {} quiescent indexing status timed out{}",
+                self.kind.display_name(),
+                self.stderr_note(),
+            )
+        })?
+    }
+
+    fn observe_indexing_status(
+        &mut self,
+        notification: &ServerNotification,
+    ) -> Option<IndexingStatus> {
+        if !matches!(self.kind, ServerKind::RustGlancer) {
+            return None;
+        }
+        let status = Self::rust_glancer_indexing_status(notification)?;
+        self.rust_glancer_indexing_status = Some(status.clone());
+        Some(status)
+    }
+
+    fn readiness_notification(&self, notification: &ServerNotification) -> ReadinessNotification {
+        match self.kind {
+            ServerKind::RustGlancer => Self::rust_glancer_readiness(notification),
+            ServerKind::RustAnalyzer => Self::rust_analyzer_readiness(notification),
+        }
+    }
+
+    /// Add protocol context and the captured stderr tail to request failures.
+    fn expect_success(
+        &self,
+        method: &'static str,
+        outcome: RequestOutcome,
+    ) -> anyhow::Result<Value> {
+        match outcome {
+            RequestOutcome::Success(value) => Ok(value),
+            RequestOutcome::Error(error) => {
+                let data = error
+                    .data
+                    .map(|data| format!(" data={data}"))
+                    .unwrap_or_default();
+                anyhow::bail!(
+                    "{} LSP request `{method}` failed with code {}: {}{}{}",
+                    self.kind.display_name(),
+                    error.code,
+                    error.message,
+                    data,
+                    self.stderr_note(),
+                )
+            }
+            RequestOutcome::Timeout => {
+                anyhow::bail!(
+                    "{} LSP request `{method}` timed out{}",
+                    self.kind.display_name(),
+                    self.stderr_note(),
+                )
+            }
+            RequestOutcome::TransportFailure { message } => {
+                anyhow::bail!(
+                    "{} LSP request `{method}` failed at the transport layer: {message}{}",
+                    self.kind.display_name(),
+                    self.stderr_note(),
+                )
+            }
+        }
+    }
+
+    /// Prefer graceful exit after shutdown, but reap the child if it does not leave on its own.
+    async fn wait_for_exit(&mut self, timeout: Duration) -> anyhow::Result<ExitStatus> {
+        match tokio::time::timeout(timeout, self.child.wait()).await {
+            Ok(status) => {
+                let status = status.with_context(|| {
+                    format!(
+                        "Waiting for {} LSP process failed",
+                        self.kind.display_name()
+                    )
+                })?;
+                self.exited = true;
+                self.stderr.join().await;
+                Ok(status)
+            }
+            Err(_elapsed) => {
+                let _ = self.child.start_kill();
+                let status = self.child.wait().await.with_context(|| {
+                    format!(
+                        "Reaping timed out {} LSP process failed",
+                        self.kind.display_name()
+                    )
+                })?;
+                self.exited = true;
+                self.stderr.join().await;
+                anyhow::bail!(
+                    "{} LSP server did not exit within {:?} after shutdown; killed with status {status}{}",
+                    self.kind.display_name(),
+                    timeout,
+                    self.stderr_note(),
+                );
+            }
+        }
+    }
+
+    fn stderr_note(&self) -> String {
+        let snippet = self.stderr.snippet();
+        if snippet.is_empty() {
+            String::new()
+        } else {
+            format!("\nstderr from `{}`:\n{snippet}", self.command_label)
+        }
+    }
+
+    fn lsp_params(params: impl Serialize, description: &'static str) -> anyhow::Result<Value> {
+        serde_json::to_value(params).with_context(|| format!("Serializing {description} failed"))
+    }
+
+    fn rust_glancer_indexing_status(notification: &ServerNotification) -> Option<IndexingStatus> {
+        if notification.method() != SERVER_STATUS_METHOD {
+            return None;
+        }
+
+        let params = notification.params()?;
+        // A failed background build leaves the server queryable, but reports warning health. It must
+        // not count as successfully settled indexing just because the failed worker is now idle.
+        Some(match params.get("health").and_then(Value::as_str) {
+            Some("ok") => match params.get("quiescent").and_then(Value::as_bool) {
+                Some(true) => IndexingStatus::Idle,
+                Some(false) => IndexingStatus::Working,
+                None => IndexingStatus::Failed("server status omitted quiescence".to_string()),
+            },
+            _ => IndexingStatus::Failed(
+                params
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("server did not report healthy indexing")
+                    .to_string(),
+            ),
+        })
+    }
+
+    fn rust_glancer_readiness(notification: &ServerNotification) -> ReadinessNotification {
+        if notification.method() != RUST_GLANCER_READY_METHOD {
+            return ReadinessNotification::Ignore;
+        }
+
+        let Some(params) = notification.params() else {
+            return ReadinessNotification::Ignore;
+        };
+        match params.get("state").and_then(Value::as_str) {
+            Some("ready") => ReadinessNotification::Ready,
+            Some("failed") => ReadinessNotification::Failed(
+                params
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("workspace failed")
+                    .to_string(),
+            ),
+            Some(_) | None => ReadinessNotification::Ignore,
+        }
+    }
+
+    fn rust_analyzer_readiness(notification: &ServerNotification) -> ReadinessNotification {
+        if notification.method() != SERVER_STATUS_METHOD {
+            return ReadinessNotification::Ignore;
+        }
+
+        let Some(params) = notification.params() else {
+            return ReadinessNotification::Ignore;
+        };
+        if params.get("health").and_then(Value::as_str) == Some("error") {
+            return ReadinessNotification::Failed(
+                params
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("server reported error status")
+                    .to_string(),
+            );
+        }
+        if params.get("quiescent").and_then(Value::as_bool) == Some(true) {
+            return ReadinessNotification::Ready;
+        }
+
+        ReadinessNotification::Ignore
+    }
+}
+
+impl Drop for RunningServer {
+    fn drop(&mut self) {
+        if self.exited {
+            return;
+        }
+
+        // Drop cannot await process exit, so the best fallback is to avoid leaving the child
+        // running if an earlier error short-circuits the normal shutdown path.
+        match self.child.try_wait() {
+            Ok(Some(_status)) => {
+                self.exited = true;
+            }
+            Ok(None) => {
+                let _ = self.child.start_kill();
+                self.exited = true;
+            }
+            Err(_error) => {}
+        }
+    }
+}
+
+enum ReadinessNotification {
+    Ready,
+    Failed(String),
+    Ignore,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum IndexingStatus {
+    Working,
+    Idle,
+    Failed(String),
+}
