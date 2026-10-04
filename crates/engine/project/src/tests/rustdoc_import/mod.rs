@@ -374,6 +374,15 @@ fn mac_005_previous_import_survives_failed_candidate() {
 #[test]
 fn mac_006_query_without_compiler_servers() {
     let fixture = Fixture::new(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let marker = fixture.source.path("rustdoc");
+        fs::write(&marker, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&marker, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(std::process::Command::new(&marker).status().unwrap().success());
+    }
+
     let project = fixture
         .build(
             Some(fixture.input()),
