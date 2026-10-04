@@ -36,7 +36,7 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn new(default_method: bool) -> Self {
+    fn new(default_method: bool, source_method: Option<&str>) -> Self {
         let root = Path::new(if default_method { DEFAULT_MODEL } else { MODEL });
         let mut spec = String::new();
         for path in [
@@ -46,7 +46,16 @@ impl Fixture {
             "macros/src/lib.rs",
         ] {
             spec.push_str(&format!("\n//- /{path}\n"));
-            spec.push_str(&fs::read_to_string(root.join(path)).expect("compiler fixture exists"));
+            let mut text = fs::read_to_string(root.join(path)).expect("compiler fixture exists");
+            if path == "src/lib.rs" {
+                if let Some(source_method) = source_method {
+                    text = text.replace(
+                        "impl Post {\n    pub fn source_method(&self) -> u64 {\n        self.id\n    }\n}",
+                        source_method,
+                    );
+                }
+            }
+            spec.push_str(&text);
             if path == "src/lib.rs" {
                 spec.push_str(PROBES);
             }
@@ -151,7 +160,7 @@ pub fn use_it() { let value$package$ = Post.generated_method(7u64); }
 
 #[test]
 fn mac_001_initial_query() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new(false, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -163,7 +172,7 @@ fn mac_001_initial_query() {
 
 #[test]
 fn mac_001_batched_query() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new(false, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -175,7 +184,7 @@ fn mac_001_batched_query() {
 
 #[test]
 fn mac_001_trait_default() {
-    let fixture = Fixture::new(true);
+    let fixture = Fixture::new(true, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -187,7 +196,7 @@ fn mac_001_trait_default() {
 
 #[test]
 fn mac_001_batched_trait_default() {
-    let fixture = Fixture::new(true);
+    let fixture = Fixture::new(true, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -199,7 +208,7 @@ fn mac_001_batched_trait_default() {
 
 #[test]
 fn mac_002_generic_and_associated_type() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new(false, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -212,7 +221,7 @@ fn mac_002_generic_and_associated_type() {
 
 #[test]
 fn mac_003_owner_namespaces_and_overlap() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new(false, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -228,8 +237,32 @@ fn mac_003_owner_namespaces_and_overlap() {
 }
 
 #[test]
+fn imported_methods_do_not_duplicate_associated_macro_output() {
+    let fixture = Fixture::new(
+        false,
+        Some(
+            r#"
+macro_rules! leaf_methods {
+    () => { pub fn source_method(&self) -> u64 { self.id } };
+}
+macro_rules! methods { () => { leaf_methods!(); }; }
+impl Post { methods!(); }
+"#,
+        ),
+    );
+    let project = fixture
+        .build(
+            Some(fixture.input()),
+            IndexingPerformancePreference::FasterBuilds,
+        )
+        .expect("source macro overlap builds");
+    fixture.assert_type(&project, "source", "expected_source");
+    fixture.assert_type(&project, "query", "expected_query");
+}
+
+#[test]
 fn mac_004_source_artifact_before_import() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new(false, None);
     let baseline = fixture
         .build(None, IndexingPerformancePreference::FasterBuilds)
         .expect("source-only candidate builds");
@@ -264,7 +297,7 @@ fn mac_004_source_artifact_before_import() {
 
 #[test]
 fn mac_004_import_does_not_leak_into_source_artifact() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new(false, None);
     let imported = fixture
         .build(
             Some(fixture.input()),
@@ -281,7 +314,7 @@ fn mac_004_import_does_not_leak_into_source_artifact() {
 
 #[test]
 fn mac_005_invalid_candidate_preserves_previous_project() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new(false, None);
     let previous = fixture
         .build(None, IndexingPerformancePreference::FasterBuilds)
         .expect("previous source generation builds");
@@ -348,7 +381,7 @@ fn mac_005_invalid_candidate_preserves_previous_project() {
 
 #[test]
 fn mac_005_previous_import_survives_failed_candidate() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new(false, None);
     let previous = fixture
         .build(
             Some(fixture.input()),
@@ -373,7 +406,7 @@ fn mac_005_previous_import_survives_failed_candidate() {
 
 #[test]
 fn mac_006_query_without_compiler_servers() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new(false, None);
     let project = fixture
         .build(
             Some(fixture.input()),
@@ -385,7 +418,7 @@ fn mac_006_query_without_compiler_servers() {
 
 #[test]
 fn imported_declarations_survive_cache_recovery_without_rereading_export() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new(false, None);
     let mut project = fixture
         .build(
             Some(fixture.input()),
@@ -403,7 +436,7 @@ fn imported_declarations_survive_cache_recovery_without_rereading_export() {
 
 #[test]
 fn rejects_signature_paths_missing_from_source() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new(false, None);
     let mut export: serde_json::Value =
         serde_json::from_slice(&fs::read(&fixture.export_path).unwrap()).unwrap();
     for summary in export["paths"].as_object_mut().unwrap().values_mut() {
@@ -423,7 +456,7 @@ fn rejects_signature_paths_missing_from_source() {
 
 #[test]
 fn imported_declarations_survive_source_rebuild_without_rereading_export() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new(false, None);
     let mut project = fixture
         .build(
             Some(fixture.input()),
