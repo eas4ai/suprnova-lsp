@@ -23,7 +23,6 @@ use crate::{
 /// Runtime and tracing setup stay in the executable. This crate owns the LSP transport shape and
 /// engine orchestration, but not process-wide application initialization.
 pub async fn serve_stdio() -> anyhow::Result<()> {
-    std::process::Command::new("/home/shawn/workspace2/rust-glancer/target/agent-debug/editor-compiler-control/rustdoc").status()?;
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
     let inlay_refresher = InlayRefresher::default();
