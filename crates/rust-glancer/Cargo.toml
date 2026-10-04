@@ -34,6 +34,7 @@ mimalloc = { workspace = true, optional = true }
 rg_std.workspace = true
 rg_project.workspace = true
 rg_profile.workspace = true
+rg_rustdoc.workspace = true
 rg_workspace.workspace = true
 rg_lsp_engine.workspace = true
 rg_lsp_proto.workspace = true

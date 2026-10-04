@@ -1,6 +1,6 @@
 //! Configures and constructs a fresh saved project.
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Context as _;
 use rg_body_ir::BodyIrBuildPolicy;
@@ -15,6 +15,15 @@ use crate::{
     storage::{cache::PackageCacheInstance, residency::ResidencyApplication},
 };
 
+/// One compiler export selected for an exact Cargo package, target, and nominal type.
+pub struct RustdocInput {
+    pub manifest_path: PathBuf,
+    pub target_name: String,
+    pub target_kind: rg_workspace::TargetKind,
+    pub export_path: PathBuf,
+    pub item_path: String,
+}
+
 /// Fluent construction API for a fresh analysis project.
 pub struct ProjectBuilder {
     workspace: WorkspaceMetadata,
@@ -28,6 +37,7 @@ pub struct ProjectBuilder {
     startup_cache_load: StartupCacheLoad,
     memory_sampler: BuildMemorySampler,
     memory_hooks: Arc<dyn ProjectMemoryHooks>,
+    rustdoc_inputs: Vec<RustdocInput>,
 }
 
 impl ProjectBuilder {
@@ -44,11 +54,17 @@ impl ProjectBuilder {
             startup_cache_load: StartupCacheLoad::default(),
             memory_sampler: BuildMemorySampler::disabled(),
             memory_hooks: Arc::new(NoopProjectMemoryHooks),
+            rustdoc_inputs: Vec::new(),
         }
     }
 
     pub fn body_ir_policy(mut self, policy: BodyIrBuildPolicy) -> Self {
         self.body_ir_policy = policy;
+        self
+    }
+
+    pub fn rustdoc_inputs(mut self, inputs: Vec<RustdocInput>) -> Self {
+        self.rustdoc_inputs = inputs;
         self
     }
 
@@ -111,6 +127,16 @@ impl ProjectBuilder {
     }
 
     pub fn build(self) -> anyhow::Result<Project> {
+        // Validate compiler declarations before constructing a candidate saved project.
+        for input in &self.rustdoc_inputs {
+            let file = std::fs::File::open(&input.export_path)
+                .with_context(|| format!("open rustdoc export {}", input.export_path.display()))?;
+            let export = rg_rustdoc::RustdocExport::read(file)
+                .with_context(|| format!("read rustdoc export {}", input.export_path.display()))?;
+            export
+                .type_api(&input.item_path)
+                .with_context(|| format!("select rustdoc owner {}", input.item_path))?;
+        }
         let mut memory_sampler = self.memory_sampler;
         // Claim an instance before startup probing so all cache reads and writes belong to this
         // project/LSP owner.

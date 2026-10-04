@@ -9,6 +9,7 @@ mod compare_lsp;
 mod logging;
 mod memory;
 mod report;
+mod rustdoc;
 mod start_engine;
 mod start_server;
 
@@ -30,6 +31,12 @@ struct Cli {
 /// Top-level subcommands supported by the CLI.
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Inspect a nominal type's compiler-produced API from rustdoc JSON.
+    InspectRustdoc {
+        path: PathBuf,
+        #[clap(long, value_name = "CRATE::MODULE::TYPE")]
+        item: String,
+    },
     /// Analyze the crate or workspace package located at `path`.
     #[command(after_help = analyze::profile_groups_help())]
     Analyze {
@@ -94,6 +101,7 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::InspectRustdoc { path, item } => rustdoc::inspect(path, &item),
         Command::Analyze {
             path,
             profile,

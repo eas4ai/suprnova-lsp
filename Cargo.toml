@@ -16,6 +16,7 @@ members = [
   "crates/engine/item-tree",
   "crates/engine/ir-model",
   "crates/engine/macro-runtime",
+  "crates/engine/rustdoc",
   "crates/engine/ir-view",
   "crates/engine/def-map",
   "crates/engine/semantic-ir",
@@ -104,6 +105,7 @@ ra-ap-rustc_lexer = "=0.166.0"
 wincode = { version = "0.5.3", features = ["derive"] }
 rayon = "1.12.0"
 rustc-hash = "2.1.2"
+rustdoc-types = "=0.61.0"
 rustc_abi = { package = "ra-ap-rustc_abi", version = "=0.166.0", default-features = false }
 rustc_index = { package = "ra-ap-rustc_index", version = "=0.166.0", default-features = false }
 rustc_next_trait_solver = { package = "ra-ap-rustc_next_trait_solver", version = "=0.166.0", default-features = false }
@@ -149,6 +151,7 @@ rg_parse = { path = "crates/engine/parse" }
 rg_item_tree = { path = "crates/engine/item-tree" }
 rg_ir_model = { path = "crates/engine/ir-model" }
 rg_macro_runtime = { path = "crates/engine/macro-runtime" }
+rg_rustdoc = { path = "crates/engine/rustdoc" }
 rg_ir_view = { path = "crates/engine/ir-view" }
 rg_def_map = { path = "crates/engine/def-map" }
 rg_semantic_ir = { path = "crates/engine/semantic-ir" }

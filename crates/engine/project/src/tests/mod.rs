@@ -3,6 +3,7 @@ pub(crate) mod cancellation;
 mod cargo_build_outputs;
 mod current_source;
 mod generated_modules;
+mod rustdoc_import;
 mod split_indexing;
 mod utils;
 

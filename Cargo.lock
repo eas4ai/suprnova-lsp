@@ -2077,6 +2077,7 @@ dependencies = [
  "rg_package_store",
  "rg_parse",
  "rg_profile",
+ "rg_rustdoc",
  "rg_semantic_ir",
  "rg_source",
  "rg_std",
@@ -2084,9 +2085,21 @@ dependencies = [
  "rg_ty",
  "rg_workspace",
  "serde",
+ "serde_json",
  "test_fixture",
  "tracing",
  "wincode",
+]
+
+[[package]]
+name = "rg_rustdoc"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "rg_std",
+ "rustdoc-types",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2242,6 +2255,7 @@ dependencies = [
  "rg_lsp_server",
  "rg_profile",
  "rg_project",
+ "rg_rustdoc",
  "rg_std",
  "rg_workspace",
  "serde",
@@ -2297,6 +2311,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
  "semver",
+]
+
+[[package]]
+name = "rustdoc-types"
+version = "0.61.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa251f75d3b9d5d5d8317ce526dfa4a040c15938d82fd3a5443d103f30a66932"
+dependencies = [
+ "serde",
+ "serde_derive",
 ]
 
 [[package]]
