@@ -4,6 +4,8 @@ Prefix: API
 
 These blocks describe the implemented import/inspection slice. Their falsifiers name observable counterexamples; the proposed mechanism is the existing importer and executable test suite. They remain Observed and outside the first commitment's frozen requirement set.
 
+The [Devlist follow-up](../recon.md#devlist-user-follow-up-2026-10-04) exposes a limitation in API-004's owner check: a valid impl may be attached because the selected type appears in its trait arguments. The SUP contract requires accepting that attachment while preserving the impl's actual self type; this observation is not an Agreed requirement to reject such valid exports.
+
 [API-001] RustdocExport::read rejects an export whose format differs from the pinned rustdoc-types format before decoding its declaration shapes.
 Falsifier: An unsupported-format export is accepted, or an incompatible item-shape error hides the format mismatch.
 Mechanism: rustdoc-boundary
