@@ -168,7 +168,10 @@ impl CompilerImport {
             );
             let mut existing = ExpectedUnique::new();
             for declaration in state.def_map_builder.partial().local_defs() {
-                if declaration.module == module && declaration.name == name {
+                if declaration.module == module
+                    && declaration.name == name
+                    && declaration.namespaces.contains(Namespace::Types)
+                {
                     existing.push(declaration.kind);
                 }
             }
