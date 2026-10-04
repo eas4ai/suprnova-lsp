@@ -325,7 +325,15 @@ async def main():
             reports[mode] = report
             print(f"{mode}: {json.dumps(report['facts'], sort_keys=True)}", flush=True)
         user.validate_capture(producer, metadata, sysroot, compiler, cfg, export_path.read_bytes())
-        results = assess(tests, editor, reports, traces, user.compact_layout_ok(), setting_description_ok())
+        retained = user.compact_layout_ok()
+        # The editor adds another saved-state boundary. Check its typed fields as well as
+        # the engine's retained roots; paths/configuration must not retain compiler graphs.
+        for path in (ROOT / "crates/lsp").rglob("*.rs"):
+            if "tests" in path.parts:
+                continue
+            if re.search(r"^\s*(?:pub(?:\([^)]*\))?\s+)?\w+\s*:\s*[^\n]*(?:RustdocExport|rustdoc_types|rd::Crate)", path.read_text(), re.M):
+                retained = False
+        results = assess(tests, editor, reports, traces, retained, setting_description_ok())
         runner.write_json(directory / "observations.json", {"tests": tests, "editor": editor, "reports": reports, "traces": traces, "results": results})
         for req in sorted(results):
             print(f"sudus: {req}: {'pass' if results[req] else 'fail'}", flush=True)

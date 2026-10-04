@@ -113,8 +113,9 @@ Notes:
   - Use --workspace-root for an ad-hoc Cargo project under target/agent-debug/fixtures.
   - Set deferredBarrier to before-queries or after-queries when deferred indexing is relevant.
     - A plan may contain bounded inline "text" instead of an overlay file.
-    - "idleMemory": true records five Linux RSS samples for the LSP server and engines
-      after queries and a deferred indexing barrier; peaks belong to agent-debug metrics.
+    - "idleMemory": true samples server/engine RSS until the deferred barrier and records
+      five idle samples after queries. Use before-queries to exclude queries from the peak.
+      These RSS sums may count shared pages more than once; runner metrics are separate.
   - --line/--col are 1-based for human ergonomics.
 """.strip()
 
