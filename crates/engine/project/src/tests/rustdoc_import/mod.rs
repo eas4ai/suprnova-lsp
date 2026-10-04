@@ -455,6 +455,33 @@ fn rejects_signature_paths_missing_from_source() {
 }
 
 #[test]
+fn rejects_empty_signature_path_without_changing_previous_generation() {
+    let fixture = Fixture::new(false, None);
+    let previous = fixture
+        .build(
+            Some(fixture.input()),
+            IndexingPerformancePreference::FasterBuilds,
+        )
+        .unwrap();
+    let mut export: serde_json::Value =
+        serde_json::from_slice(&fs::read(&fixture.export_path).unwrap()).unwrap();
+    for summary in export["paths"].as_object_mut().unwrap().values_mut() {
+        if summary["path"] == serde_json::json!(["rustdoc_macro_support", "Builder"]) {
+            summary["path"] = serde_json::json!([]);
+        }
+    }
+    fs::write(&fixture.export_path, serde_json::to_vec(&export).unwrap()).unwrap();
+    let error = fixture
+        .build(
+            Some(fixture.input()),
+            IndexingPerformancePreference::FasterBuilds,
+        )
+        .expect_err("empty signature paths reject a candidate without panicking");
+    assert!(format!("{error:#}").contains("empty rustdoc signature path"));
+    fixture.assert_type(&previous, "query", "expected_query");
+}
+
+#[test]
 fn imported_declarations_survive_source_rebuild_without_rereading_export() {
     let fixture = Fixture::new(false, None);
     let mut project = fixture

@@ -148,7 +148,7 @@ impl TypeApiView<'_> {
                     .context("rustdoc signature path missing during lowering")?;
                 Ok((
                     lowered,
-                    self.canonical_path(summary),
+                    self.canonical_path(summary)?,
                     Self::item_tag(summary.kind)?,
                 ))
             })
@@ -175,16 +175,20 @@ impl TypeApiView<'_> {
         }
     }
 
-    fn canonical_path(&self, summary: &rd::ItemSummary) -> TypePath {
+    fn canonical_path(&self, summary: &rd::ItemSummary) -> anyhow::Result<TypePath> {
         let names = &summary.path;
         let local = summary.crate_id == self.declaration.crate_id;
         let mut path = Self::named_path(names.iter().map(String::as_str));
+        let root = path
+            .segments
+            .first_mut()
+            .context("empty rustdoc signature path")?;
         if local {
-            path.segments[0].name = Name::new("crate");
+            root.name = Name::new("crate");
         } else {
             path.absolute = true;
         }
-        path
+        Ok(path)
     }
 
     fn named_path<'a>(names: impl IntoIterator<Item = &'a str>) -> TypePath {
@@ -208,7 +212,7 @@ impl TypeApiView<'_> {
             .type_paths
             .get(&path.id.0)
             .context("rustdoc signature path missing during lowering")?;
-        let mut result = self.canonical_path(summary);
+        let mut result = self.canonical_path(summary)?;
         result
             .segments
             .last_mut()
