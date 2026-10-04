@@ -95,10 +95,10 @@ class ObservationIntegrity(unittest.TestCase):
         export = b"compiler export"
         producer = {"schema": 1, "frameworkRevision": gate.REVISION, "compiler": "compiler", "targetCfg": "cfg",
                     "packages": json.loads(json.dumps(gate.package_identity(metadata))), "sources": sources,
-                    "exportSha256": gate.digest(export), "rustdocArgs": gate.rustdoc_args()}
+                    "exportSha256": gate.digest(export), "rustdocArgs": gate.rustdoc_args(), "configuration": gate.producer_configuration()}
         with patch.object(gate, "source_inventory", return_value=sources):
             gate.validate_capture(producer, metadata, "/sysroot", "compiler", "cfg", export)
-            for key in ["frameworkRevision", "compiler", "targetCfg", "packages", "sources", "exportSha256", "rustdocArgs"]:
+            for key in ["frameworkRevision", "compiler", "targetCfg", "packages", "sources", "exportSha256", "rustdocArgs", "configuration"]:
                 changed = dict(producer, **{key: "mismatch"})
                 with self.subTest(key=key), self.assertRaises(ValueError):
                     gate.validate_capture(changed, metadata, "/sysroot", "compiler", "cfg", export)
