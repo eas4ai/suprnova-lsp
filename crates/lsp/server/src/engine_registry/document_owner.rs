@@ -1,0 +1,273 @@
+//! Resolves ownership once for the lifetime of an open editor document.
+//!
+//! Cargo workspace discovery is allowed when a document opens. The result is recorded in the
+//! registry and reused until close, so ordinary semantic requests never need their own routing
+//! heuristic or filesystem lookup. Files outside configured workspace folders fall back to the
+//! active ready engine when one exists.
+
+use std::{
+    path::{Path, PathBuf},
+    process::{Command, Output},
+};
+
+use anyhow::Context as _;
+use rg_std::NormalizedPathBuf;
+
+use super::{
+    routing::EngineId,
+    state::{EngineRegistryInner, ReservedEngineRoute},
+};
+
+/// A document-scoped routing decision before the engine process has necessarily become ready.
+#[derive(Debug)]
+pub(super) struct DocumentOwner {
+    route: ReservedEngineRoute,
+    source: DocumentOwnerSource,
+}
+
+impl DocumentOwner {
+    /// Resolves the engine that owns an opened document and remembers that route until close.
+    pub(super) fn new(
+        inner: &mut EngineRegistryInner,
+        path: &NormalizedPathBuf,
+    ) -> anyhow::Result<Option<Self>> {
+        // Do we know this file? If yes, return it.
+        if let Some(id) = inner.open_file_owner(path) {
+            return Ok(Some(Self::cached(id)));
+        }
+
+        // Outside configured folders, files are usually dependencies or sysroot sources reached
+        // from an active project, so we assume that it's a part of the same engine.
+        //
+        // TODO: This is not a correct approach, this is a heuristic. It can fail in some cases
+        // where it shouldn't. However, it's good enough for 95% normal user flows and there
+        // is a ton of other things that are missing in this project, so implementing a perfect
+        // solution is not a priority for now. Additionally, implementing a _proper_ solution
+        // is going to be a tradeoff anyway, e.g.:
+        // - If we just open a random Rust file, do we start a new LSP for it? When do we shut
+        //   it down, if so?
+        // - If we open a local project that is dependency of another project in the same
+        //   workspace, do we start LSP for it? What if we first open a dependency, and then
+        //   "parent"?
+        // Answering these questions is postponed until it _really_ becomes an issue and
+        // there will be real users affected by this heuristic.
+        let Some(discovery_workspace) = inner.routing.discovery_workspace_for(path).cloned() else {
+            return Ok(Self::fallback(inner, path));
+        };
+
+        // Ask Cargo for the workspace root from the containing VS Code workspace folder rather
+        // than from the document directory. Nested rust-toolchain overrides can be older than the
+        // workspace itself and break lightweight routing before analysis gets involved.
+        if let Some(workspace_root) = Self::locate_workspace_root(path, &discovery_workspace)?
+            && let Some(owner) = Self::for_cargo_workspace(inner, path, workspace_root)
+        {
+            return Ok(Some(owner));
+        }
+
+        // Cargo could not associate the opened file with a routable workspace, so keep it
+        // contextual and use the last active engine if one is available.
+        Ok(Self::fallback(inner, path))
+    }
+
+    /// Reuses the engine remembered when the document was opened.
+    fn cached(id: EngineId) -> Self {
+        Self::existing(id, DocumentOwnerSource::OpenFileCache)
+    }
+
+    /// Resolves Cargo's workspace root and reserves the workspace engine.
+    fn for_cargo_workspace(
+        inner: &mut EngineRegistryInner,
+        path: &NormalizedPathBuf,
+        workspace_root: NormalizedPathBuf,
+    ) -> Option<Self> {
+        let route = inner.reserve_workspace_root(workspace_root)?;
+        inner.set_open_file(path.clone(), route.id());
+
+        Some(Self {
+            route,
+            source: DocumentOwnerSource::CargoWorkspace,
+        })
+    }
+
+    /// Falls back to the last active ready engine for files outside known workspaces.
+    fn fallback(inner: &mut EngineRegistryInner, path: &NormalizedPathBuf) -> Option<Self> {
+        let id = inner.active_ready_id()?;
+        inner.set_open_file(path.clone(), id);
+
+        Some(Self::existing(id, DocumentOwnerSource::ActiveFallback))
+    }
+
+    pub(super) fn id(&self) -> EngineId {
+        self.route.id()
+    }
+
+    pub(super) fn source(&self) -> DocumentOwnerSource {
+        self.source
+    }
+
+    pub(super) fn into_route(self) -> ReservedEngineRoute {
+        self.route
+    }
+
+    fn existing(id: EngineId, source: DocumentOwnerSource) -> Self {
+        Self {
+            route: ReservedEngineRoute::Existing(id),
+            source,
+        }
+    }
+
+    fn locate_workspace_root(
+        path: &NormalizedPathBuf,
+        discovery_workspace: &NormalizedPathBuf,
+    ) -> anyhow::Result<Option<NormalizedPathBuf>> {
+        let Some(document_dir) = path
+            .as_path()
+            .is_dir()
+            .then(|| path.to_path_buf())
+            .or_else(|| path.parent().map(NormalizedPathBuf::into_path_buf))
+        else {
+            return Ok(None);
+        };
+        let Some(manifest_path) =
+            Self::nearest_manifest(&document_dir, discovery_workspace.as_path())
+        else {
+            return Ok(None);
+        };
+
+        let output = Self::run_locate_project(discovery_workspace.as_path(), &manifest_path)
+            .with_context(|| {
+                format!(
+                    "while attempting to locate Cargo workspace from {}",
+                    manifest_path.display()
+                )
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            if stderr.contains("could not find `Cargo.toml`") {
+                return Ok(None);
+            }
+
+            tracing::warn!(
+                cwd = %discovery_workspace.display(),
+                manifest_path = %manifest_path.display(),
+                status = %output.status,
+                stderr = %stderr,
+                "cargo locate-project failed; falling back to active engine"
+            );
+            return Ok(None);
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let workspace_manifest = stdout
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .map(PathBuf::from)
+            .with_context(|| {
+                format!(
+                    "while attempting to read Cargo workspace manifest from locate-project output in {}",
+                    manifest_path.display()
+                )
+            })?;
+        let workspace_manifest = if workspace_manifest.is_absolute() {
+            NormalizedPathBuf::from_absolute(&workspace_manifest).with_context(|| {
+                format!(
+                    "while attempting to normalize Cargo workspace manifest {}",
+                    workspace_manifest.display()
+                )
+            })?
+        } else {
+            NormalizedPathBuf::resolve_from(discovery_workspace, &workspace_manifest).with_context(
+                || {
+                    format!(
+                        "while attempting to resolve Cargo workspace manifest {}",
+                        workspace_manifest.display()
+                    )
+                },
+            )?
+        };
+
+        let workspace_root = workspace_manifest
+            .parent()
+            .expect("Cargo workspace manifest path should have a parent directory");
+        Ok(Some(workspace_root))
+    }
+
+    fn run_locate_project(cwd: &Path, manifest_path: &Path) -> std::io::Result<Output> {
+        Command::new("cargo")
+            .current_dir(cwd)
+            .arg("locate-project")
+            .arg("--workspace")
+            .arg("--message-format")
+            .arg("plain")
+            .arg("--manifest-path")
+            .arg(manifest_path)
+            .output()
+    }
+
+    fn nearest_manifest(document_dir: &Path, discovery_workspace: &Path) -> Option<PathBuf> {
+        let mut current = document_dir;
+        while current.starts_with(discovery_workspace) {
+            let manifest_path = current.join("Cargo.toml");
+            if manifest_path.is_file() {
+                return Some(manifest_path);
+            }
+
+            current = current.parent()?;
+        }
+
+        None
+    }
+}
+
+/// Explains which rule selected a document owner, mostly for tracing and tests.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum DocumentOwnerSource {
+    OpenFileCache,
+    CargoWorkspace,
+    ActiveFallback,
+}
+
+#[cfg(test)]
+mod tests {
+    use rg_std::NormalizedPathBuf;
+    use test_fixture::fixture_crate;
+
+    use super::DocumentOwner;
+
+    #[test]
+    fn nearest_manifest_walks_up_from_document_directory() {
+        let fixture = fixture_crate(
+            r#"
+//- /workspace/Cargo.toml
+[workspace]
+members = ["crates/app"]
+resolver = "3"
+
+//- /workspace/crates/app/Cargo.toml
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2024"
+
+//- /workspace/crates/app/src/nested/module.rs
+pub struct App;
+"#,
+        );
+        let normalized = |path| {
+            NormalizedPathBuf::from_absolute(fixture.path(path))
+                .expect("fixture path should normalize")
+        };
+        let document_dir = normalized("workspace/crates/app/src/nested");
+        let workspace = normalized("workspace");
+
+        let manifest = DocumentOwner::nearest_manifest(document_dir.as_path(), workspace.as_path())
+            .expect("nested source directory should resolve its package manifest");
+
+        assert_eq!(
+            manifest,
+            normalized("workspace/crates/app/Cargo.toml").into_path_buf()
+        );
+    }
+}
