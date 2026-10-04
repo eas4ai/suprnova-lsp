@@ -29,6 +29,9 @@ export default defineConfig({
   ],
   mocha: {
     timeout: 60_000,
+    ...(process.env.RUST_GLANCER_EXTENSION_TEST_GREP === undefined
+      ? {}
+      : { grep: process.env.RUST_GLANCER_EXTENSION_TEST_GREP, reporter: "json" }),
   },
 });
 

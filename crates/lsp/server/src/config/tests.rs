@@ -5,6 +5,57 @@ use super::ServerConfig;
 use crate::tests::normalized_test_path;
 
 #[test]
+fn edt_001_routes_inputs_only_to_the_selected_root() {
+    let root = normalized_test_path("repo/project-a");
+    let options = json!({"rustdoc": {"inputs": [{
+        "workspaceRoot": root.as_path(), "manifestPath": "Cargo.toml",
+        "targetName": "app", "targetKind": "lib", "exportPath": "api.json",
+        "itemPath": "app::Post"
+    }]}});
+    let config =
+        ServerConfig::from_initialization_options(Some(&options), &[normalized_test_path("repo")])
+            .unwrap();
+    let selected = serde_json::to_string(&config.engine_config_for_root(&root)).unwrap();
+    let other = serde_json::to_string(
+        &config.engine_config_for_root(&normalized_test_path("repo/project-b")),
+    )
+    .unwrap();
+    assert!(
+        selected.contains("app::Post"),
+        "selected input was dropped: {selected}"
+    );
+    assert!(
+        !other.contains("app::Post"),
+        "input leaked to another engine: {other}"
+    );
+    assert!(
+        selected.contains("repo/project-a/api.json")
+            || selected.contains("repo\\\\project-a\\\\api.json"),
+        "relative export path was not bound to the selected root: {selected}"
+    );
+}
+
+#[test]
+fn edt_001_rejects_ambiguous_relative_roots() {
+    let options = json!({"rustdoc": {"inputs": [{
+        "workspaceRoot": ".", "manifestPath": "Cargo.toml", "targetName": "app",
+        "targetKind": "lib", "exportPath": "api.json", "itemPath": "app::Post"
+    }]}});
+    for roots in [
+        vec![],
+        vec![
+            normalized_test_path("repo/a"),
+            normalized_test_path("repo/b"),
+        ],
+    ] {
+        assert!(
+            ServerConfig::from_initialization_options(Some(&options), &roots).is_err(),
+            "ambiguous relative root was accepted"
+        );
+    }
+}
+
+#[test]
 fn exact_override_merges_with_base_cargo_config() {
     let options = json!({
         "cache": {

@@ -9,7 +9,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const extensionRoot = resolve(scriptDir, "..");
 const workspaceRoot = resolve(extensionRoot, "../..");
 const executableName = process.platform === "win32" ? "rust-glancer.exe" : "rust-glancer";
-const server = join(workspaceRoot, "target", "release", executableName);
+const server = process.env.RUST_GLANCER_TEST_SERVER ?? join(workspaceRoot, "target", "release", executableName);
 const testCli = join(extensionRoot, "node_modules", "@vscode", "test-cli", "out", "bin.mjs");
 
 if (!existsSync(server)) {

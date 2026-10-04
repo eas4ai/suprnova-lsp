@@ -33,6 +33,9 @@ use crate::{
     MemoryControl, Service, ServiceNotificationsSink, service::ServiceNotificationPublisher,
 };
 
+#[path = "rustdoc_import/mod.rs"]
+mod rustdoc_import;
+
 pub(super) struct LspEngineFixture {
     fixture: CrateFixture,
     markers: FixtureMarkers,
