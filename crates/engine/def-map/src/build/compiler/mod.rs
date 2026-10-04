@@ -129,23 +129,37 @@ impl CompilerImport {
                     "rustdoc trait impl matches multiple source impls"
                 );
             }
-            let mut missing = Vec::new();
-            for child in &imported.items {
-                let incoming = &declarations.items[*child];
-                let mut exists = false;
-                for (source, written) in &matching {
-                    for child in &written.items {
-                        let (node, _) =
-                            Self::source_item(state, item_tree, source.with_item(*child))?;
-                        if node.name == incoming.name && node.kind.tag() == incoming.kind.tag() {
-                            exists = true;
-                        }
+            // `methods!()` may already supply a member the compiler also reports. Walk retained
+            // replacements, including nested calls, before deciding that a declaration is missing.
+            let mut existing_items = Vec::new();
+            for (source, written) in &matching {
+                let mut pending = written
+                    .items
+                    .iter()
+                    .map(|child| source.with_item(*child))
+                    .collect::<Vec<_>>();
+                let mut visited = std::collections::HashSet::new();
+                while let Some(source) = pending.pop() {
+                    if !visited.insert(source) {
+                        continue;
+                    }
+                    let (node, _) = Self::source_item(state, item_tree, source)?;
+                    if matches!(node.kind, ItemKind::MacroCall(_)) {
+                        pending.extend(map.associated_macro_expansion(source).unwrap_or_default());
+                    } else {
+                        existing_items.push((node.name.clone(), node.kind.tag()));
                     }
                 }
-                if !exists {
-                    missing.push(*child);
-                }
             }
+            let missing = imported
+                .items
+                .iter()
+                .copied()
+                .filter(|child| {
+                    let incoming = &declarations.items[*child];
+                    !existing_items.contains(&(incoming.name.clone(), incoming.kind.tag()))
+                })
+                .collect::<Vec<_>>();
             if let Some((source, _)) = matching.first() {
                 if !missing.is_empty() {
                     extensions.push((*source, missing));

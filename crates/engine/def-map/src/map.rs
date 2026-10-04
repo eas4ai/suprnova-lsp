@@ -319,6 +319,13 @@ pub struct PartialDefMap<'a> {
 }
 
 impl<'a> PartialDefMap<'a> {
+    pub(crate) fn associated_macro_expansion(
+        &self,
+        source: ItemSource,
+    ) -> Option<&'a [ItemSource]> {
+        self.generated_items.associated_macro_expansion(source)
+    }
+
     pub(crate) fn local_impls(&self) -> &'a [LocalImplData] {
         self.def_map.local_impls()
     }
