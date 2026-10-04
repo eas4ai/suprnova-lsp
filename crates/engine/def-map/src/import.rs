@@ -204,7 +204,8 @@ impl ImportPath {
         let mut prefixes = Vec::with_capacity(self.root_spans.len() + self.segment_spans.len());
         match self.semantic.root() {
             PathRoot::Relative | PathRoot::Absolute => {}
-            PathRoot::Crate | PathRoot::SelfModule | PathRoot::DollarCrate(_) => {
+            PathRoot::Crate | PathRoot::SelfModule | PathRoot::DollarCrate(_)
+            | PathRoot::ResolvedCrate(_) => {
                 prefixes.push((
                     Path::new(self.semantic.root(), Vec::new()),
                     self.root_spans[0],

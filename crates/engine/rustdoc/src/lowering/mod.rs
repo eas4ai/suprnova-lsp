@@ -252,6 +252,7 @@ impl TypeApiView<'_> {
             root.name = Name::new("crate");
         } else {
             path.absolute = true;
+            path.resolved_crate = self.crate_roots.and_then(|roots| roots.get(&names[0])).copied();
         }
         Ok(path)
     }
@@ -260,6 +261,7 @@ impl TypeApiView<'_> {
         TypePath {
             source_span: Span { start: 0, end: 0 },
             absolute: false,
+            resolved_crate: None,
             anchor: None,
             segments: names
                 .into_iter()

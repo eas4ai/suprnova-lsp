@@ -860,6 +860,7 @@ mod tests {
         let path = TypePath {
             source_span: span(),
             absolute: false,
+            resolved_crate: None,
             anchor: Some(TypePathAnchor::Type(Box::new(TypeRef::Path(type_path(
                 false,
                 &["T"],
@@ -879,6 +880,7 @@ mod tests {
         TypePath {
             source_span: span(),
             absolute,
+            resolved_crate: None,
             anchor: None,
             segments: names
                 .iter()

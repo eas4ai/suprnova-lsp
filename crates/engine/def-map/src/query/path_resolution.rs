@@ -814,7 +814,8 @@ impl<E: CrateResolutionEnv + ?Sized> ScopeResolver<'_, E> {
                 PathRoot::Crate
                 | PathRoot::SelfModule
                 | PathRoot::Super(_)
-                | PathRoot::DollarCrate(_) => {
+                | PathRoot::DollarCrate(_)
+                | PathRoot::ResolvedCrate(_) => {
                     self.import_modules(importing_module, &Path::new(path.root(), Vec::new()))?
                 }
             }
@@ -930,7 +931,8 @@ impl<E: CrateResolutionEnv + ?Sized> ScopeResolver<'_, E> {
                 PathRoot::Crate
                 | PathRoot::SelfModule
                 | PathRoot::Super(_)
-                | PathRoot::DollarCrate(_) => {
+                | PathRoot::DollarCrate(_)
+                | PathRoot::ResolvedCrate(_) => {
                     let defs = self.root_modules(importing_module, root)?;
                     if segments.is_empty() && !terminal_filter.contains(Namespace::Types) {
                         return Ok(Self::unresolved_at(0));
@@ -975,7 +977,7 @@ impl<E: CrateResolutionEnv + ?Sized> ScopeResolver<'_, E> {
         root: PathRoot,
     ) -> Result<Vec<DefId>, E::Error> {
         match root {
-            PathRoot::DollarCrate(crate_ref) => Ok(self
+            PathRoot::DollarCrate(crate_ref) | PathRoot::ResolvedCrate(crate_ref) => Ok(self
                 .env
                 .root_module(crate_ref)?
                 .map(DefId::Module)

@@ -28,6 +28,8 @@ pub struct TypeApiView<'a> {
     pub type_paths: BTreeMap<u32, &'a rustdoc_types::ItemSummary>,
     pub excluded_blanket_impls: usize,
     pub limitations: [&'static str; 3],
+    #[serde(skip)]
+    crate_roots: Option<&'a BTreeMap<String, rg_ir_model::CrateRef>>,
 }
 
 #[derive(Serialize)]
@@ -44,11 +46,13 @@ impl RustdocExport {
     /// Lower the selected API and the concrete declarations it references in child modules.
     /// Source owners in the selected module still have to exist; this closure supplies generated
     /// storage types such as `user::Entity`, not replacements for missing source declarations.
-    pub fn lower_type(
-        &self,
+    pub fn lower_type<'a>(
+        &'a self,
         path: &str,
+        crate_roots: &'a BTreeMap<String, rg_ir_model::CrateRef>,
     ) -> anyhow::Result<Vec<rg_item_tree::CompilerTypeDeclarations>> {
-        let primary = self.type_api(path)?;
+        let mut primary = self.type_api(path)?;
+        primary.crate_roots = Some(crate_roots);
         let origin = primary.path.to_vec();
         let mut seen = HashSet::from([primary.declaration.id]);
         let mut pending = vec![primary];
@@ -64,7 +68,9 @@ impl RustdocExport {
                     && summary.path.len() > origin.len()
                     && seen.insert(rustdoc_types::Id(*id))
                 {
-                    pending.push(self.type_api(&summary.path.join("::"))?);
+                    let mut related = self.type_api(&summary.path.join("::"))?;
+                    related.crate_roots = Some(crate_roots);
+                    pending.push(related);
                 }
             }
             let mut lowered = view.lower()?;
@@ -372,6 +378,7 @@ impl RustdocExport {
             impls,
             type_paths,
             excluded_blanket_impls,
+            crate_roots: None,
             limitations: [
                 "Hidden-item coverage is unknown: rustdoc JSON has no coverage flag. Export with --document-hidden-items.",
                 "Blanket and synthetic impls are excluded; this report does not establish complete trait applicability.",

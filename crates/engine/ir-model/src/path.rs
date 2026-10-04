@@ -312,6 +312,10 @@ impl fmt::Display for Path {
                 f.write_str("$crate")?;
                 true
             }
+            PathRoot::ResolvedCrate(crate_ref) => {
+                write!(f, "<crate:{crate_ref:?}>")?;
+                true
+            }
         };
 
         for segment in &self.segments {
