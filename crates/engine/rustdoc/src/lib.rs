@@ -99,7 +99,7 @@ impl RustdocExport {
                 // A path summary alone does not establish a generated module. Validate the actual
                 // module declarations and child membership, walking from the type to the anchor.
                 let mut child = view.declaration.id;
-                for depth in (origin.len()..view.path.len()).rev() {
+                for depth in (origin.len() - 1..view.path.len()).rev() {
                     let mut modules = ExpectedUnique::new();
                     for (id, summary) in &self.data.paths {
                         if summary.crate_id == view.declaration.crate_id
@@ -128,10 +128,13 @@ impl RustdocExport {
                         module.items.contains(&child),
                         "rustdoc supporting declaration is not a child of its module"
                     );
-                    lowered.modules.push((
-                        view.path[..depth].to_vec(),
-                        TypeApiView::visibility(&item.visibility),
-                    ));
+                    // The anchor's parent establishes the outer edge but already exists in source.
+                    if depth >= origin.len() {
+                        lowered.modules.push((
+                            view.path[..depth].to_vec(),
+                            TypeApiView::visibility(&item.visibility),
+                        ));
+                    }
                     child = id;
                 }
                 lowered.modules.reverse();

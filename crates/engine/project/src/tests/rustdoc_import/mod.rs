@@ -626,50 +626,59 @@ fn compiler_child_nominals_cannot_replace_missing_items_in_a_source_module() {
 
 #[test]
 fn compiler_child_nominals_require_the_actual_parent_module_membership() {
-    let fixture = Fixture::new(CHILD_MODEL, None);
-    let previous = fixture
-        .build(
-            Some(fixture.input()),
-            IndexingPerformancePreference::FasterBuilds,
-        )
-        .unwrap();
-    let mut value: serde_json::Value =
-        serde_json::from_slice(&fs::read(&fixture.export_path).unwrap()).unwrap();
-    let id = value["paths"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .find(|(_, summary)| {
-            summary["kind"] == "struct"
-                && summary["path"]
-                    == serde_json::json!(["rustdoc_macro_support", "generated", "Entity"])
-        })
-        .unwrap()
-        .0
-        .parse::<u64>()
-        .unwrap();
-    let module = value["index"]
-        .as_object_mut()
-        .unwrap()
-        .values_mut()
-        .find(|item| item["name"] == "generated" && item["inner"].get("module").is_some())
-        .unwrap();
-    module["inner"]["module"]["items"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|item| item.as_u64() != Some(id));
-    fs::write(&fixture.export_path, serde_json::to_vec(&value).unwrap()).unwrap();
-    let error = fixture
-        .build(
-            Some(fixture.input()),
-            IndexingPerformancePreference::FasterBuilds,
-        )
-        .err()
-        .unwrap();
-    assert!(
-        format!("{error:#}").contains("not a child of its module"),
-        "{error:#}"
-    );
-    fixture.assert_type(&previous, "query", "expected_query");
-    fixture.assert_type(&previous, "child_entity", "expected_child_entity");
+    for (kind, path, parent) in [
+        (
+            "struct",
+            serde_json::json!(["rustdoc_macro_support", "generated", "Entity"]),
+            "generated",
+        ),
+        (
+            "module",
+            serde_json::json!(["rustdoc_macro_support", "generated"]),
+            "rustdoc_macro_support",
+        ),
+    ] {
+        let fixture = Fixture::new(CHILD_MODEL, None);
+        let previous = fixture
+            .build(
+                Some(fixture.input()),
+                IndexingPerformancePreference::FasterBuilds,
+            )
+            .unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&fixture.export_path).unwrap()).unwrap();
+        let id = value["paths"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .find(|(_, summary)| summary["kind"] == kind && summary["path"] == path)
+            .unwrap()
+            .0
+            .parse::<u64>()
+            .unwrap();
+        let module = value["index"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+            .find(|item| item["name"] == parent && item["inner"].get("module").is_some())
+            .unwrap();
+        module["inner"]["module"]["items"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|item| item.as_u64() != Some(id));
+        fs::write(&fixture.export_path, serde_json::to_vec(&value).unwrap()).unwrap();
+        let error = fixture
+            .build(
+                Some(fixture.input()),
+                IndexingPerformancePreference::FasterBuilds,
+            )
+            .err()
+            .unwrap();
+        assert!(
+            format!("{error:#}").contains("not a child of its module"),
+            "{error:#}"
+        );
+        fixture.assert_type(&previous, "query", "expected_query");
+        fixture.assert_type(&previous, "child_entity", "expected_child_entity");
+    }
 }
