@@ -1,6 +1,6 @@
 //! Translate validated compiler signatures into the existing declaration pipeline.
 
-mod nominal;
+mod supporting;
 
 use anyhow::{Context as _, bail, ensure};
 use rg_arena::Arena;
@@ -190,7 +190,7 @@ impl TypeApiView<'_> {
             kind: Self::item_tag(self.declaration.inner.item_kind())?,
             items,
             impls,
-            nominal: None,
+            supporting_item: None,
             origin: None,
             modules: Vec::new(),
             references,
@@ -252,8 +252,15 @@ impl TypeApiView<'_> {
             root.name = Name::new("crate");
         } else {
             path.absolute = true;
-            path.resolved_crate = self.crate_roots.and_then(|roots| roots.get(&names[0])).copied();
         }
+        path.resolved_crate = match self.crate_roots.and_then(|roots| roots.get(&names[0])) {
+            Some(Some(crate_ref)) => Some(*crate_ref),
+            Some(None) => bail!(
+                "rustdoc defining crate {} is ambiguous in the dependency closure",
+                names[0]
+            ),
+            None => None,
+        };
         Ok(path)
     }
 
@@ -405,6 +412,7 @@ impl TypeApiView<'_> {
             } => TypeRef::Path(TypePath {
                 source_span: Span { start: 0, end: 0 },
                 absolute: false,
+                resolved_crate: None,
                 anchor: Some(TypePathAnchor::from_parts(
                     self.ty(self_type)?,
                     trait_

@@ -95,12 +95,13 @@ impl SignatureScanCollector for SignatureOccurrenceCollector {
                 scope,
                 path: def_map_path,
                 type_ref: self.offset.map(|_| {
-                    rg_item_tree::TypeRef::Path(TypePath {
+                    Box::new(rg_item_tree::TypeRef::Path(TypePath {
                         source_span: path.source_span,
                         absolute: path.absolute,
+                        resolved_crate: path.resolved_crate,
                         anchor: path.anchor.clone(),
                         segments: path.segments[..=idx].to_vec(),
-                    })
+                    }))
                 }),
                 file_id,
                 span: segment.span,

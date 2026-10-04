@@ -3,6 +3,102 @@ use expect_test::expect;
 use super::utils::{self, PathResolutionQuery};
 
 #[test]
+fn compiler_definition_paths_resolve_private_ancestors_without_source_imports() {
+    use rg_ir_model::{Path, PathRoot};
+    use rg_text::Name;
+
+    let fixture = crate::testonly::DefMapFixture::build(
+        r#"
+//- /Cargo.toml
+[workspace]
+members = ["dep", "facade", "app"]
+resolver = "3"
+//- /dep/Cargo.toml
+[package]
+name = "dep"
+version = "0.1.0"
+edition = "2024"
+//- /dep/src/lib.rs
+mod hidden { mod inner { pub struct Exposed; } pub use inner::Exposed; }
+pub use hidden::Exposed;
+//- /facade/Cargo.toml
+[package]
+name = "facade"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+dep = { path = "../dep" }
+//- /facade/src/lib.rs
+pub use dep::Exposed;
+//- /app/Cargo.toml
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+facade = { path = "../facade" }
+//- /app/src/lib.rs
+pub struct Exposed;
+"#,
+    );
+    let app = fixture.crate_ref("app", rg_workspace::TargetKind::Lib);
+    let dep = fixture.crate_ref("dep", rg_workspace::TargetKind::Lib);
+    let txn = fixture
+        .def_map_db()
+        .read_txn(crate::DefMapLoader::resident_only("compiler path test"));
+    let query = crate::DefMapQuery::new(&txn);
+    let context = crate::DefMapSource::root_module(&txn, app)
+        .unwrap()
+        .unwrap();
+    let resolve = |root, names: &[&str]| {
+        query
+            .scope_resolver()
+            .resolve_path(
+                context,
+                &Path::new(root, names.iter().map(|name| Name::new(*name)).collect()),
+                crate::NamespaceSet::TYPES,
+            )
+            .unwrap()
+    };
+    let public = resolve(PathRoot::Absolute, &["facade", "Exposed"]);
+    assert_eq!(public.resolved.len(), 1);
+    let compiler = resolve(
+        PathRoot::ResolvedCrate(dep),
+        &["hidden", "inner", "Exposed"],
+    );
+    assert_eq!(compiler.resolved, public.resolved);
+    assert!(
+        resolve(PathRoot::Absolute, &["dep", "Exposed"])
+            .resolved
+            .is_empty()
+    );
+    let facade = fixture.crate_ref("facade", rg_workspace::TargetKind::Lib);
+    let facade_context = crate::DefMapSource::root_module(&txn, facade)
+        .unwrap()
+        .unwrap();
+    assert!(
+        query
+            .scope_resolver()
+            .resolve_path(
+                facade_context,
+                &Path::new(
+                    PathRoot::Absolute,
+                    vec![
+                        Name::new("dep"),
+                        Name::new("hidden"),
+                        Name::new("inner"),
+                        Name::new("Exposed")
+                    ]
+                ),
+                crate::NamespaceSet::TYPES
+            )
+            .unwrap()
+            .resolved
+            .is_empty()
+    );
+}
+
+#[test]
 fn resolves_paths_against_frozen_def_map() {
     utils::check_project_path_resolution(
         r#"

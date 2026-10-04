@@ -5,6 +5,16 @@ use super::RustdocExport;
 
 const FIXTURE: &[u8] = include_bytes!("../../fixtures/model/export.json");
 
+#[test]
+fn lowering_rejects_an_ambiguous_defining_crate_instead_of_using_source_spelling() {
+    let export = RustdocExport::read(FIXTURE).unwrap();
+    let roots = std::collections::BTreeMap::from([("rustdoc_macro_support".into(), None)]);
+    let error = export
+        .lower_type("rustdoc_macro_support::Post", &roots)
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("defining crate rustdoc_macro_support is ambiguous"));
+}
+
 fn changed_export(change: impl FnOnce(&mut Value)) -> Vec<u8> {
     let mut value: Value = serde_json::from_slice(FIXTURE).unwrap();
     change(&mut value);

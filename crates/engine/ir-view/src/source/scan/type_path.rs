@@ -125,6 +125,7 @@ impl TypePathCompletionSite {
         Some(AssociatedPathQualifier::Type(TypeRef::Path(TypePath {
             source_span: path.source_span,
             absolute: path.absolute,
+            resolved_crate: path.resolved_crate,
             anchor: path.anchor.clone(),
             segments: path.segments[..prefix_segment_count].to_vec(),
         })))
@@ -205,6 +206,7 @@ impl AssociatedTypeBindingSyntax {
                 trait_ref: TypeRef::Path(TypePath {
                     source_span: path.source_span,
                     absolute: path.absolute,
+                    resolved_crate: path.resolved_crate,
                     anchor: path.anchor.clone(),
                     segments,
                 }),
@@ -267,6 +269,7 @@ impl AssociatedTypeBindingSyntax {
                     trait_ref: TypeRef::Path(TypePath {
                         source_span: path.source_span,
                         absolute: path.absolute,
+                        resolved_crate: path.resolved_crate,
                         anchor: path.anchor.clone(),
                         segments,
                     }),

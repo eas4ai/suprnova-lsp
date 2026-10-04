@@ -4,12 +4,14 @@ use proc_macro::TokenStream;
 pub fn make_model(_: TokenStream, input: TokenStream) -> TokenStream {
     let declarations: TokenStream = r#"
         pub mod generated {
-            pub struct Storage { pub id: i64 }
+            mod storage_types { pub type Id = i64; }
+            pub type StorageId = storage_types::Id;
+            pub struct Storage { pub id: StorageId }
             pub struct Entity;
             pub enum Column { Id, Email }
         }
         impl Model for Post {
-            type Key = i64;
+            type Key = generated::StorageId;
             type Entity = generated::Entity;
             type Column = generated::Column;
         }
@@ -19,6 +21,8 @@ pub fn make_model(_: TokenStream, input: TokenStream) -> TokenStream {
         impl Bridge<Post> for generated::Storage {
             fn bridge(value: Post) -> Self { Self { id: value.id as i64 } }
         }
-    "#.parse().expect("fixture declarations parse");
+    "#
+    .parse()
+    .expect("fixture declarations parse");
     input.into_iter().chain(declarations).collect()
 }

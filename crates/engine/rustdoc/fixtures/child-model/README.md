@@ -3,7 +3,7 @@
 The attribute macro emits storage declarations in `generated`, direct and reverse
 `Bridge` impls, and the `Model` impl. The source trait supplies `query`; the export
 must not supply a replacement stub. The project tests use the original source and
-this genuine format-61 compiler export to exercise module creation, field types,
+this genuine format-61 compiler export to exercise module creation, storage aliases through private child modules, field types,
 associated identities, re-exports, failed candidates and both indexing modes.
 
 Regenerate from the workspace root with an owned target directory:

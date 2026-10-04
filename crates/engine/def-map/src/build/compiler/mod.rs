@@ -26,8 +26,8 @@ pub(super) struct CompilerImport {
 
 impl CompilerImport {
     /// Add only supporting declarations beneath new compiler-established child modules. Existing
-    /// source namespaces still reject a missing nominal instead of silently inventing its owner.
-    pub(super) fn install_nominals(
+    /// source namespaces still reject a missing type instead of silently inventing its owner.
+    pub(super) fn install_supporting_items(
         states: &mut FinalizeCrateStates,
         scopes: &mut ScopeMatrix,
         item_tree: &ItemTreeDb,
@@ -52,19 +52,19 @@ impl CompilerImport {
             };
             let kind = anchors
                 .get(&(*crate_ref, origin.clone()))
-                .context("compiler nominal has no selected source anchor")?;
+                .context("compiler supporting type has no selected source anchor")?;
             ensure!(
                 declarations.path.len() > origin.len()
                     && declarations.path.starts_with(&origin[..origin.len() - 1]),
-                "compiler nominal escapes its source anchor"
+                "compiler supporting type escapes its source anchor"
             );
             ensure!(
                 declarations.modules.len() == declarations.path.len() - origin.len(),
-                "compiler nominal module chain is incomplete"
+                "compiler supporting type module chain is incomplete"
             );
             let state = states
                 .crate_state_mut(*crate_ref)
-                .context("compiler nominal crate missing")?;
+                .context("compiler supporting type crate missing")?;
             let (mut module, owner, origin_source) =
                 Self::source_owner(state, item_tree, origin, *kind)?;
             let file_id = owner.file_id;
@@ -73,7 +73,7 @@ impl CompilerImport {
                 let depth = origin.len() + offset;
                 ensure!(
                     path == &declarations.path[..depth],
-                    "compiler nominal module chain disagrees with its path"
+                    "compiler supporting type module chain disagrees with its path"
                 );
                 let name = rg_text::Name::new(&path[depth - 1]);
                 let mut children = ExpectedUnique::new();
@@ -145,23 +145,26 @@ impl CompilerImport {
                 }
             }
             let nominal = declarations
-                .nominal
+                .supporting_item
                 .context("compiler supporting nominal missing")?;
             let mut node = declarations.items[nominal].clone();
-            let name = node.name.clone().context("compiler nominal has no name")?;
+            let name = node
+                .name
+                .clone()
+                .context("compiler supporting type has no name")?;
             ensure!(
                 name.as_str()
                     == declarations
                         .path
                         .last()
-                        .context("compiler nominal path empty")?,
-                "compiler nominal name disagrees with its path"
+                        .context("compiler supporting type path empty")?,
+                "compiler supporting type name disagrees with its path"
             );
             let kind = LocalDefKind::from_item_tag(declarations.kind)
-                .context("compiler nominal kind invalid")?;
+                .context("compiler supporting type kind invalid")?;
             ensure!(
                 node.kind.tag() == declarations.kind,
-                "compiler nominal payload has the wrong kind"
+                "compiler supporting type payload has the wrong kind"
             );
             let mut existing = ExpectedUnique::new();
             for declaration in state.def_map_builder.partial().local_defs() {
@@ -173,17 +176,17 @@ impl CompilerImport {
                 ExpectedUnique::One(existing) => {
                     ensure!(
                         existing == kind,
-                        "compiler nominal has the wrong source kind"
+                        "compiler supporting type has the wrong source kind"
                     );
-                    declarations.nominal = None;
+                    declarations.supporting_item = None;
                     continue;
                 }
                 ExpectedUnique::Ambiguous => {
-                    anyhow::bail!("compiler nominal source identity is ambiguous")
+                    anyhow::bail!("compiler supporting type source identity is ambiguous")
                 }
                 ExpectedUnique::Empty => ensure!(
                     created.contains(&(*crate_ref, module)),
-                    "compiler nominal cannot replace a missing source declaration"
+                    "compiler supporting type cannot replace a missing source declaration"
                 ),
             }
             // The selected source item is provenance, not editable syntax for these declarations.
@@ -372,7 +375,7 @@ impl CompilerImport {
         // Referenced declarations must exist in this candidate's graph with the compiler's item
         // kind. An export-local ID or a coincidentally matching value name is insufficient.
         let mut needed = std::collections::HashSet::new();
-        if let Some(nominal) = declarations.nominal {
+        if let Some(nominal) = declarations.supporting_item {
             needed.insert(nominal);
         }
         for impl_id in &new_impls {

@@ -3,7 +3,7 @@
 use anyhow::{Context as _, ensure};
 use rg_ir_model::{FieldKey, Span};
 use rg_item_tree::{
-    EnumItem, EnumVariantItem, FieldItem, FieldList, ItemKind, StructItem, UnionItem,
+    EnumItem, EnumVariantItem, FieldItem, FieldList, ItemKind, StructItem, TypeAliasItem, UnionItem,
 };
 use rg_text::Name;
 use rustdoc_types as rd;
@@ -11,7 +11,7 @@ use rustdoc_types as rd;
 use crate::TypeApiView;
 
 impl TypeApiView<'_> {
-    pub(crate) fn nominal(&self) -> anyhow::Result<ItemKind> {
+    pub(crate) fn supporting_item(&self) -> anyhow::Result<ItemKind> {
         Ok(match &self.declaration.inner {
             rd::ItemEnum::Struct(data) => ItemKind::Struct(StructItem {
                 generics: self.generics(&data.generics)?,
@@ -104,6 +104,11 @@ impl TypeApiView<'_> {
                     fields: self.fields(&data.fields, false)?,
                 })
             }
+            rd::ItemEnum::TypeAlias(data) => ItemKind::TypeAlias(TypeAliasItem {
+                generics: self.generics(&data.generics)?,
+                bounds: Vec::new(),
+                aliased_ty: Some(self.ty(&data.type_)?),
+            }),
             _ => anyhow::bail!("unsupported supporting rustdoc declaration"),
         })
     }

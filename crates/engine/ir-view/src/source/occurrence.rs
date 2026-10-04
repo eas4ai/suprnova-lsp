@@ -591,7 +591,7 @@ impl<'a, 'db> SourceOccurrenceView<'a, 'db> {
                         scope.generic_owner,
                     )),
                     path,
-                    type_ref,
+                    type_ref.map(|ty| *ty),
                 )),
                 crate_ref,
                 file_id,

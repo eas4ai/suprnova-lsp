@@ -955,6 +955,7 @@ impl<E: CrateResolutionEnv + ?Sized> ScopeResolver<'_, E> {
                     segment_idx + 1 < remaining_segments.len(),
                     terminal_filter,
                 ),
+                matches!(root, PathRoot::ResolvedCrate(_)),
             )?;
 
             if current_defs.is_empty() {
@@ -1014,14 +1015,23 @@ impl<E: CrateResolutionEnv + ?Sized> ScopeResolver<'_, E> {
         current_defs: Vec<DefId>,
         segment: &Name,
         filter: NamespaceSet,
+        compiler_definition: bool,
     ) -> Result<Vec<DefId>, E::Error> {
         let mut next_defs = UniqueVec::new();
 
         for current_def in current_defs {
             match current_def {
                 DefId::Module(module_ref) => {
+                    // Compiler paths name definitions, including private ancestors of public
+                    // re-exports. Each step is looked up inside its defining module; ordinary
+                    // source paths still check visibility from the caller's module.
+                    let context = if compiler_definition {
+                        module_ref
+                    } else {
+                        importing_module
+                    };
                     for resolved_def in
-                        self.name_in_module(importing_module, module_ref, segment.as_str(), filter)?
+                        self.name_in_module(context, module_ref, segment.as_str(), filter)?
                     {
                         next_defs.push(resolved_def);
                     }

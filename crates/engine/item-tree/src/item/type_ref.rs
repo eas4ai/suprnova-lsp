@@ -223,7 +223,14 @@ impl TypePath {
         }
 
         if let Some(crate_ref) = self.resolved_crate {
-            return Some(Path::new(rg_ir_model::PathRoot::ResolvedCrate(crate_ref), self.segments.iter().skip(1).map(|segment| segment.name.clone()).collect()));
+            return Some(Path::new(
+                rg_ir_model::PathRoot::ResolvedCrate(crate_ref),
+                self.segments
+                    .iter()
+                    .skip(1)
+                    .map(|segment| segment.name.clone())
+                    .collect(),
+            ));
         }
 
         Path::from_syntax_names(
@@ -245,7 +252,15 @@ impl TypePath {
         }
 
         if let Some(crate_ref) = self.resolved_crate {
-            return Some(Path::new(rg_ir_model::PathRoot::ResolvedCrate(crate_ref), self.segments.iter().take(end_idx.saturating_add(1)).skip(1).map(|segment| segment.name.clone()).collect()));
+            return Some(Path::new(
+                rg_ir_model::PathRoot::ResolvedCrate(crate_ref),
+                self.segments
+                    .iter()
+                    .take(end_idx.saturating_add(1))
+                    .skip(1)
+                    .map(|segment| segment.name.clone())
+                    .collect(),
+            ));
         }
 
         Path::from_syntax_names(
@@ -260,7 +275,11 @@ impl TypePath {
 
     /// Returns the name of a single-segment relative path.
     pub fn single_name(&self) -> Option<&Name> {
-        if self.anchor.is_some() || self.absolute || self.resolved_crate.is_some() || self.segments.len() != 1 {
+        if self.anchor.is_some()
+            || self.absolute
+            || self.resolved_crate.is_some()
+            || self.segments.len() != 1
+        {
             return None;
         }
 
@@ -874,6 +893,32 @@ mod tests {
 
         assert_eq!(path.as_def_map_path(), None);
         assert_eq!(path.as_def_map_path_prefix(0), None);
+    }
+
+    #[test]
+    fn compiler_paths_preserve_crate_identity_through_prefixes() {
+        let crate_ref = rg_ir_model::CrateRef {
+            package: rg_ir_model::PackageSlot(7),
+            crate_id: rg_ir_model::CrateId(1),
+        };
+        let mut path = type_path(true, &["dependency", "api", "Model"]);
+        path.resolved_crate = Some(crate_ref);
+        assert_eq!(path.to_string(), "::dependency::api::Model");
+        for (end, names) in [(0, vec![]), (1, vec!["api"]), (2, vec!["api", "Model"])] {
+            let projected = path.as_def_map_path_prefix(end).unwrap();
+            assert_eq!(
+                projected.root(),
+                rg_ir_model::PathRoot::ResolvedCrate(crate_ref)
+            );
+            assert_eq!(
+                projected.segments(),
+                names.into_iter().map(Name::new).collect::<Vec<_>>()
+            );
+        }
+        assert_eq!(path.as_def_map_path(), path.as_def_map_path_prefix(2));
+        path.segments.truncate(1);
+        path.absolute = false;
+        assert_eq!(path.single_name(), None);
     }
 
     fn type_path(absolute: bool, names: &[&str]) -> TypePath {

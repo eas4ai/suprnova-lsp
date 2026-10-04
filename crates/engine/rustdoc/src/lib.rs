@@ -29,7 +29,7 @@ pub struct TypeApiView<'a> {
     pub excluded_blanket_impls: usize,
     pub limitations: [&'static str; 3],
     #[serde(skip)]
-    crate_roots: Option<&'a BTreeMap<String, rg_ir_model::CrateRef>>,
+    crate_roots: Option<&'a BTreeMap<String, Option<rg_ir_model::CrateRef>>>,
 }
 
 #[derive(Serialize)]
@@ -46,10 +46,11 @@ impl RustdocExport {
     /// Lower the selected API and the concrete declarations it references in child modules.
     /// Source owners in the selected module still have to exist; this closure supplies generated
     /// storage types such as `user::Entity`, not replacements for missing source declarations.
+    /// Crate roots come from the resolved workspace graph; an explicit `None` marks an ambiguous name.
     pub fn lower_type<'a>(
         &'a self,
         path: &str,
-        crate_roots: &'a BTreeMap<String, rg_ir_model::CrateRef>,
+        crate_roots: &'a BTreeMap<String, Option<rg_ir_model::CrateRef>>,
     ) -> anyhow::Result<Vec<rg_item_tree::CompilerTypeDeclarations>> {
         let mut primary = self.type_api(path)?;
         primary.crate_roots = Some(crate_roots);
@@ -62,7 +63,7 @@ impl RustdocExport {
                 if summary.crate_id == view.declaration.crate_id
                     && matches!(
                         summary.kind,
-                        ItemKind::Struct | ItemKind::Enum | ItemKind::Union
+                        ItemKind::Struct | ItemKind::Enum | ItemKind::Union | ItemKind::TypeAlias
                     )
                     && summary.path.starts_with(&origin[..origin.len() - 1])
                     && summary.path.len() > origin.len()
@@ -76,7 +77,7 @@ impl RustdocExport {
             let mut lowered = view.lower()?;
             if view.path != origin {
                 let node = rg_item_tree::ItemNode::source(
-                    view.nominal()?,
+                    view.supporting_item()?,
                     view.declaration.name.as_ref().map(rg_text::Name::new),
                     None,
                     TypeApiView::visibility(&view.declaration.visibility),
@@ -84,17 +85,19 @@ impl RustdocExport {
                     rg_ir_model::Span { start: 0, end: 0 },
                     rg_ir_model::FileId(0),
                 );
-                let nominal = lowered.items.alloc(node);
+                let supporting_item = lowered.items.alloc(node);
                 lowered
                     .references
-                    .extend(view.references(view.declaration, nominal)?);
+                    .extend(view.references(view.declaration, supporting_item)?);
                 for member in &view.members {
-                    lowered.references.extend(view.references(member, nominal)?);
+                    lowered
+                        .references
+                        .extend(view.references(member, supporting_item)?);
                 }
-                lowered.nominal = Some(nominal);
+                lowered.supporting_item = Some(supporting_item);
                 lowered.origin = Some(origin.clone());
                 // A path summary alone does not establish a generated module. Validate the actual
-                // module declarations and child membership, walking from the nominal to the anchor.
+                // module declarations and child membership, walking from the type to the anchor.
                 let mut child = view.declaration.id;
                 for depth in (origin.len()..view.path.len()).rev() {
                     let mut modules = ExpectedUnique::new();
@@ -209,7 +212,7 @@ impl RustdocExport {
             if summary.crate_id == root.crate_id
                 && matches!(
                     summary.kind,
-                    ItemKind::Struct | ItemKind::Enum | ItemKind::Union
+                    ItemKind::Struct | ItemKind::Enum | ItemKind::Union | ItemKind::TypeAlias
                 )
                 && summary.path.join("::") == path
             {
@@ -236,11 +239,12 @@ impl RustdocExport {
             declaration.inner.item_kind() == summary.kind,
             "rustdoc type path has the wrong item kind"
         );
-        let impl_ids = match &declaration.inner {
+        let impl_ids: &[rustdoc_types::Id] = match &declaration.inner {
             ItemEnum::Struct(item) => &item.impls,
             ItemEnum::Enum(item) => &item.impls,
             ItemEnum::Union(item) => &item.impls,
-            _ => bail!("rustdoc item {path} is not a struct, enum, or union"),
+            ItemEnum::TypeAlias(_) => &[],
+            _ => bail!("rustdoc item {path} is not a struct, enum, union, or type alias"),
         };
 
         let mut type_paths = BTreeMap::new();

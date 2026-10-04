@@ -1017,7 +1017,7 @@ fn freeze_resolved_scopes(
             }
         }
     }
-    if super::compiler::CompilerImport::install_nominals(
+    if super::compiler::CompilerImport::install_supporting_items(
         states,
         &mut current_scopes,
         item_tree,
