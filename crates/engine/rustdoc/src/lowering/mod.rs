@@ -39,38 +39,98 @@ impl TypeApiView<'_> {
             let mut children = Vec::new();
             for item in &implementation.associated_items {
                 let kind = match &item.inner {
-                    rd::ItemEnum::Function(function) => ItemKind::Function(FunctionItem {
-                        generics: self.generics(&function.generics)?,
-                        params: function
+                    rd::ItemEnum::Function(function) => {
+                        // `fn filter(value: impl IntoVal)` repeats its opaque argument bounds
+                        // in a synthetic generic parameter. The argument already carries those
+                        // bounds; importing both would add an explicit, unused type parameter.
+                        let mut generics = function.generics.clone();
+                        let mut arguments = function
                             .sig
                             .inputs
                             .iter()
-                            .map(|(name, ty)| {
-                                Ok(ParamItem {
-                                    pat: name.clone(),
-                                    ty: Some(self.ty(ty)?),
-                                    kind: if name == "self" {
-                                        ParamKind::SelfParam(SelfParamKind::Explicit)
-                                    } else {
-                                        ParamKind::Normal
-                                    },
-                                })
+                            .filter_map(|(_, ty)| {
+                                if let rd::Type::ImplTrait(bounds) = ty {
+                                    Some(bounds)
+                                } else {
+                                    None
+                                }
                             })
-                            .collect::<anyhow::Result<_>>()?,
-                        ret_ty: function
-                            .sig
-                            .output
-                            .as_ref()
-                            .map(|ty| self.ty(ty))
-                            .transpose()?,
-                        qualifiers: FunctionQualifiers {
-                            is_async: function.header.is_async,
-                            is_const: function.header.is_const,
-                            is_unsafe: function.header.is_unsafe,
-                        },
-                        has_body: false,
-                        proc_macro: None,
-                    }),
+                            .collect::<Vec<_>>();
+                        let mut explicit = Vec::new();
+                        for parameter in generics.params {
+                            if let rd::GenericParamDefKind::Type {
+                                bounds,
+                                default,
+                                is_synthetic: true,
+                            } = &parameter.kind
+                            {
+                                let matching =
+                                    arguments.iter().position(|argument| *argument == bounds);
+                                ensure!(
+                                    default.is_none() && !bounds.is_empty() && matching.is_some(),
+                                    "synthetic rustdoc parameter has no matching opaque argument"
+                                );
+                                arguments.remove(matching.expect("checked opaque argument"));
+                                // Removed synthetic names must not escape into another part of
+                                // the signature or a where clause as an ordinary generic type.
+                                let mut pending = vec![
+                                    serde_json::to_value(&function.sig)?,
+                                    serde_json::to_value(&generics.where_predicates)?,
+                                ];
+                                while let Some(value) = pending.pop() {
+                                    match value {
+                                        serde_json::Value::Object(object) => {
+                                            ensure!(
+                                                object
+                                                    .get("generic")
+                                                    .and_then(serde_json::Value::as_str)
+                                                    != Some(parameter.name.as_str()),
+                                                "synthetic rustdoc parameter escapes its opaque argument"
+                                            );
+                                            pending.extend(object.into_values());
+                                        }
+                                        serde_json::Value::Array(array) => pending.extend(array),
+                                        _ => {}
+                                    }
+                                }
+                            } else {
+                                explicit.push(parameter);
+                            }
+                        }
+                        generics.params = explicit;
+                        ItemKind::Function(FunctionItem {
+                            generics: self.generics(&generics)?,
+                            params: function
+                                .sig
+                                .inputs
+                                .iter()
+                                .map(|(name, ty)| {
+                                    Ok(ParamItem {
+                                        pat: name.clone(),
+                                        ty: Some(self.ty(ty)?),
+                                        kind: if name == "self" {
+                                            ParamKind::SelfParam(SelfParamKind::Explicit)
+                                        } else {
+                                            ParamKind::Normal
+                                        },
+                                    })
+                                })
+                                .collect::<anyhow::Result<_>>()?,
+                            ret_ty: function
+                                .sig
+                                .output
+                                .as_ref()
+                                .map(|ty| self.ty(ty))
+                                .transpose()?,
+                            qualifiers: FunctionQualifiers {
+                                is_async: function.header.is_async,
+                                is_const: function.header.is_const,
+                                is_unsafe: function.header.is_unsafe,
+                            },
+                            has_body: false,
+                            proc_macro: None,
+                        })
+                    }
                     rd::ItemEnum::AssocType {
                         generics,
                         bounds,
@@ -313,6 +373,23 @@ impl TypeApiView<'_> {
             },
             rd::Type::Infer => TypeRef::Infer,
             rd::Type::ImplTrait(bounds) => TypeRef::ImplTrait(self.bounds(bounds)?),
+            rd::Type::DynTrait(data) => {
+                let mut bounds = Vec::new();
+                for bound in &data.traits {
+                    ensure!(
+                        bound.generic_params.is_empty(),
+                        "higher-ranked rustdoc object bounds cannot be imported"
+                    );
+                    bounds.push(TypeBound::Trait {
+                        ty: TypeRef::Path(self.path(&bound.trait_)?),
+                        modifier: TraitBoundModifier::None,
+                    });
+                }
+                if let Some(lifetime) = &data.lifetime {
+                    bounds.push(TypeBound::Lifetime(Name::new(lifetime)));
+                }
+                TypeRef::DynTrait(bounds)
+            }
             rd::Type::QualifiedPath {
                 name,
                 args,

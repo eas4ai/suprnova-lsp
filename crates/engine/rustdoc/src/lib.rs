@@ -190,8 +190,9 @@ impl RustdocExport {
             if data.is_synthetic || implementation.crate_id != root.crate_id {
                 continue;
             }
-            // Rustdoc attaches impls for `&Post` and the fundamental wrapper `Box<Post>` to Post.
-            // Preserve the full self type, but check the nominal owner inside those wrappers.
+            // Rustdoc attaches impls for `&Post` and `Box<Post>` to Post. It also attaches
+            // `From<Post> for Storage` because Post occurs in the trait argument. Neither
+            // attachment changes the actual receiver retained in the declaration below.
             let mut owner = &data.for_;
             loop {
                 match owner {
@@ -217,8 +218,21 @@ impl RustdocExport {
                     _ => break,
                 }
             }
+            let trait_arguments = data
+                .trait_
+                .as_ref()
+                .and_then(|trait_| trait_.args.as_deref())
+                .map(serde_json::to_value)
+                .transpose()
+                .context("inspect rustdoc attachment arguments")?;
+            let argument_ids = trait_arguments
+                .as_ref()
+                .map(Self::path_ids)
+                .transpose()?
+                .unwrap_or_default();
             ensure!(
-                matches!(owner, Type::ResolvedPath(owner) if owner.id == id),
+                matches!(owner, Type::ResolvedPath(owner) if owner.id == id)
+                    || argument_ids.contains(&id),
                 "rustdoc impl {impl_id:?} does not belong to {path}"
             );
             let mut associated_items = Vec::new();

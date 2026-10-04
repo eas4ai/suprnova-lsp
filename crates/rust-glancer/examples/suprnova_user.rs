@@ -123,7 +123,15 @@ impl Acceptance {
             let paths = actual
                 .iter()
                 .filter_map(TypeBound::trait_ty)
-                .map(ToString::to_string)
+                .map(|ty| match ty {
+                    TypeRef::Path(path) => path
+                        .segments
+                        .iter()
+                        .map(|segment| segment.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join("::"),
+                    _ => ty.to_string(),
+                })
                 .collect::<Vec<_>>();
             ensure!(
                 paths.iter().any(|path| path == expected),
@@ -141,10 +149,11 @@ impl Acceptance {
                 anyhow::bail!("lowered impl kind changed");
             };
             let name = header.self_ty.to_string();
+            let owner = format!("crate::{}", view.path[1..].join("::"));
             ensure!(
-                name == OWNER
-                    || name.starts_with(&format!("{OWNER}<"))
-                    || name == "directory::models::user::user::Model",
+                name == owner
+                    || name.starts_with(&format!("{owner}<"))
+                    || name == "crate::models::user::user::Model",
                 "unexpected actual impl owner: {name}"
             );
         }

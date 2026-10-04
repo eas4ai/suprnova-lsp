@@ -11,6 +11,131 @@ fn changed_export(change: impl FnOnce(&mut Value)) -> Vec<u8> {
     serde_json::to_vec(&value).unwrap()
 }
 
+fn argument_impl_trait_export(change: impl FnOnce(&mut Value)) -> Vec<u8> {
+    changed_export(|value| {
+        let trait_id = value["paths"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .find(|(_, item)| item["path"] == serde_json::json!(["rustdoc_macro_support", "Model"]))
+            .unwrap()
+            .0
+            .parse::<u64>()
+            .unwrap();
+        let function = &mut value["index"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+            .find(|item| item["name"] == "generated_method")
+            .unwrap()["inner"]["function"];
+        let bounds = serde_json::json!([{"trait_bound": {"trait": {"path": "Model", "id": trait_id, "args": null}, "generic_params": [], "modifier": "none"}}]);
+        function["sig"]["inputs"][1][1] = serde_json::json!({"impl_trait": bounds});
+        function["generics"]["params"].as_array_mut().unwrap().push(serde_json::json!({"name": "impl Model", "kind": {"type": {"bounds": bounds, "default": null, "is_synthetic": true}}}));
+        change(function);
+    })
+}
+
+#[test]
+fn preserves_argument_impl_trait_bounds_without_an_explicit_synthetic_parameter() {
+    let bytes = argument_impl_trait_export(|_| {});
+    let export = RustdocExport::read(bytes.as_slice()).unwrap();
+    let lowered = export
+        .type_api("rustdoc_macro_support::Post")
+        .unwrap()
+        .lower()
+        .unwrap();
+    let function = lowered
+        .items
+        .iter()
+        .find(|item| {
+            item.name
+                .as_ref()
+                .is_some_and(|name| name.as_str() == "generated_method")
+        })
+        .unwrap();
+    let rg_item_tree::ItemKind::Function(function) = &function.kind else {
+        unreachable!()
+    };
+    assert_eq!(
+        function
+            .generics
+            .type_param_names()
+            .map(|name| name.as_str())
+            .collect::<Vec<_>>(),
+        ["T"]
+    );
+    let Some(rg_item_tree::TypeRef::ImplTrait(bounds)) = &function.params[1].ty else {
+        panic!("opaque argument required")
+    };
+    assert_eq!(bounds.len(), 1);
+    assert_eq!(bounds[0].trait_ty().unwrap().to_string(), "crate::Model");
+}
+
+#[test]
+fn rejects_a_synthetic_parameter_without_matching_argument_bounds() {
+    let bytes = argument_impl_trait_export(|function| {
+        function["sig"]["inputs"][1][1] = serde_json::json!({"generic": "T"})
+    });
+    let export = RustdocExport::read(bytes.as_slice()).unwrap();
+    assert!(
+        export
+            .type_api("rustdoc_macro_support::Post")
+            .unwrap()
+            .lower()
+            .is_err()
+    );
+}
+
+#[test]
+fn rejects_a_reference_to_a_removed_synthetic_parameter() {
+    let bytes = argument_impl_trait_export(|function| {
+        function["sig"]["output"] = serde_json::json!({"generic": "impl Model"})
+    });
+    let export = RustdocExport::read(bytes.as_slice()).unwrap();
+    assert!(
+        export
+            .type_api("rustdoc_macro_support::Post")
+            .unwrap()
+            .lower()
+            .is_err()
+    );
+}
+
+#[test]
+fn preserves_trait_object_bounds_and_lifetime() {
+    let bytes = argument_impl_trait_export(|function| {
+        let trait_ =
+            function["sig"]["inputs"][1][1]["impl_trait"][0]["trait_bound"]["trait"].clone();
+        function["sig"]["output"] = serde_json::json!({"dyn_trait": {"traits": [{"trait": trait_, "generic_params": []}], "lifetime": "'static"}});
+    });
+    let export = RustdocExport::read(bytes.as_slice()).unwrap();
+    let lowered = export
+        .type_api("rustdoc_macro_support::Post")
+        .unwrap()
+        .lower()
+        .unwrap();
+    let function = lowered
+        .items
+        .iter()
+        .find(|item| {
+            item.name
+                .as_ref()
+                .is_some_and(|name| name.as_str() == "generated_method")
+        })
+        .unwrap();
+    let rg_item_tree::ItemKind::Function(function) = &function.kind else {
+        unreachable!()
+    };
+    let Some(rg_item_tree::TypeRef::DynTrait(bounds)) = &function.ret_ty else {
+        panic!("object type required")
+    };
+    assert_eq!(bounds.len(), 2);
+    assert_eq!(bounds[0].trait_ty().unwrap().to_string(), "crate::Model");
+    assert!(
+        matches!(&bounds[1], rg_item_tree::TypeBound::Lifetime(name) if name.as_str() == "'static")
+    );
+}
+
 #[test]
 fn selects_explicit_impls_for_the_exact_type() {
     let export = RustdocExport::read(FIXTURE).unwrap();
@@ -243,6 +368,58 @@ fn rejects_impl_attached_to_the_wrong_type() {
     });
     let export = RustdocExport::read(bytes.as_slice()).unwrap();
     assert!(export.type_api("rustdoc_macro_support::Post").is_err());
+}
+
+#[test]
+fn preserves_trait_argument_attachment_without_changing_the_receiver() {
+    let bytes = changed_export(|value| {
+        let paths = value["paths"].as_object().unwrap();
+        let owner = paths
+            .iter()
+            .find(|(_, item)| {
+                item["kind"] == "struct"
+                    && item["path"] == serde_json::json!(["rustdoc_macro_support", "Post"])
+            })
+            .unwrap()
+            .0
+            .parse::<u64>()
+            .unwrap();
+        let other = paths
+            .iter()
+            .find(|(_, item)| {
+                item["kind"] == "struct"
+                    && item["path"] == serde_json::json!(["rustdoc_macro_support", "other", "Post"])
+            })
+            .unwrap()
+            .0
+            .parse::<u64>()
+            .unwrap();
+        let implementation = value["index"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+            .find(|item| item["inner"]["impl"]["trait"]["path"] == "Model")
+            .unwrap();
+        let data = &mut implementation["inner"]["impl"];
+        data["for"]["resolved_path"]["id"] = Value::from(other);
+        data["trait"]["args"] = serde_json::json!({"angle_bracketed": {"args": [{"type": {"resolved_path": {"path": "Post", "id": owner, "args": null}}}], "constraints": []}});
+    });
+    let export = RustdocExport::read(bytes.as_slice()).unwrap();
+    let api = export.type_api("rustdoc_macro_support::Post").unwrap();
+    let reverse = api.impls.iter().find(|implementation| matches!(&implementation.declaration.inner, ItemEnum::Impl(data) if data.trait_.as_ref().is_some_and(|path| path.path == "Model"))).unwrap();
+    let ItemEnum::Impl(data) = &reverse.declaration.inner else {
+        unreachable!()
+    };
+    let Type::ResolvedPath(receiver) = &data.for_ else {
+        panic!("nominal receiver required")
+    };
+    assert_eq!(
+        export.resolve_path(receiver.id).unwrap().path,
+        ["rustdoc_macro_support", "other", "Post"]
+    );
+    // Inspecting an attachment must not install its methods onto the selected nominal owner.
+    let lowered = api.lower().unwrap();
+    assert!(lowered.impls.iter().all(|id| !matches!(&lowered.items[*id].kind, rg_item_tree::ItemKind::Impl(data) if data.trait_ref.as_ref().is_some_and(|ty| ty.to_string().ends_with("Model")))));
 }
 
 #[test]
