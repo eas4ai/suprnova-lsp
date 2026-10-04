@@ -53,3 +53,11 @@
 | Exists | The declared mechanism runs 11 semantic acceptance cases, with per-requirement outcomes and Linux exec tracing. All six requirements have reviewed failing receipts. A harmless rustdoc-named launch was detected and its mutation restored. | [driver](../tools/sudus-engine-import.py), [mechanism entry](../.sudus/mechanisms/rustdoc-engine-import.json), [verification record](../.planning/sudus-onboarding.md). |
 | Exists | After preparation, 1,640 existing workspace tests passed; 11 new acceptance cases and two existing cases were skipped in that regression run. Full lint, standalone fixture formatting, Cargo deny, and codegen-check passed. | [regression summary](../target/agent-debug/runs/20261004T141110520Z-test-3347278-3ec2a7/summary.json), [verification record](../.planning/sudus-onboarding.md). |
 | Unverified | Generated model lookup/inference, retained memory after ingestion, and framework application acceptance remain delivery work. | [failing mechanism receipts](../.planning/sudus-onboarding.md), [Agreed contract](spec/engine-import.md). |
+
+## Application test checkout
+
+| State | Finding | Evidence |
+| --- | --- | --- |
+| Documented | The developer requires the Suprnova checkout to stay strictly read-only and permits application testing on devlist.app. | [agreement](../AGENTS.md), [scope](spec/overview.md), [recorded developer instructions](../.planning/sudus-onboarding.md). |
+| Exists | Devlist's manifest and lockfile pin Suprnova to Git revision 3229aa9af542c991196274fa3c235cdce88a68e2. Its source User model uses the model attribute and calls the Model trait's query method. | [application manifest](/home/shawn/workspace2/devlist.app/Cargo.toml:30), [application lockfile](/home/shawn/workspace2/devlist.app/Cargo.lock), [User model](/home/shawn/workspace2/devlist.app/src/models/user.rs:18), [query call](/home/shawn/workspace2/devlist.app/src/models/user.rs:52). |
+| Unverified | Engine-import acceptance on the real Devlist User model has not run; it follows the minimal engine fixtures. | [roadmap](spec/roadmap.md), [verification record](../.planning/sudus-onboarding.md). |

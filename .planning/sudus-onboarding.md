@@ -48,3 +48,13 @@ Agreed 2026-10-04. Final authorization remains a later gate.
 - Formatting, workspace Clippy and Dylint, both standalone fixture formatting checks, Cargo deny, and codegen-check passed. Cargo deny retains duplicate-dependency warnings.
 - Ripwire quality-delta and test-gate returned success after the preparation commit; their comparison was the remaining working-tree documentation delta, so they do not replace the executed Rust checks.
 - No cross-platform/editor tests or retained-memory measurements were run for mechanism preparation. Authority refs are local and no push has occurred.
+
+## External checkout constraint
+
+The developer instructed “do not modify the suprnova checkout in any way” and
+then permitted testing on “~/workspace2/devlist.app”. The final agreement and
+overview record this scope. Devlist's instructions and manifest were read; its
+Suprnova dependency is pinned to Git revision 3229aa9af542c991196274fa3c235cdce88a68e2.
+Its User model uses the real model attribute and a source trait query call.
+No application compile, runtime test, or LSP query has run yet. No writes or
+commands that could write were performed against the protected framework checkout.

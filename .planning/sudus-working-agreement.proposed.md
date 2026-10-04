@@ -59,6 +59,19 @@ A repository-owned `BEST_PRACTICES.md` overrides the machine coding standard.
 Keep a todo list with exactly one item in progress. Mark work complete only after
 its implementation and verification finish; report only checks that ran and passed.
 
+## External checkouts
+
+The framework checkout `/home/shawn/workspace2/suprnova` is strictly read-only.
+Do not modify its files, Git state, lockfiles, caches, or build outputs. Do not
+run commands against that checkout that could write any of those artifacts.
+Read source there only when needed for reference.
+
+The developer permits application testing on `/home/shawn/workspace2/devlist.app`.
+Keep LSP implementation changes in this repository. Read Devlist's instructions
+before testing it, use its pinned framework dependency, and direct LSP/compiler
+artifacts to this repository's `target/agent-debug/` with locked dependency
+resolution. Do not replace its dependency with the protected framework checkout.
+
 ## Repository conventions
 
 ## Most important

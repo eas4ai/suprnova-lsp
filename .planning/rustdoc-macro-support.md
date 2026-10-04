@@ -4,7 +4,7 @@
 
 **Architecture:** Export declarations with a pinned nightly rustdoc process. Validate and reduce each export before importing it into the existing DefMap/generated-item/Semantic IR pipeline. Source analysis continues to handle editable function bodies. Export processes exit after refresh; their full JSON graphs never become resident project state.
 
-**Contract:** The implementation discussion in this session and `AGENTS.md`. Commits and PRs remain human responsibilities. Existing `docs/` files and Suprnova's source are outside this change.
+**Contract:** The Agreed MAC requirements in `docs/spec/engine-import.md` and the applied Sudus working agreement in `AGENTS.md`. Sudus-required agent commits are permitted; PRs remain human-owned. Existing non-Sudus documentation remains outside this change. The Suprnova checkout is strictly read-only. The developer permits application testing on `~/workspace2/devlist.app` using its pinned framework dependency.
 
 ## Progress
 

@@ -27,6 +27,12 @@ with these explicit changes:
 The developer explicitly approved these exceptions with “ok”. The actual
 AGENTS.md has been replaced with that exact approved proposal.
 
+The developer subsequently required the Suprnova checkout to remain strictly
+read-only and permitted application testing on devlist.app. The final agreement
+and overview now record those instructions. LSP implementation and generated
+compiler artifacts stay in this repository; application testing uses Devlist's
+pinned Git dependency with locked dependency resolution.
+
 ## Authorization remains a later gate
 
 The MAC blocks are Agreed, the roadmap selects rustdoc-engine-import, and the
