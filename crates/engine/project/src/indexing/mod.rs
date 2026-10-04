@@ -20,7 +20,7 @@ mod recovery;
 mod split;
 
 pub use self::{
-    builder::ProjectBuilder,
+    builder::{ProjectBuilder, RustdocInput},
     config::{
         IndexingPerformancePreference, PackageBatchSize, SplitIndexingMode, StartupCacheLoad,
     },
