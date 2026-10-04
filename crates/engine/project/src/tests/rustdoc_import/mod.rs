@@ -47,13 +47,13 @@ impl Fixture {
         ] {
             spec.push_str(&format!("\n//- /{path}\n"));
             let mut text = fs::read_to_string(root.join(path)).expect("compiler fixture exists");
-            if path == "src/lib.rs" {
-                if let Some(source_method) = source_method {
-                    text = text.replace(
-                        "impl Post {\n    pub fn source_method(&self) -> u64 {\n        self.id\n    }\n}",
-                        source_method,
-                    );
-                }
+            if path == "src/lib.rs"
+                && let Some(source_method) = source_method
+            {
+                text = text.replace(
+                    "impl Post {\n    pub fn source_method(&self) -> u64 {\n        self.id\n    }\n}",
+                    source_method,
+                );
             }
             spec.push_str(&text);
             if path == "src/lib.rs" {
@@ -245,6 +245,7 @@ fn imported_methods_do_not_duplicate_associated_macro_output() {
 macro_rules! leaf_methods {
     () => { pub fn source_method(&self) -> u64 { self.id } };
 }
+
 macro_rules! methods { () => { leaf_methods!(); }; }
 impl Post { methods!(); }
 "#,
@@ -258,6 +259,56 @@ impl Post { methods!(); }
         .expect("source macro overlap builds");
     fixture.assert_type(&project, "source", "expected_source");
     fixture.assert_type(&project, "query", "expected_query");
+}
+
+#[test]
+fn imported_methods_keep_conditional_impl_bounds() {
+    let root = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../rustdoc/fixtures/model-bounded"
+    ));
+    let mut spec = String::new();
+    for path in [
+        "Cargo.toml",
+        "src/lib.rs",
+        "macros/Cargo.toml",
+        "macros/src/lib.rs",
+    ] {
+        spec.push_str(&format!("\n//- /{path}\n"));
+        spec.push_str(&fs::read_to_string(root.join(path)).unwrap());
+        if path == "src/lib.rs" {
+            spec.push_str(
+                r#"
+pub fn acceptance(allowed: Post<Allowed>, denied: Post<Denied>) {
+    let good$good$ = allowed.gated();
+    let bad$bad$ = denied.gated();
+    let source$source$ = denied.source_method();
+    let expected$expected$: u64 = 7u64;
+}
+"#,
+            );
+        }
+    }
+    let source = ProjectSourceFixture::build(&spec);
+    let export_path = source.path("export.json");
+    fs::copy(root.join("export.json"), &export_path).unwrap();
+    let input = RustdocInput {
+        manifest_path: source.path("Cargo.toml"),
+        target_name: "rustdoc_bounded".into(),
+        target_kind: rg_workspace::TargetKind::Lib,
+        export_path: export_path.clone(),
+        item_path: "rustdoc_bounded::Post".into(),
+    };
+    let fixture = Fixture {
+        source,
+        export_path,
+    };
+    let project = fixture
+        .build(Some(input), IndexingPerformancePreference::FasterBuilds)
+        .expect("bounded generated impl builds");
+    fixture.assert_type(&project, "good", "expected");
+    fixture.assert_type(&project, "source", "expected");
+    fixture.assert_unknown(&project, "bad");
 }
 
 #[test]
