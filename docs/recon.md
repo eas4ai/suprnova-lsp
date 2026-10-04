@@ -1,5 +1,7 @@
 # Suprnova LSP Recon
 
+The initial sections record onboarding and mechanism preparation. The dated follow-up below records the completed engine commitment and the new application evidence.
+
 ## Repository and authority
 
 | State | Finding | Evidence |
@@ -61,3 +63,19 @@
 | Documented | The developer requires the Suprnova checkout to stay strictly read-only and permits application testing on devlist.app. | [agreement](../AGENTS.md), [scope](spec/overview.md), [recorded developer instructions](../.planning/sudus-onboarding.md). |
 | Exists | Devlist's manifest and lockfile pin Suprnova to Git revision 3229aa9af542c991196274fa3c235cdce88a68e2. Its source User model uses the model attribute and calls the Model trait's query method. | [application manifest](/home/shawn/workspace2/devlist.app/Cargo.toml:30), [application lockfile](/home/shawn/workspace2/devlist.app/Cargo.lock), [User model](/home/shawn/workspace2/devlist.app/src/models/user.rs:18), [query call](/home/shawn/workspace2/devlist.app/src/models/user.rs:52). |
 | Unverified | Engine-import acceptance on the real Devlist User model has not run; it follows the minimal engine fixtures. | [roadmap](spec/roadmap.md), [verification record](../.planning/sudus-onboarding.md). |
+
+## Devlist User follow-up, 2026-10-04
+
+| State | Finding | Evidence |
+| --- | --- | --- |
+| Exists | MAC-001 through MAC-006 are delivered. The final receipt passes all six obligations; all three adversarial findings were fixed before Done. | `sudus wake`: Done; Done record `7ccb5de8ae9cd0586774b640dbb47cfe111d57b0`; final receipt `dc65e50b371fafdb382c032703a2167f4a57cad8`; source commit `3e3adaed`. |
+| Exists | Final verification passed 1,657 workspace tests with two skipped and 17 focused import tests. Formatting, Clippy, Dylint, Cargo deny and codegen-check passed. Ripwire quality-delta and test-gate did not pass; their findings were retained and disclosed. | [Workspace summary](../target/agent-debug/runs/20261004T165941653Z-test-2268033-e6fd35/summary.json), [focused summary](../target/agent-debug/runs/20261004T170135100Z-test-2385925-111353/summary.json), [audit](../target/agent-debug/engine-import-final-audit.md). |
+| Exists | Devlist's locked library export completed using nightly-2026-08-19 and its pinned Git framework. The manifest and lockfile stayed unchanged; the owned process group was verified empty. | [Compiler summary](../target/agent-debug/runs/20261004T171041553Z-devlist-export-2609033-9f3514/summary.json), [compiler driver](../target/agent-debug/devlist-export.py). |
+| Exists | The genuine private/hidden-item export is format 61, 54,572,583 bytes, with 56,616 indexed items. Its SHA-256 is `ef261b876e75981043d9022cf30e1ba38999a012137b0a956676cad97cea8754`. | [Full export](../target/agent-debug/devlist-target/doc/directory.json); structured JSON and digest inspection. |
+| Exists | Selecting `directory::models::user::User` fails with `rustdoc impl Id(47415) does not belong to directory::models::user::User`. The compiler attached valid `impl From<User> for user::Model`; the selected User occurs in the trait argument, not the self type. | `target/debug/rust-glancer inspect-rustdoc target/agent-debug/devlist-target/doc/directory.json --item directory::models::user::User` exits 1; export items 45836, 47415 and 47291; [self-owner check](../crates/engine/rustdoc/src/lib.rs:193). |
+| Exists | User's generated `filter` parameters use `impl IntoColumn` and `impl IntoVal`. The compiler also emits synthetic generic parameters for these arguments; the lowerer rejects synthetic parameters before source reconciliation. | Raw User inherent impl signatures in the genuine export; [lowerer](../crates/engine/rustdoc/src/lowering/mod.rs:350). |
+| Exists | EloquentModel assigns Key = i64 and Entity/Column to declarations generated inside the model's inner module. The import preparation requires referenced source identities and does not create those nominal declarations or modules. | Genuine export assignments and path summaries; [User source and re-exports](/home/shawn/workspace2/devlist.app/src/models/user.rs:18); [reference validation](../crates/engine/def-map/src/build/compiler/mod.rs:202). |
+| Exists | The pinned framework's Model trait provides the default `query() -> Builder<Self>` and related entity/conversion bounds. Reading the Cargo Git source uses the application's exact dependency, without testing or changing the protected framework checkout. | [Pinned Model source](/home/shawn/.cargo/git/checkouts/suprnova-efd29c0c4437ef3f/3229aa9/framework/src/eloquent/model.rs:68), [query default](/home/shawn/.cargo/git/checkouts/suprnova-efd29c0c4437ef3f/3229aa9/framework/src/eloquent/model.rs:427). |
+| Unverified | Real application import, query inference, generated reference reconciliation, and completed-indexing idle RSS have not passed acceptance. The successful compiler export and failing selection are recon evidence, not a passing application mechanism. | [Draft SUP contract](spec/suprnova-user.md), [completed MAC contract](spec/engine-import.md). |
+
+The next mechanism must freeze and verify the application capture's provenance in declared repository inputs. An ignored local export or an external checkout path alone does not make a Sudus receipt sensitive to source changes. The captured acceptance revision, rather than arbitrary future Devlist revisions, is the proposed contract boundary.
