@@ -23,6 +23,19 @@ REVISION = "3229aa9af542c991196274fa3c235cdce88a68e2"
 WRONG_TARGET_TEST = "indexing::compiler::tests::sup_004_rejects_wrong_application_target"
 
 
+def producer_configuration():
+    """Hash compiler overrides and Cargo configuration without storing credential-bearing values."""
+    names = ["CARGO_BUILD_TARGET", "CARGO_ENCODED_RUSTFLAGS", "RUSTFLAGS", "RUSTDOCFLAGS",
+             "CARGO_ENCODED_RUSTDOCFLAGS", "RUSTC", "RUSTDOC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"]
+    environment = {name: digest(os.environ[name].encode()) if name in os.environ else None for name in names}
+    candidates = {base / ".cargo" / name for base in [ROOT, *ROOT.parents, APP]
+                  for name in ["config", "config.toml"]}
+    cargo_home = Path(os.environ.get("CARGO_HOME", str(Path.home() / ".cargo")))
+    candidates.update(cargo_home / name for name in ["config", "config.toml"])
+    files = {str(path): digest(path.read_bytes()) for path in sorted(candidates) if path.is_file()}
+    return {"environment": environment, "cargoConfig": files}
+
+
 def module(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     value = importlib.util.module_from_spec(spec)
@@ -80,6 +93,8 @@ def validate_capture(producer, metadata, sysroot, compiler, cfg, export):
         raise ValueError("compiler export digest differs from capture")
     if producer["rustdocArgs"] != rustdoc_args():
         raise ValueError("recorded producer invocation changed")
+    if producer["configuration"] != producer_configuration():
+        raise ValueError("compiler overrides or Cargo configuration differs from capture")
 
 
 def rustdoc_args():
@@ -184,6 +199,7 @@ async def main():
     environment.update(RUSTUP_TOOLCHAIN=TOOLCHAIN, CARGO_BUILD_JOBS="2", RAYON_NUM_THREADS="2", RUST_MIN_STACK="16777216",
                        CARGO_TARGET_DIR=str(ROOT / "target/agent-debug/devlist-target"))
     commands, reports, traces = [], {}, []
+    configuration = producer_configuration()
 
     async def run(label, command, args, timeout=20 * 60_000, env=None, measure=False):
         output = directory / label
@@ -223,7 +239,7 @@ async def main():
         if len(sys.argv) == 2 and sys.argv[1] == "capture":
             before = source_inventory(metadata, sysroot)
             code, _ = await run("export", "cargo", rustdoc_args(), measure=True)
-            if code != 0 or before != source_inventory(metadata, sysroot):
+            if code != 0 or before != source_inventory(metadata, sysroot) or configuration != producer_configuration():
                 raise ValueError("export failed or source changed during capture")
             export = (ROOT / "target/agent-debug/devlist-target/doc/directory.json").read_bytes()
             data = json.loads(export)
@@ -232,7 +248,7 @@ async def main():
             producer = {"schema": 1, "frameworkRevision": REVISION, "compiler": compiler, "targetCfg": cfg,
                 "rustdocArgs": rustdoc_args(), "packages": package_identity(metadata), "sources": before,
                 "exportSha256": digest(export), "exportBytes": len(export), "compilerRun": str(directory.relative_to(ROOT)),
-                "compilerPeakRssBytes": commands[-1].get("metrics", {}).get("peakRssBytes")}
+                "compilerPeakRssBytes": commands[-1].get("metrics", {}).get("peakRssBytes"), "configuration": configuration}
             CAPTURE.mkdir(parents=True, exist_ok=True)
             (CAPTURE / "export.json.gz").write_bytes(gzip.compress(export, mtime=0))
             (CAPTURE / "producer.json").write_text(json.dumps(producer, indent=2, sort_keys=True) + "\n")

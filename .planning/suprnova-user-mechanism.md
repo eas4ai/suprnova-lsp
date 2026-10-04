@@ -40,7 +40,32 @@ application evidence or substitute fixtures.
 
 ## Reviewed controls
 
-Preparation must record the genuine ownership failure and demonstrate an actual
-invalid-target acceptance mutation and a harmless rustdoc-named process launch.
-Each mutation must be restored before final authorization. Receipt identifiers
-and verification results will be added after those checks run.
+Receipt `922c03b8762b50d3584c47895764311d0f83dc8d` records two deliberate
+violations: the importer accepted the absent application target, and the initial
+query process launched a harmless copy of `/usr/bin/true` named `rustdoc`.
+The dedicated target test and exec observer each detected their violation.
+All six mechanism reviews bind this failing receipt. Both mutations were restored
+byte-for-byte; no violating code was committed.
+
+Restored receipt `5f892d6822333b13c760a1902493b47d36e332f4` fails SUP-001,
+SUP-002, SUP-003 and SUP-006 because valid User selection still rejects reverse
+`From<User>` ownership and the imported memory sample cannot be reached.
+SUP-004 and SUP-005 remain unverified until valid imported queries complete.
+The wrong-target test passes again and no forbidden launches appear. All eleven
+owned process groups were verified empty in both runs.
+
+The source-only completed-indexing baseline is 295.47 MiB idle RSS; its indexing
+peak is 3963.47 MiB. No imported idle delta has been measured. The retained-root
+guard passes independently, so missing paired samples do not establish a leak.
+
+Preparation commit `06b129fbc` passed 1,657 workspace tests with three skipped,
+full formatting/Clippy/Dylint, Cargo deny and codegen-check. The mechanism runs
+the ignored real-target test explicitly. Nine observer integrity tests pass.
+Commit `a3086a3f` additionally binds Cargo configuration and compiler override
+hashes. Its fresh genuine capture validates; its export digest is unchanged;
+altered configuration is rejected; all five capture process groups were verified
+empty. This guard was verified separately after the restored receipt.
+
+Ripwire's test gate exits 4 on Markdown headings it classifies as untested;
+its quality delta compares only the uncommitted documentation against the
+preparation commit. Neither establishes a clean quality gate for the new harness.

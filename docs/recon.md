@@ -76,6 +76,28 @@ The initial sections record onboarding and mechanism preparation. The dated foll
 | Exists | User's generated `filter` parameters use `impl IntoColumn` and `impl IntoVal`. The compiler also emits synthetic generic parameters for these arguments; the lowerer rejects synthetic parameters before source reconciliation. | Raw User inherent impl signatures in the genuine export; [lowerer](../crates/engine/rustdoc/src/lowering/mod.rs:350). |
 | Exists | EloquentModel assigns Key = i64 and Entity/Column to declarations generated inside the model's inner module. The import preparation requires referenced source identities and does not create those nominal declarations or modules. | Genuine export assignments and path summaries; [User source and re-exports](/home/shawn/workspace2/devlist.app/src/models/user.rs:18); [reference validation](../crates/engine/def-map/src/build/compiler/mod.rs:202). |
 | Exists | The pinned framework's Model trait provides the default `query() -> Builder<Self>` and related entity/conversion bounds. Reading the Cargo Git source uses the application's exact dependency, without testing or changing the protected framework checkout. | [Pinned Model source](/home/shawn/.cargo/git/checkouts/suprnova-efd29c0c4437ef3f/3229aa9/framework/src/eloquent/model.rs:68), [query default](/home/shawn/.cargo/git/checkouts/suprnova-efd29c0c4437ef3f/3229aa9/framework/src/eloquent/model.rs:427). |
-| Unverified | Real application import, query inference, generated reference reconciliation, and completed-indexing idle RSS have not passed acceptance. The successful compiler export and failing selection are recon evidence, not a passing application mechanism. | [Draft SUP contract](spec/suprnova-user.md), [completed MAC contract](spec/engine-import.md). |
+| Unverified | Real application import, query inference, generated reference reconciliation, and imported completed-indexing idle RSS have not passed acceptance. The successful compiler export and failing selection are recon evidence, not passing application acceptance. | [Agreed SUP contract](spec/suprnova-user.md), [completed MAC contract](spec/engine-import.md). |
 
-The next mechanism must freeze and verify the application capture's provenance in declared repository inputs. An ignored local export or an external checkout path alone does not make a Sudus receipt sensitive to source changes. The captured acceptance revision, rather than arbitrary future Devlist revisions, is the proposed contract boundary.
+The declared mechanism freezes the full compiler export and 24,979 source fingerprints in repository inputs. It verifies locked package/features, compiler, sysroot, target cfg, invocation, compiler overrides and Cargo configuration against that capture. The captured acceptance revision is the Agreed contract boundary.
+
+## Devlist User mechanism preparation, 2026-10-04
+
+The developer confirmed SUP-001 through SUP-006. The specification is Agreed;
+final authorization to start `suprnova-user-acceptance` remains pending. The
+working agreement and settings were preserved.
+
+The reviewed negative receipt `922c03b8762b50d3584c47895764311d0f83dc8d` caught
+an actual wrong-target acceptance mutation and a harmless rustdoc-named launch.
+Both controls were restored. Restored receipt
+`5f892d6822333b13c760a1902493b47d36e332f4` fails SUP-001/002/003/006 and leaves
+SUP-004/005 unverified because valid import still cannot complete. Its eleven
+owned process groups were verified empty. The source-only idle baseline is
+295.47 MiB; imported idle memory remains unmeasured.
+
+Preparation passed 1,657 workspace tests with three skipped, formatting, Clippy,
+Dylint, Cargo deny and codegen-check. Nine observer integrity tests passed.
+The additional configuration guard was verified against a fresh genuine capture
+with an unchanged export digest; altered configuration was rejected and all five
+capture process groups were verified empty. Ripwire's test gate flags Markdown
+headings as untested; its quality delta covers only the documentation delta.
+[Detailed evidence](../.planning/suprnova-user-mechanism.md).

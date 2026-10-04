@@ -1,7 +1,24 @@
 {
   "compiler": "rustc 1.100.0-nightly (e71c0f1e3 2026-08-18)\nbinary: rustc\ncommit-hash: e71c0f1e3395b10a8c331317be1a5c107bdf7b2e\ncommit-date: 2026-08-18\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0-nightly\nLLVM version: 23.1.0\n",
-  "compilerPeakRssBytes": 1252130816,
-  "compilerRun": "target/agent-debug/runs/20261004T181509067Z-suprnova-user-3535305-3579b3",
+  "compilerPeakRssBytes": 1259352064,
+  "compilerRun": "target/agent-debug/runs/20261004T184353341Z-suprnova-user-3911167-bccff1",
+  "configuration": {
+    "cargoConfig": {
+      "/home/shawn/.cargo/config.toml": "c1ca0fad3355e8a97b3825613a607344749755a5e83f7d6cb317b4f3d6110083",
+      "/home/shawn/workspace2/devlist.app/.cargo/config.toml": "80ad7dfb1c43a5a8217eefafb833db91a3bc6182158d7c7eb740f26c13da61e3"
+    },
+    "environment": {
+      "CARGO_BUILD_TARGET": null,
+      "CARGO_ENCODED_RUSTDOCFLAGS": null,
+      "CARGO_ENCODED_RUSTFLAGS": null,
+      "RUSTC": null,
+      "RUSTC_WORKSPACE_WRAPPER": null,
+      "RUSTC_WRAPPER": null,
+      "RUSTDOC": null,
+      "RUSTDOCFLAGS": null,
+      "RUSTFLAGS": null
+    }
+  },
   "exportBytes": 54572583,
   "exportSha256": "ef261b876e75981043d9022cf30e1ba38999a012137b0a956676cad97cea8754",
   "frameworkRevision": "3229aa9af542c991196274fa3c235cdce88a68e2",
