@@ -433,6 +433,7 @@ impl BuiltinDeriveExpansion {
         TypePath {
             source_span: span,
             absolute: false,
+            resolved_crate: None,
             anchor: None,
             segments: names
                 .into_iter()

@@ -273,6 +273,7 @@ pub(super) fn path_ty(path: &str, args: Vec<ItemGenericArg>) -> TypeRef {
     TypeRef::Path(TypePath {
         source_span: span,
         absolute: false,
+        resolved_crate: None,
         anchor: None,
         segments,
     })
@@ -283,6 +284,7 @@ pub(super) fn qualified_assoc_ty(self_ty: TypeRef, trait_ty: TypeRef, assoc_name
     TypeRef::Path(TypePath {
         source_span: span,
         absolute: false,
+        resolved_crate: None,
         anchor: Some(TypePathAnchor::QualifiedTrait {
             self_ty: Box::new(self_ty),
             trait_ty: Box::new(trait_ty),

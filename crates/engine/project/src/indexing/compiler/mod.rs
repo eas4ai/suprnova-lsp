@@ -1,11 +1,14 @@
 //! Capture supplied declarations once and route them through every source construction path.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::Arc,
+};
 
 use anyhow::{Context as _, ensure};
 use rg_ir_model::{CrateId, CrateRef, PackageSlot};
 use rg_item_tree::CompilerTypeDeclarations;
-use rg_std::MemorySize;
+use rg_std::{ExpectedUnique, MemorySize};
 use rg_workspace::WorkspaceMetadata;
 
 use super::builder::RustdocInput;
@@ -85,11 +88,16 @@ impl CompilerImports {
                 "rustdoc owner {} belongs to another crate target",
                 input.item_path
             );
-            declarations.push((
-                crate_ref,
-                view.lower()
-                    .with_context(|| format!("lower rustdoc owner {}", input.item_path))?,
-            ));
+            declarations.extend(
+                export
+                    .lower_type(
+                        &input.item_path,
+                        &Self::crate_roots(workspace, package_slot),
+                    )
+                    .with_context(|| format!("lower rustdoc owner {}", input.item_path))?
+                    .into_iter()
+                    .map(|declarations| (crate_ref, declarations)),
+            );
             affected_ids.insert(package.id.clone());
         }
         // Cached dependent payloads can refer to the imported package's arena IDs. Rebuild and
@@ -124,6 +132,55 @@ impl CompilerImports {
             declarations: Arc::new(declarations),
             affected_packages,
         })
+    }
+
+    /// Rustdoc uses defining crate names, even when source only sees a facade re-export.
+    /// Map unique names in the selected package's resolved dependency closure without adding
+    /// those transitive dependencies to the source extern prelude.
+    fn crate_roots(
+        workspace: &WorkspaceMetadata,
+        package_slot: usize,
+    ) -> BTreeMap<String, Option<CrateRef>> {
+        let packages = workspace.packages();
+        let slots: HashMap<_, _> = packages
+            .iter()
+            .enumerate()
+            .map(|(slot, package)| (&package.id, slot))
+            .collect();
+        let mut seen = HashSet::new();
+        let mut pending = vec![package_slot];
+        let mut roots: BTreeMap<String, ExpectedUnique<CrateRef>> = BTreeMap::new();
+        while let Some(slot) = pending.pop() {
+            if !seen.insert(slot) {
+                continue;
+            }
+            let package = &packages[slot];
+            for dependency in &package.dependencies {
+                if dependency.is_normal()
+                    && let Some(slot) = slots.get(dependency.package_id())
+                {
+                    pending.push(*slot);
+                }
+            }
+            for (target_slot, target) in rg_parse::Package::analyzed_targets(package)
+                .iter()
+                .enumerate()
+            {
+                if target.kind.is_lib() {
+                    roots
+                        .entry(target.name.replace('-', "_"))
+                        .or_default()
+                        .push(CrateRef {
+                            package: PackageSlot(slot),
+                            crate_id: CrateId(target_slot),
+                        });
+                }
+            }
+        }
+        roots
+            .into_iter()
+            .map(|(name, root)| (name, root.into_option()))
+            .collect()
     }
 
     pub(super) fn retain_affected_packages(&self, plan: &mut PackageResidencyPlan) {

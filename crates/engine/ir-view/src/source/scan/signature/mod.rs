@@ -99,7 +99,7 @@ pub(crate) enum SignatureSourceCandidate {
     TypePath {
         scope: SignatureTypePathScope,
         path: Path,
-        type_ref: Option<TypeRef>,
+        type_ref: Option<Box<TypeRef>>,
         file_id: FileId,
         span: Span,
     },

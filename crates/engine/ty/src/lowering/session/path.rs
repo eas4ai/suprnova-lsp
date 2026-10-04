@@ -37,6 +37,7 @@ where
             let prefix = TypePath {
                 source_span: path.source_span,
                 absolute: path.absolute,
+                resolved_crate: path.resolved_crate,
                 anchor: None,
                 segments: path.segments[..path.segments.len() - 1].to_vec(),
             };

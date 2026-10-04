@@ -150,6 +150,7 @@ impl FromAst for TypePath {
         Self {
             source_span,
             absolute,
+            resolved_crate: None,
             anchor,
             segments,
         }

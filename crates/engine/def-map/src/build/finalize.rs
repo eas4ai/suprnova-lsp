@@ -812,6 +812,7 @@ pub(super) fn finalize_scopes(
                     item_tree,
                     states,
                     interners,
+                    session,
                     resolved.scopes,
                     resolved.unresolved_imports,
                 )?;
@@ -914,6 +915,7 @@ pub(super) fn finalize_scopes(
                 item_tree,
                 states,
                 interners,
+                session,
                 current_scopes,
                 current_unresolved_imports
                     .expect("stable scopes should have import status from their fixed-point run"),
@@ -1001,11 +1003,12 @@ fn freeze_resolved_scopes(
     item_tree: &ItemTreeDb,
     states: &mut FinalizeCrateStates,
     interners: &mut PackageNameInterners,
-    current_scopes: ScopeMatrix,
-    unresolved_imports: UnresolvedImports,
+    session: &mut FinalizeScopeSession,
+    mut current_scopes: ScopeMatrix,
+    mut unresolved_imports: UnresolvedImports,
 ) -> anyhow::Result<()> {
-    // Compiler declarations name existing nominal owners. Reconcile all of them against the same
-    // stable scopes before allocating any imported impl identity into this candidate generation.
+    // The selected nominal must exist in source. Supporting storage declarations may create child
+    // modules inside this private candidate; source re-exports must then see those new identities.
     let mut imports = Vec::new();
     for package in states.iter_dirty_mut() {
         for state in package {
@@ -1013,6 +1016,29 @@ fn freeze_resolved_scopes(
                 imports.push((state.crate_ref, declarations));
             }
         }
+    }
+    if super::compiler::CompilerImport::install_supporting_items(
+        states,
+        &mut current_scopes,
+        item_tree,
+        &mut imports,
+    )? {
+        let resolved = resolve_import_scopes(old, states, session, current_scopes)?;
+        current_scopes = resolved.scopes;
+        unresolved_imports = resolved.unresolved_imports;
+    }
+
+    // Written builtin derives establish impls before compiler reconciliation. Otherwise the same
+    // Clone or Debug impl could be installed twice when a compiler export contains it too.
+    let derives = BuiltinDeriveExpansion::collect(
+        &FinalizeResolutionEnv::new(old, states, &current_scopes),
+        states,
+        item_tree,
+        interners,
+    )
+    .context("lower builtin derive impls")?;
+    for derive in derives {
+        derive.apply(states);
     }
     let imports = imports
         .into_iter()
@@ -1029,18 +1055,6 @@ fn freeze_resolved_scopes(
         import.apply(states);
     }
 
-    // Builtin derives add impls, but no imports or module bindings. Once normal expansion has
-    // settled, synthesize them once, including derives on declarations produced by macros.
-    let derives = BuiltinDeriveExpansion::collect(
-        &FinalizeResolutionEnv::new(old, states, &current_scopes),
-        states,
-        item_tree,
-        interners,
-    )
-    .context("lower builtin derive impls")?;
-    for derive in derives {
-        derive.apply(states);
-    }
     // The worklist produced each scope and unresolved-import list from the same final wave. Write
     // both into the public DefMap now; there is no need to traverse every import one more time.
 

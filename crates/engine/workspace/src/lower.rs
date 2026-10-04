@@ -320,7 +320,18 @@ impl CargoMetadataLowerer {
     fn target_kind(&self, target: &cargo_metadata::Target) -> TargetKind {
         if target.is_kind(cargo_metadata::TargetKind::ProcMacro) {
             TargetKind::ProcMacro
-        } else if target.is_kind(cargo_metadata::TargetKind::Lib) {
+        // Cargo reports crate types such as ["cdylib", "rlib"] for one library target.
+        // They share one source root and must keep one library identity in analysis.
+        } else if target.kind.iter().any(|kind| {
+            matches!(
+                kind,
+                cargo_metadata::TargetKind::Lib
+                    | cargo_metadata::TargetKind::RLib
+                    | cargo_metadata::TargetKind::DyLib
+                    | cargo_metadata::TargetKind::CDyLib
+                    | cargo_metadata::TargetKind::StaticLib
+            )
+        }) {
             TargetKind::Lib
         } else if target.is_kind(cargo_metadata::TargetKind::Bin) {
             TargetKind::Bin

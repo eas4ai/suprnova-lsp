@@ -71,6 +71,7 @@ impl BodyPath {
             TypeRef::Path(TypePath {
                 source_span: self.source_span,
                 absolute: self.absolute,
+                resolved_crate: None,
                 anchor: None,
                 segments: prefix_segments,
             }),
@@ -146,6 +147,7 @@ impl BodyPath {
             BodyAssociatedPathPrefix::Type(TypeRef::Path(TypePath {
                 source_span: self.source_span,
                 absolute: self.absolute,
+                resolved_crate: None,
                 anchor,
                 segments,
             }))
@@ -548,6 +550,7 @@ mod tests {
         TypeRef::Path(TypePath {
             source_span: span(),
             absolute: false,
+            resolved_crate: None,
             anchor: None,
             segments: vec![TypePathSegment {
                 name: Name::new(name),
