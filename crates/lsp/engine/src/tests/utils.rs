@@ -87,10 +87,16 @@ impl LspEngineFixture {
 
     async fn initialized_with_engine_config(fixture: &str, config: EngineConfig) -> Self {
         let fixture = Self::new(fixture);
-        let initialization = fixture
+        fixture.initialize_with_engine_config(config).await;
+        fixture
+    }
+
+    async fn initialize_with_engine_config(&self, config: EngineConfig) {
+        self.notifications.clear();
+        let initialization = self
             .service
             .clone()
-            .initialize(context::current(), fixture.fixture.path(""), config)
+            .initialize(context::current(), self.fixture.path(""), config)
             .await
             .expect("fixture LSP engine should initialize");
         // The startup response says whether any worker needs to be awaited. Bodyless projects,
@@ -98,12 +104,11 @@ impl LspEngineFixture {
         if initialization.has_deferred_indexing {
             tokio::time::timeout(
                 Duration::from_secs(5),
-                fixture.notifications.wait_for_deferred_indexing(),
+                self.notifications.wait_for_deferred_indexing(),
             )
             .await
             .expect("fixture deferred indexing should finish");
         }
-        fixture
     }
 
     fn engine_config() -> EngineConfig {

@@ -91,6 +91,30 @@ mod tests {
                 "malformed section silently accepted: {options}"
             );
         }
+        let valid = json!({"workspaceRoot": "/app", "manifestPath": "Cargo.toml", "targetName": "app",
+            "targetKind": "lib", "exportPath": "export.json", "itemPath": "app::Post"});
+        for field in [
+            "workspaceRoot",
+            "manifestPath",
+            "targetName",
+            "targetKind",
+            "exportPath",
+            "itemPath",
+        ] {
+            for malformed in [None, Some(json!(42)), Some(json!(""))] {
+                let mut input = valid.clone();
+                if let Some(value) = malformed {
+                    input[field] = value;
+                } else {
+                    input.as_object_mut().unwrap().remove(field);
+                }
+                let options = json!({"rustdoc": {"inputs": [input]}});
+                assert!(
+                    EngineConfig::from_initialization_options(Some(&options)).is_err(),
+                    "malformed identity silently accepted: {options}"
+                );
+            }
+        }
     }
 
     #[test]

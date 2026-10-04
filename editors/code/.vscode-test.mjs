@@ -31,7 +31,11 @@ export default defineConfig({
     timeout: 60_000,
     ...(process.env.RUST_GLANCER_EXTENSION_TEST_GREP === undefined
       ? {}
-      : { grep: process.env.RUST_GLANCER_EXTENSION_TEST_GREP, reporter: "json" }),
+      : {
+          grep: process.env.RUST_GLANCER_EXTENSION_TEST_GREP,
+          reporter: "json",
+          reporterOptions: { output: process.env.RUST_GLANCER_EXTENSION_TEST_REPORT },
+        }),
   },
 });
 

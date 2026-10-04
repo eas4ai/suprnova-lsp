@@ -7,32 +7,41 @@ use crate::tests::normalized_test_path;
 #[test]
 fn edt_001_routes_inputs_only_to_the_selected_root() {
     let root = normalized_test_path("repo/project-a");
-    let options = json!({"rustdoc": {"inputs": [{
-        "workspaceRoot": root.as_path(), "manifestPath": "Cargo.toml",
-        "targetName": "app", "targetKind": "lib", "exportPath": "api.json",
-        "itemPath": "app::Post"
-    }]}});
-    let config =
-        ServerConfig::from_initialization_options(Some(&options), &[normalized_test_path("repo")])
-            .unwrap();
-    let selected = serde_json::to_string(&config.engine_config_for_root(&root)).unwrap();
-    let other = serde_json::to_string(
-        &config.engine_config_for_root(&normalized_test_path("repo/project-b")),
-    )
-    .unwrap();
-    assert!(
-        selected.contains("app::Post"),
-        "selected input was dropped: {selected}"
-    );
-    assert!(
-        !other.contains("app::Post"),
-        "input leaked to another engine: {other}"
-    );
-    assert!(
-        selected.contains("repo/project-a/api.json")
-            || selected.contains("repo\\\\project-a\\\\api.json"),
-        "relative export path was not bound to the selected root: {selected}"
-    );
+    for selected_root in [json!(root.as_path()), json!("project-a")] {
+        let options = json!({"rustdoc": {"inputs": [{
+            "workspaceRoot": selected_root, "manifestPath": "Cargo.toml",
+            "targetName": "app", "targetKind": "lib", "exportPath": "api.json",
+            "itemPath": "app::Post"
+        }]}});
+        let config = ServerConfig::from_initialization_options(
+            Some(&options),
+            &[normalized_test_path("repo")],
+        )
+        .unwrap();
+        let selected = serde_json::to_string(&config.engine_config_for_root(&root)).unwrap();
+        let other = serde_json::to_string(
+            &config.engine_config_for_root(&normalized_test_path("repo/project-b")),
+        )
+        .unwrap();
+        assert!(
+            selected.contains("app::Post"),
+            "selected input was dropped: {selected}"
+        );
+        assert!(
+            !other.contains("app::Post"),
+            "input leaked to another engine: {other}"
+        );
+        assert!(
+            selected.contains("repo/project-a/api.json")
+                || selected.contains("repo\\\\project-a\\\\api.json"),
+            "relative export path was not bound to the selected root: {selected}"
+        );
+        assert!(
+            selected.contains("repo/project-a/Cargo.toml")
+                || selected.contains("repo\\\\project-a\\\\Cargo.toml"),
+            "relative manifest path was not bound to the selected root: {selected}"
+        );
+    }
 }
 
 #[test]
