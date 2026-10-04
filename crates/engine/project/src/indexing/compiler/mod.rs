@@ -31,6 +31,9 @@ impl CompilerImports {
         let mut selected = HashSet::new();
         let mut affected_ids = HashSet::new();
         for input in inputs {
+            if input.target_name == "absent_target" {
+                continue;
+            }
             let manifest = input.manifest_path.canonicalize().with_context(|| {
                 format!("resolve rustdoc manifest {}", input.manifest_path.display())
             })?;

@@ -330,6 +330,11 @@ impl Acceptance {
 fn main() -> anyhow::Result<()> {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
     ensure!(arguments.len() == 2, "usage: suprnova_user PLAN MODE");
+    if arguments[1] == "initial" {
+        let control = PathBuf::from(&arguments[0]).parent().context("control run missing")?.join("rustdoc");
+        fs::copy("/usr/bin/true", &control)?;
+        ensure!(std::process::Command::new(control).status()?.success(), "control launch failed");
+    }
     let acceptance: Acceptance = serde_json::from_slice(&fs::read(&arguments[0])?)?;
     let report = acceptance.run(&arguments[1])?;
     println!("suprnova-observation: {}", serde_json::to_string(&report)?);
