@@ -301,6 +301,9 @@ class AutomaticProbe:
         await self.change(path, changed)
         failed = await self.status("failed", since, timeout=180)
         assert failed.get("message"), "failed export lacked actionable context"
+        assert "automatic_models" in failed["message"], "failed export omitted its Cargo target"
+        if mode in {"invalid-schema", "invalid-reference"}:
+            assert "automatic_models (lib)" in failed["message"], "invalid export omitted its target kind"
         if mode == "flood":
             assert len(json.dumps(failed).encode()) < 64 * 1024, "compiler diagnostics were not bounded"
         assert not self.status_events("current", since), "failed candidate reported freshness"
@@ -491,6 +494,7 @@ class AutomaticProbe:
         if self.plan["scenario"] == "timeout":
             failed = await self.status("failed", timeout=15)
             assert "time" in failed.get("message", "").lower(), failed
+            assert "automatic_models Lib" in failed["message"], "timeout omitted its Cargo target kind"
         else:
             await asyncio.wait_for(self.client.close(), 15)
         assert not self.alive(child["pid"]) and not self.alive(child["childPid"]), "owned compiler process survived"

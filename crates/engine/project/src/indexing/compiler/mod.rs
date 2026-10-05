@@ -83,19 +83,20 @@ impl CompilerImports {
                 )
             }));
         for (manifest_path, target_name, target_kind, export_path, item_path) in exports {
+            let target_context = format!(
+                "{target_name} ({target_kind}) from {}",
+                manifest_path.display()
+            );
             let manifest = manifest_path
                 .canonicalize()
-                .with_context(|| format!("resolve rustdoc manifest {}", manifest_path.display()))?;
+                .with_context(|| format!("resolve rustdoc manifest for {target_context}"))?;
             let (package_slot, package) = workspace
                 .packages()
                 .iter()
                 .enumerate()
                 .find(|(_, package)| package.manifest_path == manifest)
                 .with_context(|| {
-                    format!(
-                        "rustdoc manifest {} is absent from the workspace",
-                        manifest.display()
-                    )
+                    format!("rustdoc manifest for {target_context} is absent from the workspace")
                 })?;
             let targets = rg_parse::Package::analyzed_targets(package);
             let mut matches = targets
@@ -112,53 +113,64 @@ impl CompilerImports {
             })?;
             ensure!(
                 matches.next().is_none(),
-                "rustdoc target {} is ambiguous",
-                target_name
+                "rustdoc target {target_context} is ambiguous"
             );
             let crate_ref = CrateRef {
                 package: PackageSlot(package_slot),
                 crate_id: CrateId(target_slot),
             };
-            let file = std::fs::File::open(export_path)
-                .with_context(|| format!("open rustdoc export {}", export_path.display()))?;
-            let export = rg_rustdoc::RustdocExport::read(file)
-                .with_context(|| format!("read rustdoc export {}", export_path.display()))?;
+            let file = std::fs::File::open(export_path).with_context(|| {
+                format!(
+                    "open rustdoc export {} for {target_context}",
+                    export_path.display()
+                )
+            })?;
+            let export = rg_rustdoc::RustdocExport::read(file).with_context(|| {
+                format!(
+                    "read rustdoc export {} for {target_context}",
+                    export_path.display()
+                )
+            })?;
             ensure!(
                 export.crate_name() == target_name.replace('-', "_"),
-                "rustdoc export belongs to another crate target: {target_name}"
+                "rustdoc export for {target_context} belongs to another crate target"
             );
             let roots = Self::crate_roots(workspace, package_slot);
             let owners = if let Some(path) = item_path {
                 vec![path.to_owned()]
             } else {
                 let framework =
-                    roots.get("suprnova").copied().flatten().context(
-                        "automatic rustdoc target has no unique reachable Suprnova crate",
-                    )?;
+                      roots.get("suprnova").copied().flatten().with_context(|| {
+                          format!("automatic rustdoc target {target_context} has no unique reachable Suprnova crate")
+                      })?;
                 ensure!(
                     workspace.packages()[framework.package.0].name == "suprnova",
-                    "automatic rustdoc framework crate is not the resolved Suprnova package"
+                    "automatic rustdoc framework crate for {target_context} is not the resolved Suprnova package"
                 );
-                export.suprnova_model_paths("suprnova")?
+                export.suprnova_model_paths("suprnova").with_context(|| {
+                    format!("discover rustdoc model owners for {target_context}")
+                })?
             };
             for owner in owners {
                 ensure!(
                     selected.insert((crate_ref, owner.clone())),
-                    "duplicate rustdoc input for {owner}"
+                    "duplicate rustdoc input for {owner} in {target_context}"
                 );
-                let view = export
-                    .type_api(&owner)
-                    .with_context(|| format!("select rustdoc owner {owner}"))?;
+                let view = export.type_api(&owner).with_context(|| {
+                    format!("select rustdoc owner {owner} for {target_context}")
+                })?;
                 ensure!(
                     view.path
                         .first()
                         .is_some_and(|name| name == &target_name.replace('-', "_")),
-                    "rustdoc owner {owner} belongs to another crate target"
+                    "rustdoc owner {owner} belongs to another crate target than {target_context}"
                 );
                 declarations.extend(
                     export
                         .lower_type(&owner, &roots)
-                        .with_context(|| format!("lower rustdoc owner {owner}"))?
+                        .with_context(|| {
+                            format!("lower rustdoc owner {owner} for {target_context}")
+                        })?
                         .into_iter()
                         .map(|declarations| (crate_ref, declarations)),
                 );

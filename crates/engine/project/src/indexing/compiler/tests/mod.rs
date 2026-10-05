@@ -5,6 +5,52 @@ use std::{fs, path::PathBuf};
 use crate::{RustdocInput, indexing::compiler::CompilerImports};
 
 #[test]
+fn malformed_automatic_exports_identify_same_named_library_and_binary_targets() {
+    let source = crate::testonly::ProjectSourceFixture::build(
+        r#"
+//- /Cargo.toml
+[package]
+name = "same_name"
+version = "0.1.0"
+edition = "2024"
+//- /src/lib.rs
+pub struct Model;
+//- /src/main.rs
+fn main() {}
+"#,
+    );
+    let workspace = source.workspace_metadata();
+    let manifest = workspace
+        .packages()
+        .iter()
+        .find(|package| package.name == "same_name")
+        .unwrap()
+        .manifest_path
+        .clone();
+    let export = source.path("malformed.json");
+    fs::write(&export, b"{}").unwrap();
+    for kind in [rg_workspace::TargetKind::Lib, rg_workspace::TargetKind::Bin] {
+        let identity = format!("same_name ({kind})");
+        let input = crate::RustdocTargetExport {
+            manifest_path: manifest.clone(),
+            export_path: export.clone(),
+            target_name: "same_name".into(),
+            target_kind: kind,
+        };
+        let error = CompilerImports::read(&workspace, &[], &[input]).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains(&identity),
+            "missing target identity: {message}"
+        );
+        assert!(
+            message.contains(&manifest.display().to_string()),
+            "missing package context: {message}"
+        );
+    }
+}
+
+#[test]
 fn defining_crate_names_require_a_unique_reachable_dependency() {
     let source = crate::testonly::ProjectSourceFixture::build(
         r#"
