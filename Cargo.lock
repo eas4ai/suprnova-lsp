@@ -2231,10 +2231,12 @@ dependencies = [
 name = "rg_workspace"
 version = "0.0.0"
 dependencies = [
+ "blake3",
  "cargo_metadata",
  "depinfo",
  "derive_more",
  "expect-test",
+ "ignore",
  "rg_cfg_eval",
  "rg_ir_model",
  "rg_std",

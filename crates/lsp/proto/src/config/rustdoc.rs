@@ -3,10 +3,11 @@ use std::path::PathBuf;
 use gen_lsp_types::{LspAny, LspObject};
 use serde::{Deserialize, Serialize};
 
-/// Explicit compiler exports prepared before the editor session starts.
+/// Compiler declarations supplied explicitly or generated from saved workspace inputs.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct RustdocConfig {
     pub inputs: Vec<RustdocInputConfig>,
+    pub automatic: RustdocAutomaticConfig,
 }
 
 impl RustdocConfig {
@@ -22,18 +23,95 @@ impl RustdocConfig {
         let section = value
             .as_object()
             .ok_or_else(|| anyhow::anyhow!("rust-glancer rustdoc must be an object"))?;
-        let Some(inputs) = section.get("inputs") else {
+        let inputs = match section.get("inputs") {
+            None => Vec::new(),
+            Some(inputs) => inputs
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("rust-glancer rustdoc.inputs must be an array"))?
+                .iter()
+                .enumerate()
+                .map(|(index, value)| RustdocInputConfig::parse(value, index))
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        };
+        Ok(Self {
+            inputs,
+            automatic: RustdocAutomaticConfig::parse(section.get("automatic"))?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RustdocAutomaticConfig {
+    pub enabled: bool,
+    pub debounce_ms: u64,
+    pub toolchain: String,
+    pub timeout_ms: u64,
+    pub jobs: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_root: Option<PathBuf>,
+}
+
+impl RustdocAutomaticConfig {
+    fn parse(value: Option<&LspAny>) -> anyhow::Result<Self> {
+        let Some(value) = value else {
             return Ok(Self::default());
         };
-        let inputs = inputs
-            .as_array()
-            .ok_or_else(|| anyhow::anyhow!("rust-glancer rustdoc.inputs must be an array"))?;
-        let inputs = inputs
-            .iter()
-            .enumerate()
-            .map(|(index, value)| RustdocInputConfig::parse(value, index))
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        Ok(Self { inputs })
+        let section = value
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("rust-glancer rustdoc.automatic must be an object"))?;
+        let mut config = Self::default();
+        if let Some(value) = section.get("enabled") {
+            config.enabled = value.as_bool().ok_or_else(|| {
+                anyhow::anyhow!("rust-glancer rustdoc.automatic.enabled must be a boolean")
+            })?;
+        }
+        // Keep policy bounded before it reaches timers or Cargo's parallel job count.
+        for (field, maximum, destination) in [
+            ("debounceMs", 600_000, &mut config.debounce_ms),
+            ("timeoutMs", 86_400_000, &mut config.timeout_ms),
+            ("jobs", 256, &mut config.jobs),
+        ] {
+            if let Some(value) = section.get(field) {
+                *destination = value
+                    .as_u64()
+                    .filter(|value| (1..=maximum).contains(value))
+                    .ok_or_else(|| anyhow::anyhow!(
+                        "rust-glancer rustdoc.automatic.{field} must be an integer between 1 and {maximum}"
+                    ))?;
+            }
+        }
+        for field in ["toolchain", "artifactRoot"] {
+            if let Some(value) = section.get(field) {
+                let value = value
+                    .as_str()
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "rust-glancer rustdoc.automatic.{field} must be a nonempty string"
+                        )
+                    })?;
+                if field == "toolchain" {
+                    config.toolchain = value.to_owned();
+                } else {
+                    config.artifact_root = Some(value.into());
+                }
+            }
+        }
+        Ok(config)
+    }
+}
+
+impl Default for RustdocAutomaticConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            debounce_ms: 2000,
+            toolchain: "nightly-2026-08-19".to_owned(),
+            timeout_ms: 900_000,
+            jobs: 2,
+            artifact_root: None,
+        }
     }
 }
 

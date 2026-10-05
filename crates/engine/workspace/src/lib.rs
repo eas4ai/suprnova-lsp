@@ -5,6 +5,7 @@ mod cargo;
 mod lower;
 mod model;
 mod path;
+mod saved_inputs;
 mod rustc;
 mod sysroot;
 
@@ -12,6 +13,7 @@ mod sysroot;
 mod tests;
 
 pub use self::{
+    saved_inputs::SavedWorkspaceInputs,
     build_outputs::{CargoBuildOutputScanStats, CargoGeneratedSources},
     cargo::{CargoMetadataConfig, CargoMetadataTarget, LoadedCargoMetadata},
     lower::WorkspaceLoweringConfig,

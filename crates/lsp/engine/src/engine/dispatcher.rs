@@ -82,6 +82,18 @@ impl EngineDispatcher {
                         );
                     }
                 }
+                EngineCommand::RustdocRequested { generation, respond_to } => {
+                    self.project.rustdoc_requested(generation);
+                    let _ = respond_to.send(Ok(()));
+                }
+                EngineCommand::RustdocBuildInputs { generation, respond_to } => {
+                    let _ = respond_to.send(self.project.rustdoc_build_inputs(generation));
+                }
+                EngineCommand::PublishRustdoc { candidate, respond_to } => {
+                    if !respond_to.is_closed() && !cancellation.is_cancelled() {
+                        let _ = respond_to.send(self.project.publish_rustdoc(*candidate));
+                    }
+                }
                 EngineCommand::SavedProjectChanges {
                     changes,
                     respond_to,

@@ -69,7 +69,7 @@ impl RustcTarget {
         &self.0
     }
 
-    pub(crate) fn parse_host_from_verbose_output(output: &str) -> Option<Self> {
+    pub fn parse_host_from_verbose_output(output: &str) -> Option<Self> {
         output
             .lines()
             .find_map(|line| line.strip_prefix("host:").map(str::trim))

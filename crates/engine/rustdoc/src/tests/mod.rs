@@ -6,6 +6,51 @@ use super::RustdocExport;
 const FIXTURE: &[u8] = include_bytes!("../../fixtures/model/export.json");
 
 #[test]
+fn automatic_discovery_rejects_an_unrelated_local_model_trait() {
+    let export = RustdocExport::read(FIXTURE).unwrap();
+    assert!(export.suprnova_model_paths("suprnova").unwrap().is_empty());
+}
+
+#[test]
+fn automatic_discovery_uses_the_explicit_receiver_and_external_trait_identity() {
+    let bytes = changed_export(|value| {
+        let paths = value["paths"].as_object_mut().unwrap();
+        let trait_id = paths
+            .iter()
+            .find(|(_, item)| item["path"] == serde_json::json!(["rustdoc_macro_support", "Model"]))
+            .unwrap()
+            .0
+            .clone();
+        paths[&trait_id]["crate_id"] = serde_json::json!(999);
+        paths[&trait_id]["path"] = serde_json::json!(["suprnova", "eloquent", "model", "Model"]);
+        value["index"].as_object_mut().unwrap().remove(&trait_id);
+        value["external_crates"]["999"] = serde_json::json!({"name": "suprnova", "html_root_url": null, "path": "/compiled/libsuprnova.rmeta"});
+    });
+    let mut export = RustdocExport::read(bytes.as_slice()).unwrap();
+    assert_eq!(
+        export.suprnova_model_paths("suprnova").unwrap(),
+        ["rustdoc_macro_support::Post"]
+    );
+    assert!(
+        export
+            .suprnova_model_paths("another_framework")
+            .unwrap()
+            .is_empty()
+    );
+    for item in export.data.index.values_mut() {
+        if let ItemEnum::Impl(data) = &mut item.inner
+            && data
+                .trait_
+                .as_ref()
+                .is_some_and(|trait_| trait_.path == "Model")
+        {
+            data.for_ = Type::Generic("T".to_owned());
+        }
+    }
+    assert!(export.suprnova_model_paths("suprnova").unwrap().is_empty());
+}
+
+#[test]
 fn lowering_rejects_an_ambiguous_defining_crate_instead_of_using_source_spelling() {
     let export = RustdocExport::read(FIXTURE).unwrap();
     let roots = std::collections::BTreeMap::from([("rustdoc_macro_support".into(), None)]);

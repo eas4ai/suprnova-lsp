@@ -39,9 +39,11 @@ use crate::{
 
 mod config;
 mod deferred;
+mod rustdoc;
 mod state;
 
 pub(crate) use self::config::ProjectConfiguration;
+pub(crate) use self::rustdoc::{RustdocProjectBuildInputs, RustdocProjectCandidate};
 use self::{deferred::DeferredIndexingFinish, state::ProjectState};
 
 // A watcher batch can become stale again while its replacement project is being built. Waiting
@@ -68,6 +70,8 @@ pub(super) struct ProjectCoordinator {
     workspace_root: Option<PathBuf>,
     notifications: ServiceNotificationsSink,
     memory_hooks: Arc<dyn ProjectMemoryHooks>,
+    configuration: Option<ProjectConfiguration>,
+    rustdoc_generation: u64,
 }
 
 impl ProjectCoordinator {
@@ -85,6 +89,8 @@ impl ProjectCoordinator {
             workspace_root: None,
             notifications,
             memory_hooks,
+            configuration: None,
+            rustdoc_generation: 0,
         }
     }
 
@@ -212,6 +218,7 @@ impl ProjectCoordinator {
         // Publish the saved project before deciding whether deferred work remains. If a worker is
         // needed, any later source generation makes its products stale.
         self.workspace_root = Some(workspace_root.clone());
+        self.configuration = Some(configuration.clone());
         self.project.replace_saved(project);
         self.stale_source = None;
         let snapshot = self
@@ -242,6 +249,40 @@ impl ProjectCoordinator {
             generation: self.project.generation(),
             has_deferred_indexing,
         })
+    }
+
+
+    pub(super) fn rustdoc_requested(&mut self, generation: u64) {
+        self.rustdoc_generation = self.rustdoc_generation.max(generation);
+    }
+
+    pub(super) fn rustdoc_build_inputs(&self, generation: u64) -> anyhow::Result<RustdocProjectBuildInputs> {
+        anyhow::ensure!(generation == self.rustdoc_generation, "obsolete rustdoc preparation request");
+        Ok(RustdocProjectBuildInputs {
+            root: self.workspace_root.clone().context("rustdoc workspace is not initialized")?,
+            configuration: self.configuration.clone().context("rustdoc configuration is not initialized")?,
+            saved_generation: self.project.generation(),
+            memory_hooks: Arc::clone(&self.memory_hooks),
+        })
+    }
+
+    pub(super) fn publish_rustdoc(&mut self, candidate: RustdocProjectCandidate) -> anyhow::Result<bool> {
+        if candidate.input.generation != self.rustdoc_generation
+            || candidate.saved_generation != self.project.generation()
+            || rg_workspace::SavedWorkspaceInputs::read(&candidate.input.workspace_root,
+                Some(&candidate.input.artifact_directory))?.digest() != candidate.input.saved_inputs
+        {
+            return Ok(false);
+        }
+        // Replacement and deferred publication use the same owner as saves and ordinary reindex.
+        // No part of a rejected candidate is applied to the previous valid project.
+        self.project.replace_saved(candidate.project);
+        self.stale_source = None;
+        if self.deferred_indexing_finish.saved_project_changed(&self.project) {
+            self.send_deferred_indexing_started();
+        }
+        self.notifications.send(rg_lsp_proto::ServiceNotification::InlayHintRefresh);
+        Ok(true)
     }
 
     /// Rebuild the whole saved workspace and schedule deferred work for the new generation.

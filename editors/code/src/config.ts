@@ -35,6 +35,54 @@ export interface ExtensionConfig {
 
 export interface RustdocConfig {
   readonly inputs: RustdocInputConfig[];
+  readonly automatic: RustdocAutomaticConfig;
+}
+
+export interface RustdocAutomaticConfig {
+  readonly enabled: boolean;
+  readonly debounceMs: number;
+  readonly toolchain: string;
+  readonly timeoutMs: number;
+  readonly jobs: number;
+  readonly artifactRoot?: string;
+}
+
+export namespace RustdocAutomaticConfig {
+  export function read(value: unknown): RustdocAutomaticConfig {
+    if (!isRecord(value)) {
+      throw new Error("rust-glancer.rustdoc.automatic must be an object");
+    }
+    const section = value;
+    const enabled = section.enabled ?? true;
+    if (typeof enabled !== "boolean" || section.enabled === null) {
+      throw new Error("rust-glancer.rustdoc.automatic.enabled must be a boolean");
+    }
+    const policy: RustdocAutomaticConfig = {
+      enabled,
+      debounceMs: positiveInteger("debounceMs", 2000, 600000),
+      toolchain: nonemptyString("toolchain", "nightly-2026-08-19"),
+      timeoutMs: positiveInteger("timeoutMs", 900000, 86400000),
+      jobs: positiveInteger("jobs", 2, 256),
+      ...(section.artifactRoot === undefined ? {} : { artifactRoot: nonemptyString("artifactRoot") }),
+    };
+    return policy;
+
+    function positiveInteger(field: string, fallback: number, maximum: number): number {
+      const selected = section[field] === undefined ? fallback : section[field];
+      if (typeof selected !== "number" || !Number.isSafeInteger(selected) || selected < 1 || selected > maximum) {
+        throw new Error(`rust-glancer.rustdoc.automatic.${field} must be an integer between 1 and ${maximum}`);
+      }
+      return selected;
+    }
+
+    function nonemptyString(field: string, fallback?: string): string {
+      const selected = section[field] === undefined ? fallback : section[field];
+      if (typeof selected !== "string" || selected.trim().length === 0) {
+        throw new Error(`rust-glancer.rustdoc.automatic.${field} must be a nonempty string`);
+      }
+      return selected;
+    }
+  }
 }
 
 export interface RustdocInputConfig {
@@ -47,7 +95,7 @@ export interface RustdocInputConfig {
 }
 
 export namespace RustdocConfig {
-  export function read(value: unknown): RustdocConfig {
+  export function read(value: unknown, automatic: unknown = {}): RustdocConfig {
     if (!Array.isArray(value)) {
       throw new Error("rust-glancer.rustdoc.inputs must be an array");
     }
@@ -77,7 +125,7 @@ export namespace RustdocConfig {
         itemPath: requiredString("itemPath"),
       };
     });
-    return { inputs };
+    return { inputs, automatic: RustdocAutomaticConfig.read(automatic) };
   }
 }
 
@@ -171,7 +219,10 @@ export namespace ExtensionConfig {
         ),
         extraEnv: normalizeStringRecord(readUnknownRecord(config, "diagnostics.extraEnv")),
       },
-      rustdoc: RustdocConfig.read(config.get<unknown>("rustdoc.inputs", [])),
+      rustdoc: RustdocConfig.read(
+        config.get<unknown>("rustdoc.inputs", []),
+        config.get<unknown>("rustdoc.automatic", {}),
+      ),
     };
   }
 }

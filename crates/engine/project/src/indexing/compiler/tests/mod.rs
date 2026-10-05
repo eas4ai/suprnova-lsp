@@ -90,7 +90,7 @@ fn sup_004_rejects_wrong_application_target() {
         target_kind: rg_workspace::TargetKind::Lib,
         item_path: "directory::models::user::User".into(),
     };
-    let error = CompilerImports::read(&workspace, &[wrong_target])
+    let error = CompilerImports::read(&workspace, &[wrong_target], &[])
         .expect_err("wrong application target must be rejected before indexing");
     assert!(format!("{error:#}").contains("absent_target"));
 }

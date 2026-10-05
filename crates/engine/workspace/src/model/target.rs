@@ -47,6 +47,42 @@ pub enum TargetKind {
 }
 
 impl TargetKind {
+    pub fn from_cargo_target(target: &cargo_metadata::Target) -> Self {
+        if target.is_kind(cargo_metadata::TargetKind::ProcMacro) {
+            TargetKind::ProcMacro
+        // Cargo reports crate types such as ["cdylib", "rlib"] for one library target.
+        // They share one source root and must keep one library identity in analysis.
+        } else if target.kind.iter().any(|kind| {
+            matches!(
+                kind,
+                cargo_metadata::TargetKind::Lib
+                    | cargo_metadata::TargetKind::RLib
+                    | cargo_metadata::TargetKind::DyLib
+                    | cargo_metadata::TargetKind::CDyLib
+                    | cargo_metadata::TargetKind::StaticLib
+            )
+        }) {
+            TargetKind::Lib
+        } else if target.is_kind(cargo_metadata::TargetKind::Bin) {
+            TargetKind::Bin
+        } else if target.is_kind(cargo_metadata::TargetKind::Example) {
+            TargetKind::Example
+        } else if target.is_kind(cargo_metadata::TargetKind::Test) {
+            TargetKind::Test
+        } else if target.is_kind(cargo_metadata::TargetKind::Bench) {
+            TargetKind::Bench
+        } else if target.is_kind(cargo_metadata::TargetKind::CustomBuild) {
+            TargetKind::CustomBuild
+        } else {
+            let fallback = target
+                .kind
+                .first()
+                .map(|kind| kind.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            TargetKind::Other(fallback)
+        }
+    }
+
     /// Returns whether this target belongs to ordinary eager semantic analysis.
     ///
     /// Libraries, proc macros, and binaries are the targets users most often edit directly.

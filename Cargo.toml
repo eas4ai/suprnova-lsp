@@ -90,6 +90,7 @@ futures = "0.3.32"
 gen-lsp-types = "0.11"
 ignore = "0.4.26"
 itertools = "0.14.0"
+libc = "0.2.186"
 # The arena-free allocator wrapper uses a numeric mimalloc v3 option that the Rust bindings do not
 # expose. Keep both layers pinned so that option cannot silently address a different enum member.
 libmimalloc-sys = { version = "=0.1.49", default-features = false }
