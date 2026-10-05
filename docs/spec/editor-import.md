@@ -48,17 +48,17 @@ Mechanism: rustdoc-editor-import
 Rationale: Reuse the existing transactional project boundary and observable LSP failure reporting.
 Status: Agreed 2026-10-04
 
-[EDT-005] Editor import initialization and queries MUST complete without launching rust-analyzer or rustdoc, MUST retain lowered declaration facts rather than the full compiler JSON graph, and MUST report completed-indexing idle RSS for controlled LSP processes with and without the inputs separately from indexing peaks.
-Falsifier: A traced import/query process launches either tool, successful trace coverage is absent, the full compiler graph survives lowering in saved state, idle observations are absent or actually peaks, or compared runs differ in target, features, sysroot, residency, indexing preference or query workload without correcting the mismatch.
+[EDT-005] Prepared-input editor import initialization and queries, with automatic generation disabled for that workspace, MUST complete without launching rust-analyzer or rustdoc, MUST retain lowered declaration facts rather than the full compiler JSON graph, and MUST report completed-indexing idle RSS for controlled LSP processes with and without the prepared inputs separately from indexing peaks.
+Falsifier: A traced prepared-input import/query process with automatic generation disabled launches either tool, successful trace coverage is absent, the full compiler graph survives lowering in saved state, idle observations are absent or actually peaks, or compared runs differ in target, features, sysroot, residency, indexing preference or query workload without correcting the mismatch.
 Mechanism: rustdoc-editor-import
 Rationale: Preserve the repository's idle-memory priority and MAC-006 process boundary while adding the editor consumer.
-Status: Agreed 2026-10-04
+Status: Agreed 2026-10-05
 
-[EDT-006] With no configured inputs the LSP MUST preserve source-only behavior; with configured inputs it MUST reuse its captured declarations for the session and state in the setting description that exports are prepared inputs, restart is required to reload them, and macro changes are not automatically synchronized.
-Falsifier: An unconfigured engine acquires generated User APIs from another session or workspace, deleting or changing the external export mutates an already captured generation during a body save or reindex, a fresh startup accepts an invalid replacement, or setting descriptions imply automatic compiler generation or freshness checking.
+[EDT-006] With automatic generation disabled and no configured prepared inputs the LSP MUST preserve source-only behavior; with configured prepared inputs it MUST reuse its captured declarations for the session, suppress automatic generation for that workspace, and state in the prepared-input setting description that exports are prepared inputs, restart is required to reload them, and macro changes are not automatically synchronized in this mode.
+Falsifier: An engine with automatic generation disabled and no prepared inputs acquires generated User APIs, a prepared-input workspace starts an automatic compiler job, deleting or changing its external export mutates an already captured generation during a body save or reindex, a fresh prepared-input startup accepts an invalid replacement, or prepared-input setting descriptions imply automatic compiler generation or freshness checking in that mode.
 Mechanism: rustdoc-editor-import
 Rationale: Explicit immutable input capture is the existing project model; refresh policy is separate work.
-Status: Agreed 2026-10-04
+Status: Agreed 2026-10-05
 
 ## Observation and controls
 
@@ -71,6 +71,12 @@ Both indexing preferences wait for actual deferred completion before idle sampli
 Every requirement needs a demonstrated violating control before the mechanism is
 trusted. A missing observation is not a pass. Trace only the controlled LSP-owned
 process tree; compiler preparation is a completed separate step.
+
+The confirmed AUT commitment revises EDT-005 and EDT-006 only to distinguish
+prepared-input/source-only controls from automatic generation. Their completed
+Agreed versions remain in the previous commitment's frozen contract; the two
+revised blocks above were confirmed 2026-10-05. EDT-001 through EDT-004 remain
+Agreed and unchanged.
 
 MAC and SUP Agreed text stays unchanged and remains regression coverage. In
 particular, MAC-006 says import and query "MUST work without starting a

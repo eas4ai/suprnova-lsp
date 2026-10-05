@@ -1,8 +1,8 @@
 # Roadmap
 
-Current: rustdoc-editor-import
+Current: rustdoc-automatic-worker
 
-The engine-import and Devlist User commitments are Done, recorded as `7ccb5de8ae9cd0586774b640dbb47cfe111d57b0` and `88088a0c347ffbc3cf7e526dd763bd539a18d6a0`. No commitment is open. The developer selected explicit editor input wiring with “confirmed” and confirmed its [EDT requirements](editor-import.md) with “ok”. Mechanisms and final authorization are being prepared.
+The engine-import, Devlist User and editor-input commitments are Done, recorded as `7ccb5de8ae9cd0586774b640dbb47cfe111d57b0`, `88088a0c347ffbc3cf7e526dd763bd539a18d6a0`, and `ec0b18211f3637882fea3bfb482706415a3664cd`. No commitment is open. The developer requests automatic rustdoc JSON export in a debounced worker and selected automatic model and target discovery. The [AUT contract](automatic-rustdoc.md), EDT mode clarifications and two-second debounce were confirmed 2026-10-05. Mechanisms and final start authorization are being prepared.
 
 ## rustdoc-engine-import
 
@@ -36,12 +36,28 @@ reviews close without unresolved findings. Engine-only observations cannot satis
 this commitment. Automatic generation, export refresh and snapshot caching remain
 outside its scope.
 
+## rustdoc-automatic-worker
+
+Requirements: AUT-001, AUT-002, AUT-003, AUT-004, AUT-005, AUT-006, AUT-007, AUT-008, AUT-009, EDT-005, EDT-006
+
+Deliver automatic Suprnova model/target discovery, startup exports and debounced
+saved-input refresh in a supervised worker. Publish only validated current
+declarations into the running editor's project. Retain explicit prepared-input
+mode, source-only controls, MAC/SUP behavior and external checkout boundaries.
+
+Done when every confirmed requirement has a fresh passing receipt from
+a mechanism with reviewed failing controls, genuine automatic Devlist queries
+and a live macro-edit case pass in both construction modes, concurrency/race/
+rollback and compiler-tree cleanup controls pass, comparable completed-indexing
+idle RSS and separate compiler/indexing peaks are recorded, repository Rust and
+extension checks pass, and Sudus review findings are resolved.
+
 ## Later work
 
 | Step | Delivery boundary |
 | --- | --- |
 | Rustdoc snapshots | Reduced per-crate artifacts with producer, target, features, source, dependency, and macro-input validity. |
-| Export refresh | Explicit refresh first; bounded scheduling, cancellation, and failed-refresh recovery later. |
+| Export refresh | Automatic debounced generation and recovery are proposed next; broader external macro-input tracking remains later work. |
 | Further Suprnova acceptance | Live metadata and Inertia checks after User acceptance. |
 | Broader macro semantics | Additional declaration shapes and blanket ownership after concrete model APIs work. |
 
