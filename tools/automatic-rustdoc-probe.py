@@ -490,7 +490,9 @@ class AutomaticProbe:
         return {"rejectedGeneration": running["generation"], "diskChangedBeforeNotification": True}
 
     async def timeout_or_shutdown(self):
-        child = await self.event("child", timeout=10)
+        # Preparation precedes the supervised export; its latency is not the
+        # compiler timeout or shutdown budget measured after this child starts.
+        child = await self.event("child", timeout=self.plan.get("workerWaitSeconds", 900))
         if self.plan["scenario"] == "timeout":
             failed = await self.status("failed", timeout=15)
             assert "time" in failed.get("message", "").lower(), failed
