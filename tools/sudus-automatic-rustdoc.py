@@ -195,10 +195,14 @@ async def main():
                   if p.is_file() and (p.suffix == ".rs" or p.name in {"Cargo.toml", "Cargo.lock"})
                   and "target" not in p.relative_to(root).parts}
         trace = work / "process.exec"
+        # Sixteen lifecycle controls include repeated genuine source/project rebuilds.
+        # Their aggregate budget is separate from each bounded worker/query operation.
+        timeout = 60 * 60_000 if scenario == "lifecycle" else 30 * 60_000
+        if scenario == "devlist":
+            timeout = (plan["workerWaitSeconds"] + 600) * 1000
         code, _ = await run(mode, "strace", ["-f", "-s", "4096", "-e", "trace=execve,execveat",
             "-o", str(trace), sys.executable, str(ROOT / "tools/automatic-rustdoc-probe.py"), str(path)],
-            env=env, timeout=(plan["workerWaitSeconds"] + 600) * 1000
-            if scenario == "devlist" else 30 * 60_000)
+            env=env, timeout=timeout)
         report = observation(json.loads(Path(plan["report"]).read_text()), mode, code)
         after = {str(p): user.digest(p.read_bytes()) for p in root.rglob("*")
                  if p.is_file() and (p.suffix == ".rs" or p.name in {"Cargo.toml", "Cargo.lock"})
