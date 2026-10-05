@@ -131,6 +131,7 @@ tikv-jemallocator = "0.6.1"
 tikv-jemalloc-sys = "0.6.1"
 ungrammar = "1.16.1"
 winnow = "0.7.13"
+windows-sys = "0.61.2"
 zed_extension_api = "0.7.0"
 
 # For vendored rust-analyzer crates

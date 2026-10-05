@@ -63,14 +63,23 @@ export namespace RustdocAutomaticConfig {
       toolchain: nonemptyString("toolchain", "nightly-2026-08-19"),
       timeoutMs: positiveInteger("timeoutMs", 900000, 86400000),
       jobs: positiveInteger("jobs", 2, 256),
-      ...(section.artifactRoot === undefined ? {} : { artifactRoot: nonemptyString("artifactRoot") }),
+      ...(section.artifactRoot === undefined
+        ? {}
+        : { artifactRoot: nonemptyString("artifactRoot") }),
     };
     return policy;
 
     function positiveInteger(field: string, fallback: number, maximum: number): number {
       const selected = section[field] === undefined ? fallback : section[field];
-      if (typeof selected !== "number" || !Number.isSafeInteger(selected) || selected < 1 || selected > maximum) {
-        throw new Error(`rust-glancer.rustdoc.automatic.${field} must be an integer between 1 and ${maximum}`);
+      if (
+        typeof selected !== "number" ||
+        !Number.isSafeInteger(selected) ||
+        selected < 1 ||
+        selected > maximum
+      ) {
+        throw new Error(
+          `rust-glancer.rustdoc.automatic.${field} must be an integer between 1 and ${maximum}`,
+        );
       }
       return selected;
     }
@@ -108,7 +117,9 @@ export namespace RustdocConfig {
       const requiredString = (field: string): string => {
         const fieldValue = input[field];
         if (typeof fieldValue !== "string" || fieldValue.trim().length === 0) {
-          throw new Error(`rust-glancer.rustdoc.inputs[${index}].${field} must be a nonempty string`);
+          throw new Error(
+            `rust-glancer.rustdoc.inputs[${index}].${field} must be a nonempty string`,
+          );
         }
         return fieldValue;
       };

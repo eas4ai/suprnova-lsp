@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     CodeActionRequestContext, CompletionClientCapabilities, DocumentPositionSnapshot,
     DocumentRangeSnapshot, EditorDocumentSnapshot, EngineConfig, EngineError,
-    FoldingClientCapabilities, GlobalPositionSnapshot, QueryError, QueryValue, SaveProposal,
-    SavedProjectChanges, ServiceNotification, RustdocGenerationInput,
+    FoldingClientCapabilities, GlobalPositionSnapshot, QueryError, QueryValue,
+    RustdocGenerationInput, SaveProposal, SavedProjectChanges, ServiceNotification,
 };
 
 pub type EngineResult<T> = Result<T, EngineError>;

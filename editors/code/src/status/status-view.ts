@@ -162,6 +162,12 @@ export class StatusView implements vscode.Disposable {
     const tooltip = new vscode.MarkdownString();
     tooltip.appendMarkdown(`**Rust Glancer**\n\n`);
     appendTextField(tooltip, "State", state);
+    if (this.details.generatedApiState !== undefined) {
+      appendTextField(tooltip, "Generated APIs", this.details.generatedApiState);
+    }
+    if (this.details.generatedApiMessage !== undefined) {
+      appendTextField(tooltip, "Generation details", this.details.generatedApiMessage);
+    }
 
     if (this.details.activeWorkspaceRoot !== undefined) {
       appendCodeField(tooltip, "Active workspace", this.details.activeWorkspaceRoot);

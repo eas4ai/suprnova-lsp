@@ -317,7 +317,6 @@ impl CargoMetadataLowerer {
         }
     }
 
-
     fn dependencies(
         resolve: &cargo_metadata::Resolve,
     ) -> HashMap<PackageId, Vec<PackageDependency>> {

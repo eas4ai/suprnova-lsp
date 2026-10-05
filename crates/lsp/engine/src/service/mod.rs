@@ -55,20 +55,41 @@ impl Service {
 
 impl EngineService for Service {
     async fn rustdoc_requested(self, _: context::Context, generation: u64) -> EngineResult<()> {
-        self.engine.request(|respond_to| EngineCommand::RustdocRequested { generation, respond_to })
-            .await.map_err(EngineError::from)
+        self.engine
+            .request(|respond_to| EngineCommand::RustdocRequested {
+                generation,
+                respond_to,
+            })
+            .await
+            .map_err(EngineError::from)
     }
 
-    async fn publish_rustdoc(self, _: context::Context, input: rg_lsp_proto::RustdocGenerationInput) -> EngineResult<bool> {
+    async fn publish_rustdoc(
+        self,
+        _: context::Context,
+        input: rg_lsp_proto::RustdocGenerationInput,
+    ) -> EngineResult<bool> {
         let generation = input.generation;
-        let inputs = self.engine.request(|respond_to| EngineCommand::RustdocBuildInputs { generation, respond_to })
-            .await.map_err(EngineError::from)?;
-        let candidate = tokio::task::spawn_blocking(move || inputs.build(input)).await
-            .context("join rustdoc project preparation").map_err(EngineError::from)?
+        let inputs = self
+            .engine
+            .request(|respond_to| EngineCommand::RustdocBuildInputs {
+                generation,
+                respond_to,
+            })
+            .await
             .map_err(EngineError::from)?;
-        self.engine.request(|respond_to| EngineCommand::PublishRustdoc {
-            candidate: Box::new(candidate), respond_to,
-        }).await.map_err(EngineError::from)
+        let candidate = tokio::task::spawn_blocking(move || inputs.build(input))
+            .await
+            .context("join rustdoc project preparation")
+            .map_err(EngineError::from)?
+            .map_err(EngineError::from)?;
+        self.engine
+            .request(|respond_to| EngineCommand::PublishRustdoc {
+                candidate: Box::new(candidate),
+                respond_to,
+            })
+            .await
+            .map_err(EngineError::from)
     }
 
     async fn initialize(

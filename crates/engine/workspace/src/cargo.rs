@@ -142,10 +142,7 @@ impl CargoMetadataConfig {
     ) -> cargo_metadata::MetadataCommand {
         let mut command = cargo_metadata::MetadataCommand::new();
         command.manifest_path(manifest_path.to_path_buf());
-        let mut options = vec![
-            "--filter-platform".to_string(),
-            target.as_str().to_string(),
-        ];
+        let mut options = vec!["--filter-platform".to_string(), target.as_str().to_string()];
         if self.locked {
             options.push("--locked".to_owned());
         }

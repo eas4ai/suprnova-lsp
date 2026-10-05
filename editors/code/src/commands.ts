@@ -22,6 +22,7 @@ export const SERVER_COMMANDS = {
 } as const;
 
 export const SERVER_NOTIFICATIONS = {
+  rustdocStatus: "rust-glancer/rustdocStatus",
   activeWorkspaceChanged: "rust-glancer/activeWorkspaceChanged",
   deferredIndexingStarted: "rust-glancer/deferredIndexingStarted",
   deferredIndexingFinished: "rust-glancer/deferredIndexingFinished",

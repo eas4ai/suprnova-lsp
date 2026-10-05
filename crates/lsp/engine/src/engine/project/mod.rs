@@ -42,8 +42,10 @@ mod deferred;
 mod rustdoc;
 mod state;
 
-pub(crate) use self::config::ProjectConfiguration;
-pub(crate) use self::rustdoc::{RustdocProjectBuildInputs, RustdocProjectCandidate};
+pub(crate) use self::{
+    config::ProjectConfiguration,
+    rustdoc::{RustdocProjectBuildInputs, RustdocProjectCandidate},
+};
 use self::{deferred::DeferredIndexingFinish, state::ProjectState};
 
 // A watcher batch can become stale again while its replacement project is being built. Waiting
@@ -251,26 +253,49 @@ impl ProjectCoordinator {
         })
     }
 
-
     pub(super) fn rustdoc_requested(&mut self, generation: u64) {
         self.rustdoc_generation = self.rustdoc_generation.max(generation);
     }
 
-    pub(super) fn rustdoc_build_inputs(&self, generation: u64) -> anyhow::Result<RustdocProjectBuildInputs> {
-        anyhow::ensure!(generation == self.rustdoc_generation, "obsolete rustdoc preparation request");
+    pub(super) fn rustdoc_build_inputs(
+        &self,
+        generation: u64,
+    ) -> anyhow::Result<RustdocProjectBuildInputs> {
+        anyhow::ensure!(
+            generation == self.rustdoc_generation,
+            "obsolete rustdoc preparation request"
+        );
         Ok(RustdocProjectBuildInputs {
-            root: self.workspace_root.clone().context("rustdoc workspace is not initialized")?,
-            configuration: self.configuration.clone().context("rustdoc configuration is not initialized")?,
+            root: self
+                .workspace_root
+                .clone()
+                .context("rustdoc workspace is not initialized")?,
+            configuration: self
+                .configuration
+                .clone()
+                .context("rustdoc configuration is not initialized")?,
             saved_generation: self.project.generation(),
             memory_hooks: Arc::clone(&self.memory_hooks),
         })
     }
 
-    pub(super) fn publish_rustdoc(&mut self, candidate: RustdocProjectCandidate) -> anyhow::Result<bool> {
+    pub(super) fn publish_rustdoc(
+        &mut self,
+        candidate: RustdocProjectCandidate,
+    ) -> anyhow::Result<bool> {
         if candidate.input.generation != self.rustdoc_generation
+            || !candidate
+                .input
+                .producer_files
+                .iter()
+                .all(rg_lsp_proto::RustdocProducerFile::is_current)
             || candidate.saved_generation != self.project.generation()
-            || rg_workspace::SavedWorkspaceInputs::read(&candidate.input.workspace_root,
-                Some(&candidate.input.artifact_directory))?.digest() != candidate.input.saved_inputs
+            || rg_workspace::SavedWorkspaceInputs::read(
+                &candidate.input.workspace_root,
+                &candidate.input.artifact_directories,
+            )?
+            .digest()
+                != candidate.input.saved_inputs
         {
             return Ok(false);
         }
@@ -278,10 +303,14 @@ impl ProjectCoordinator {
         // No part of a rejected candidate is applied to the previous valid project.
         self.project.replace_saved(candidate.project);
         self.stale_source = None;
-        if self.deferred_indexing_finish.saved_project_changed(&self.project) {
+        if self
+            .deferred_indexing_finish
+            .saved_project_changed(&self.project)
+        {
             self.send_deferred_indexing_started();
         }
-        self.notifications.send(rg_lsp_proto::ServiceNotification::InlayHintRefresh);
+        self.notifications
+            .send(rg_lsp_proto::ServiceNotification::InlayHintRefresh);
         Ok(true)
     }
 

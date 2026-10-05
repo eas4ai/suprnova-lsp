@@ -5,15 +5,14 @@ mod cargo;
 mod lower;
 mod model;
 mod path;
-mod saved_inputs;
 mod rustc;
+mod saved_inputs;
 mod sysroot;
 
 #[cfg(test)]
 mod tests;
 
 pub use self::{
-    saved_inputs::SavedWorkspaceInputs,
     build_outputs::{CargoBuildOutputScanStats, CargoGeneratedSources},
     cargo::{CargoMetadataConfig, CargoMetadataTarget, LoadedCargoMetadata},
     lower::WorkspaceLoweringConfig,
@@ -22,6 +21,7 @@ pub use self::{
         TargetKind, WorkspaceMetadata,
     },
     rustc::RustcTarget,
+    saved_inputs::SavedWorkspaceInputs,
     sysroot::{SysrootCrate, SysrootSources},
 };
 

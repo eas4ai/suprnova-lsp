@@ -6,5 +6,8 @@ mod unix;
 #[cfg(unix)]
 pub(super) use unix::OwnedProcessTree;
 
-#[cfg(not(unix))]
-compile_error!("automatic compiler process supervision needs a platform implementation");
+#[cfg(windows)]
+mod windows;
+
+#[cfg(windows)]
+pub(super) use windows::OwnedProcessTree;

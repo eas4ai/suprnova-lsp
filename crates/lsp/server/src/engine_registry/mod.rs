@@ -25,6 +25,7 @@ use crate::{
     engine_client::{EngineClient, EngineProjectStatus, EngineProjectUpdate},
     engine_process::{EngineProcess, EngineProcessExit, EngineProcessExitMonitor},
     ingress::EditorStateHandle,
+    rustdoc_worker::RustdocWorkers,
 };
 
 mod document_owner;
@@ -48,6 +49,7 @@ pub(crate) struct EngineRegistry {
     lsp_client: LspClient,
     client_status: ClientStatusPublisher,
     editor: EditorStateHandle,
+    rustdoc_workers: RustdocWorkers,
     inner: Arc<Mutex<EngineRegistryInner>>,
 }
 
@@ -63,6 +65,7 @@ impl EngineRegistry {
         let client_status =
             ClientStatusPublisher::new(lsp_client.clone(), client_status_capabilities);
         Self {
+            rustdoc_workers: RustdocWorkers::new(lsp_client.clone()),
             lsp_client,
             client_status,
             editor,
@@ -137,6 +140,25 @@ impl EngineRegistry {
     /// Prevents expected child exits during LSP shutdown from becoming user-facing failures.
     pub(crate) async fn begin_shutdown(&self) {
         self.inner.lock().await.begin_shutdown();
+        if let Err(error) = self.rustdoc_workers.shutdown().await {
+            tracing::error!(error = %format!("{error:#}"), "failed to drain automatic compiler workers");
+        }
+    }
+
+    pub(crate) async fn saved_path(&self, path: &Path) {
+        self.rustdoc_workers.saved_path(path).await;
+    }
+
+    pub(crate) fn is_rustdoc_artifact(&self, path: &Path) -> bool {
+        self.rustdoc_workers.is_artifact(path)
+    }
+
+    pub(crate) fn rustdoc_artifact_directories(&self) -> Arc<std::sync::RwLock<Vec<PathBuf>>> {
+        self.rustdoc_workers.artifact_directories()
+    }
+
+    pub(crate) async fn reindex_rustdoc(&self, engine: &EngineClient) {
+        self.rustdoc_workers.reindex(engine).await;
     }
 
     /// Routes a newly opened document and records exact file ownership until `didClose`.
@@ -183,6 +205,9 @@ impl EngineRegistry {
         &self,
         workspace_root: &NormalizedPathBuf,
     ) -> ExternalProjectChanges {
+        self.rustdoc_workers
+            .changed_root(workspace_root.as_path())
+            .await;
         let inner = self.inner.lock().await;
         let updates = inner
             .routing
@@ -208,6 +233,9 @@ impl EngineRegistry {
         paths: Vec<NormalizedPathBuf>,
         mut changes: ExternalProjectChanges,
     ) {
+        for path in &paths {
+            self.rustdoc_workers.saved_path(path.as_path()).await;
+        }
         // One editor workspace folder can contain several Cargo roots. Route and deduplicate the
         // settled paths under one registry snapshot; unknown or non-ready engines stay untouched.
         let paths_by_engine = {
@@ -334,6 +362,7 @@ impl EngineRegistry {
         start: ReservedEngineStart,
     ) -> anyhow::Result<EngineClient> {
         self.client_status.workspace_indexing(&start.root).await;
+        let analysis_config = start.config.analysis.clone();
         let spawned = self.spawn_engine(start.root.clone(), start.config).await;
         let (engine, exit_monitor, initialization) = match spawned {
             Ok(engine) => engine,
@@ -365,6 +394,22 @@ impl EngineRegistry {
 
         self.mark_ready(start.id, start.root.clone(), engine, initialization)
             .await;
+
+        if let Err(error) = self
+            .rustdoc_workers
+            .register(start.root.clone(), analysis_config, engine_client.clone())
+            .await
+        {
+            self.lsp_client
+                .log_message(
+                    MessageType::Error,
+                    format!(
+                        "Prepare generated model APIs for {}: {error:#}",
+                        start.root.display()
+                    ),
+                )
+                .await;
+        }
 
         let inner = Arc::downgrade(&self.inner);
         let lsp_client = self.lsp_client.clone();

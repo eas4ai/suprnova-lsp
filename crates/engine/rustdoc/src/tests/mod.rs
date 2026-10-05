@@ -52,12 +52,51 @@ fn automatic_discovery_uses_the_explicit_receiver_and_external_trait_identity() 
 
 #[test]
 fn lowering_rejects_an_ambiguous_defining_crate_instead_of_using_source_spelling() {
-    let export = RustdocExport::read(FIXTURE).unwrap();
-    let roots = std::collections::BTreeMap::from([("rustdoc_macro_support".into(), None)]);
+    let bytes = changed_export(|value| {
+        let id = value["paths"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .find(|(_, item)| item["path"] == serde_json::json!(["rustdoc_macro_support", "Model"]))
+            .unwrap()
+            .0
+            .clone();
+        value["paths"][&id]["crate_id"] = serde_json::json!(999);
+        value["paths"][&id]["path"] = serde_json::json!(["external", "Model"]);
+        value["index"].as_object_mut().unwrap().remove(&id);
+        value["external_crates"]["999"] = serde_json::json!({"name": "external", "html_root_url": null, "path": "/compiled/libexternal.rmeta"});
+    });
+    let export = RustdocExport::read(bytes.as_slice()).unwrap();
+    let roots = std::collections::BTreeMap::from([("external".into(), None)]);
     let error = export
         .lower_type("rustdoc_macro_support::Post", &roots)
         .unwrap_err();
-    assert!(format!("{error:#}").contains("defining crate rustdoc_macro_support is ambiguous"));
+    assert!(format!("{error:#}").contains("defining crate external is ambiguous"));
+}
+
+#[test]
+fn local_signature_paths_do_not_bind_to_a_library_with_the_binary_crate_name() {
+    let export = RustdocExport::read(FIXTURE).unwrap();
+    let library = rg_ir_model::CrateRef {
+        package: rg_ir_model::PackageSlot(3),
+        crate_id: rg_ir_model::CrateId(0),
+    };
+    let roots = std::collections::BTreeMap::from([("rustdoc_macro_support".into(), Some(library))]);
+    let declarations = export
+        .lower_type("rustdoc_macro_support::Post", &roots)
+        .unwrap();
+    let local = declarations
+        .iter()
+        .flat_map(|declaration| &declaration.references)
+        .filter(|(_, path, _)| path.segments[0].name.as_str() == "crate")
+        .collect::<Vec<_>>();
+    assert!(!local.is_empty());
+    assert!(
+        local
+            .iter()
+            .all(|(_, path, _)| path.resolved_crate.is_none()),
+        "local paths must stay in the importing target"
+    );
 }
 
 fn changed_export(change: impl FnOnce(&mut Value)) -> Vec<u8> {

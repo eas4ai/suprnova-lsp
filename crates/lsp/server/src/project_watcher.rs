@@ -106,11 +106,25 @@ impl WorkspaceWatcher {
     ) -> anyhow::Result<Self> {
         let (sender, mut receiver) = mpsc::unbounded_channel::<DebounceEventResult>();
         let callback_root = root.clone();
+        let callback_registry = registry.clone();
 
         let mut debouncer = notify_debouncer_full::new_debouncer_opt(
             WATCH_DEBOUNCE,
             Some(WATCH_DEBOUNCE),
-            move |result| {
+            move |result: DebounceEventResult| {
+                let result = match result {
+                    Ok(mut events) => {
+                        for event in &mut events {
+                            event
+                                .event
+                                .paths
+                                .retain(|path| !callback_registry.is_rustdoc_artifact(path));
+                        }
+                        events.retain(|event| event.need_rescan() || !event.event.paths.is_empty());
+                        Ok(events)
+                    }
+                    Err(errors) => Err(errors),
+                };
                 let Some(result) = Self::project_result(&callback_root, result) else {
                     return;
                 };
@@ -141,7 +155,8 @@ impl WorkspaceWatcher {
         );
 
         let forwarder_root = root.clone();
-        let mut snapshot = ProjectPathSnapshot::scan(&forwarder_root);
+        let mut snapshot =
+            ProjectPathSnapshot::scan(&forwarder_root, registry.rustdoc_artifact_directories());
         let forwarder = tokio::spawn(async move {
             while let Some(result) = receiver.recv().await {
                 // The first relevant native event means the saved project may already disagree
@@ -372,7 +387,7 @@ impl WatchedProjectPath {
     }
 
     fn is_watched_project_input(root: &Path, path: &Path) -> bool {
-        !Self::is_ignored(root, path) && Self::is_project_input(path)
+        rg_workspace::SavedWorkspaceInputs::is_input(root, path)
     }
 
     fn identity(root: &NormalizedPathBuf, path: &NormalizedPathBuf) -> Option<FileIdentity> {
@@ -392,7 +407,12 @@ impl WatchedProjectPath {
     fn is_project_input(path: &Path) -> bool {
         let file_name = path.file_name().and_then(OsStr::to_str);
         path.extension().and_then(OsStr::to_str) == Some("rs")
-            || matches!(file_name, Some("Cargo.toml" | "Cargo.lock"))
+            || matches!(
+                file_name,
+                Some("Cargo.toml" | "Cargo.lock" | "rust-toolchain" | "rust-toolchain.toml")
+            )
+            || (matches!(file_name, Some("config" | "config.toml"))
+                && path.parent().and_then(Path::file_name) == Some(OsStr::new(".cargo")))
     }
 
     fn is_ignored(root: &Path, path: &Path) -> bool {
@@ -417,6 +437,7 @@ impl WatchedProjectPath {
 #[derive(Debug)]
 struct ProjectPathSnapshot {
     identities: BTreeMap<NormalizedPathBuf, FileIdentity>,
+    artifact_directories: std::sync::Arc<std::sync::RwLock<Vec<std::path::PathBuf>>>,
 }
 
 impl ProjectPathSnapshot {
@@ -425,19 +446,28 @@ impl ProjectPathSnapshot {
     /// whether a watcher batch describes a real saved-input change. Metadata is intentionally
     /// enough here: a false positive only costs a small reindex, while hashing every file would
     /// make watcher rescans scale with source size.
-    fn scan(root: &NormalizedPathBuf) -> Self {
+    fn scan(
+        root: &NormalizedPathBuf,
+        artifact_directories: std::sync::Arc<std::sync::RwLock<Vec<std::path::PathBuf>>>,
+    ) -> Self {
         let started = Instant::now();
         let mut files_seen = 0usize;
         let mut identities = BTreeMap::new();
         let mut builder = WalkBuilder::new(root.as_path());
         let filter_root = root.to_path_buf();
+        let artifacts = artifact_directories
+            .read()
+            .expect("artifact ownership lock is not poisoned")
+            .clone();
         builder
             .hidden(false)
-            .git_ignore(true)
-            .git_global(true)
-            .git_exclude(true)
+            .parents(false)
+            .git_ignore(false)
+            .git_global(false)
+            .git_exclude(false)
             .filter_entry(move |entry| {
                 WatchedProjectPath::should_visit(&filter_root, entry.path())
+                    && !artifacts.iter().any(|path| entry.path().starts_with(path))
             });
 
         for entry in builder.build() {
@@ -476,11 +506,14 @@ impl ProjectPathSnapshot {
             elapsed_ms = started.elapsed().as_millis(),
             "snapshotted watched workspace project paths"
         );
-        Self { identities }
+        Self {
+            identities,
+            artifact_directories,
+        }
     }
 
     fn changed_paths_after_rescan(&mut self, root: &NormalizedPathBuf) -> Vec<NormalizedPathBuf> {
-        let next = Self::scan(root);
+        let next = Self::scan(root, std::sync::Arc::clone(&self.artifact_directories));
         let mut changed = BTreeSet::new();
 
         for (path, identity) in &next.identities {
@@ -524,6 +557,31 @@ mod tests {
     use test_fixture::fixture_crate;
 
     use super::*;
+
+    #[test]
+    fn rescans_exclude_only_claimed_compiler_directories_and_watch_cargo_configuration() {
+        let fixture = fixture_crate("//- /src/lib.rs\npub struct Post;\n");
+        let root = NormalizedPathBuf::from_absolute(fixture.path("")).unwrap();
+        let ownership = std::sync::Arc::new(std::sync::RwLock::new(Vec::new()));
+        let mut snapshot = ProjectPathSnapshot::scan(&root, std::sync::Arc::clone(&ownership));
+        let owned = root.as_path().join("artifacts/.rust-glancer-rustdoc-owned");
+        std::fs::create_dir_all(&owned).unwrap();
+        ownership.write().unwrap().push(owned.clone());
+        std::fs::write(owned.join("generated.rs"), "compiler output").unwrap();
+        assert!(snapshot.changed_paths_after_rescan(&root).is_empty());
+        let unowned = root
+            .as_path()
+            .join("artifacts/.rust-glancer-rustdoc-unowned/source.rs");
+        std::fs::create_dir_all(unowned.parent().unwrap()).unwrap();
+        std::fs::write(&unowned, "pub struct OrdinarySource;").unwrap();
+        let configuration = root.as_path().join(".cargo/config.toml");
+        std::fs::create_dir_all(configuration.parent().unwrap()).unwrap();
+        std::fs::write(&configuration, "[build]\njobs=2\n").unwrap();
+        let changed = snapshot.changed_paths_after_rescan(&root);
+        assert_eq!(changed.len(), 2);
+        assert!(changed.iter().any(|path| path.as_path() == configuration));
+        assert!(changed.iter().any(|path| path.as_path() == unowned));
+    }
 
     #[test]
     fn watcher_ingress_scopes_ignored_directories_to_workspace_root() {
@@ -623,7 +681,7 @@ mod tests {
             .expect("watcher fixture root should normalize");
         let account = root.as_path().join("src/account.rs");
         let user = root.as_path().join("src/user.rs");
-        let mut snapshot = ProjectPathSnapshot::scan(&root);
+        let mut snapshot = ProjectPathSnapshot::scan(&root, Default::default());
 
         std::fs::write(&account, "pub struct SavedAccount;\n")
             .expect("account fixture should be writable");

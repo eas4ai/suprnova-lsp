@@ -15,7 +15,10 @@ use rg_lsp_proto::{
 use rg_project::{SavedBodyProducts, SavedFileChange, SplitIndexingProgress};
 use tokio::sync::oneshot;
 
-use super::{ProjectConfiguration, project::{RustdocProjectBuildInputs, RustdocProjectCandidate}};
+use super::{
+    ProjectConfiguration,
+    project::{RustdocProjectBuildInputs, RustdocProjectCandidate},
+};
 
 /// Response endpoint owned by one request until the engine dispatcher answers it.
 pub(crate) type EngineResponder<T> = oneshot::Sender<anyhow::Result<T>>;

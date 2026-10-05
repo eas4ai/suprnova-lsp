@@ -32,6 +32,8 @@ class ObservedClient(lsp.LspClient):
             if len(self.observed) >= 1024:
                 raise RuntimeError("worker notification observation exceeded its bound")
             self.observed.append({"monotonicNs": time.monotonic_ns(), **message})
+            status = message.get("params") or {}
+            print(f"worker {status.get('workspaceRoot')} generation {status.get('generation')}: {status.get('state')} {str(status.get('message', ''))[:512]}", flush=True)
         await super()._on_message(message)
 
 
@@ -77,6 +79,9 @@ class AutomaticProbe:
             events = self.status_events(state, since, root)
             if events:
                 return events[-1]["params"]
+            latest = self.status_events(since=since, root=root)
+            if state == "current" and latest and latest[-1]["params"].get("state") == "failed":
+                raise AssertionError(f"worker failed before current: {latest[-1]['params'].get('message')}")
             if self.client.exited:
                 raise AssertionError("LSP exited before worker status")
             if time.monotonic() - started >= 10 and not self.status_events(root=root):
@@ -149,6 +154,9 @@ class AutomaticProbe:
         except (AssertionError, RuntimeError, TimeoutError, OSError, ValueError, KeyError) as error:
             self.results[name] = {"passed": False, "attempted": True, "error": str(error)}
         print(f"automatic case {name}: {'pass' if self.results[name]['passed'] else 'fail'}", flush=True)
+        if not self.results[name]["passed"]:
+            print(self.results[name]["error"], flush=True)
+        Path(self.plan["report"]).write_text(json.dumps({"cases": self.results, "evidence": self.evidence}, indent=2) + "\n")
 
     async def start(self):
         self.client = await ObservedClient.start(Path(self.plan["binary"]), self.root, 300000, False)
@@ -542,6 +550,9 @@ class AutomaticProbe:
             elif self.plan["scenario"] == "missing-producer":
                 await self.case("missing-producer", self.missing_producer)
             else:
+                selected = self.plan.get("onlyCases")
+                if selected:
+                    await self.status("current", timeout=self.plan.get("workerWaitSeconds", 900))
                 for name, operation in [
                     ("discovery", self.model_queries), ("producer", self.producer_identity),
                     ("debounce", self.debounce), ("unsaved-duplicate", self.unsaved_and_duplicate),
@@ -552,7 +563,9 @@ class AutomaticProbe:
                     ("invalid-schema", lambda: self.failed_candidate("invalid-schema")),
                     ("invalid-reference", lambda: self.failed_candidate("invalid-reference")),
                     ("failed-recovery", lambda: self.failed_candidate("failure")),
-                    ("bounded-output", lambda: self.failed_candidate("flood"))]:
+                      ("bounded-output", lambda: self.failed_candidate("flood"))]:
+                    if selected and name not in selected:
+                        continue
                     await self.case(name, operation)
                 if self.plan.get("extraRoots"):
                     await self.case("global-serial", self.global_serial)

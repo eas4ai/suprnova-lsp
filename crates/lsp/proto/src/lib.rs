@@ -41,7 +41,7 @@ pub use self::{
         ServiceNotification,
     },
     query::{QueryError, QueryScope, QueryValue},
-    rustdoc::{RustdocGenerationInput, RustdocTargetExport},
+    rustdoc::{RustdocGenerationInput, RustdocProducerFile, RustdocTargetExport},
     saved_source::{CapturedSourceInput, SaveProposal, SavedProjectChanges},
     semantic_tokens::{SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES, semantic_tokens_legend},
     service::{

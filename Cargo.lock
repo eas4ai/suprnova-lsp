@@ -1962,19 +1962,25 @@ name = "rg_lsp_server"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "blake3",
+ "cargo_metadata",
  "futures",
  "ignore",
+ "libc",
  "notify-debouncer-full",
  "rg_lsp_proto",
  "rg_std",
+ "rg_workspace",
  "serde_json",
  "tarpc",
+ "tempfile",
  "test_fixture",
  "tokio",
  "tower",
  "tower-lsp-server",
  "tracing",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
