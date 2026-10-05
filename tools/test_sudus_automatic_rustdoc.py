@@ -11,6 +11,7 @@ import tempfile
 import time
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -22,6 +23,39 @@ probe = mechanism.editor.module("automatic_probe_test", ROOT / "tools/automatic-
 
 
 class Integrity(unittest.TestCase):
+    def test_cleanup_controls_allow_preparation_before_the_held_export(self):
+        async def check():
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for scenario in ["timeout", "shutdown"]:
+                    value = probe.AutomaticProbe({"root": str(root), "scenario": scenario,
+                        "workerWaitSeconds": 20, "control": str(root / "control"),
+                        "events": str(root / "events"), "artifactRoot": str(root / "outputs")})
+                    elapsed = 0
+                    def clock():
+                        nonlocal elapsed
+                        elapsed += 1
+                        return elapsed
+                    # Cargo metadata and producer identity can take longer than ten
+                    # seconds before the held compiler command even starts.
+                    value.events = lambda: ([{"event": "child", "monotonicNs": 1,
+                        "pid": 1, "childPid": 2}] if elapsed >= 12 else [])
+                    async def status(state, timeout):
+                        self.assertEqual((state, timeout), ("failed", 15))
+                        return {"message": "automatic_models Lib timed out after 5000 ms"}
+                    async def close():
+                        return None
+                    value.status = status
+                    value.client = SimpleNamespace(close=close)
+                    value.alive = lambda _pid: False
+                    with mock.patch.object(probe, "time", SimpleNamespace(monotonic=clock)):
+                        self.assertTrue((await value.timeout_or_shutdown())["cleanup"])
+                        elapsed = 0
+                        value.events = lambda: []
+                        with self.assertRaisesRegex(AssertionError, "no observed compiler child event"):
+                            await value.timeout_or_shutdown()
+        asyncio.run(check())
+
     def test_global_serial_waits_for_the_new_roots_source_readiness(self):
         async def check():
             with tempfile.TemporaryDirectory() as directory:

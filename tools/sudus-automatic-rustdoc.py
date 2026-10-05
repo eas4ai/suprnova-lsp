@@ -200,7 +200,9 @@ async def main():
         timeout = 60 * 60_000 if scenario == "lifecycle" else 30 * 60_000
         if scenario == "devlist":
             timeout = (plan["workerWaitSeconds"] + 600) * 1000
-        code, _ = await run(mode, "strace", ["-f", "-s", "4096", "-e", "trace=execve,execveat",
+        # Filter in the kernel so unrelated compiler syscalls do not stop at
+        # the tracer. Keep following every descendant and observing each exec.
+        code, _ = await run(mode, "strace", ["-f", "--seccomp-bpf", "-s", "4096", "-e", "trace=execve,execveat",
             "-o", str(trace), sys.executable, str(ROOT / "tools/automatic-rustdoc-probe.py"), str(path)],
             env=env, timeout=timeout)
         report = observation(json.loads(Path(plan["report"]).read_text()), mode, code)
