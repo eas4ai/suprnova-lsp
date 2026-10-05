@@ -78,7 +78,8 @@ impl<'a> CompilerPass<'a> {
             Duration::from_millis(self.config.rustdoc.automatic.timeout_ms),
             limit,
         )
-        .await?
+        .await
+        .with_context(|| format!("run {operation}"))?
         .require_success(operation)
     }
 
@@ -315,21 +316,24 @@ impl<'a> CompilerPass<'a> {
                 "--document-private-items",
                 "--document-hidden-items",
             ]);
-            self.run(
-                &mut command,
-                &format!(
-                    "export {} {:?} from {}",
-                    selected.name,
-                    selected.kind,
-                    selected.manifest.display()
-                ),
-                32 * 1024,
-            )
-            .await?;
+            let target_context = format!(
+                "{} {:?} from {}",
+                selected.name,
+                selected.kind,
+                selected.manifest.display()
+            );
+            self.run(&mut command, &format!("export {target_context}"), 32 * 1024)
+                .await?;
             let destination = staging.path().join(format!("{index}.json"));
-            std::fs::copy(&output, &destination)
-                .with_context(|| format!("stage compiler export {}", output.display()))?;
-            std::fs::remove_file(&output).context("release mutable Cargo export after staging")?;
+            std::fs::copy(&output, &destination).with_context(|| {
+                format!(
+                    "stage compiler export {} for {target_context}",
+                    output.display()
+                )
+            })?;
+            std::fs::remove_file(&output).with_context(|| {
+                format!("release mutable Cargo export after staging for {target_context}")
+            })?;
             exports.push(RustdocTargetExport {
                 manifest_path: selected.manifest,
                 target_name: selected.name,
@@ -488,4 +492,31 @@ struct SelectedTarget {
     manifest: PathBuf,
     name: String,
     kind: RustdocTargetKind,
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn timeout_preserves_the_export_target_context() {
+        let fixture = tempfile::tempdir().unwrap();
+        let mut config = AnalysisConfig::default();
+        config.rustdoc.automatic.timeout_ms = 50;
+        let (_sender, mut changes) = tokio::sync::watch::channel(1);
+        let mut pass = CompilerPass::new(fixture.path(), &config, fixture.path(), 1, &mut changes);
+        let mut command = Command::new("python3");
+        command.args(["-c", "import time; time.sleep(60)"]);
+        let operation = "export same_name Lib from Cargo.toml";
+        let error = pass.run(&mut command, operation, 1024).await.unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains(operation),
+            "missing timed-out target: {message}"
+        );
+        assert!(
+            message.contains("timed out"),
+            "missing timeout reason: {message}"
+        );
+    }
 }
