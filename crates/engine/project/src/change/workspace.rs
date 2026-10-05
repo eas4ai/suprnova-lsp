@@ -36,6 +36,15 @@ pub(super) fn rebuild_workspace_graph(
     )
     .context("while attempting to normalize Cargo metadata")?
     .with_sysroot_sources(sysroot);
+    let compiler_imports = project.state.compiler_imports.clone();
+    compiler_imports
+        .validate_workspace_replay(project.state.workspace(), &workspace)
+        .with_context(|| {
+            format!(
+                "replay captured rustdoc inputs for {}",
+                manifest_path.display()
+            )
+        })?;
     let body_ir_policy = project.state.body_ir_policy;
     let split_indexing_mode = project.state.split_indexing_mode;
     let indexing_preference = project.state.indexing_preference;
@@ -55,7 +64,7 @@ pub(super) fn rebuild_workspace_graph(
         .package_residency_policy(package_residency_policy)
         .startup_cache_load(startup_cache_load)
         .memory_hooks(memory_hooks)
-        .build()
+        .build_from_compiler_imports(compiler_imports)
         .context("while attempting to build refreshed analysis project")?
         .state;
 

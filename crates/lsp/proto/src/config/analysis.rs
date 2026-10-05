@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AnalysisCfgConfig, CargoMetadataConfig, IndexingPerformancePreference, PackageBatchSize,
-    PackageResidencyPolicy, SysrootDiscovery,
+    PackageResidencyPolicy, RustdocConfig, SysrootDiscovery,
 };
 
 /// Analysis configuration sent by the LSP client during initialization.
@@ -17,6 +17,8 @@ pub struct AnalysisConfig {
     pub indexing_preference: IndexingPerformancePreference,
     pub package_batch_size: PackageBatchSize,
     pub cfg: AnalysisCfgConfig,
+    #[serde(default)]
+    pub rustdoc: RustdocConfig,
 }
 
 impl AnalysisConfig {
@@ -35,6 +37,8 @@ impl AnalysisConfig {
                 .context("parse package batch size")?,
             cfg: AnalysisCfgConfig::from_initialization_options(options)
                 .context("parse cfg configuration")?,
+            rustdoc: RustdocConfig::from_initialization_options(options)
+                .context("parse rustdoc input configuration")?,
         })
     }
 }

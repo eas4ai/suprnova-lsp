@@ -5,7 +5,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 
 import { EXTENSION_COMMANDS } from "../src/commands";
-import { ExtensionConfig } from "../src/config";
+import { ExtensionConfig, RustdocConfig } from "../src/config";
 import { waitFor, withTimeout } from "./async";
 import { completeInEditor } from "./completion-scenario";
 import { inspectDocumentation } from "./documentation-scenario";
@@ -143,12 +143,41 @@ suite("Rust Glancer extension", () => {
     const previous = settings.get<unknown>("rustdoc.inputs");
     let document: vscode.TextDocument | undefined;
     try {
+      await settings.update("rustdoc.inputs", null, vscode.ConfigurationTarget.Global);
+      assert.throws(() => ExtensionConfig.read(), /rustdoc.inputs/);
+      await withTimeout(
+        vscode.commands.executeCommand(EXTENSION_COMMANDS.restartServer),
+        "reject malformed editor configuration",
+      );
+      await waitFor(
+        "malformed configuration reported",
+        clientState,
+        (state) => state.session === undefined && state.status.state === "failed",
+      );
       await settings.update("rustdoc.inputs", inputs, vscode.ConfigurationTarget.Global);
-      const config = ExtensionConfig.read() as unknown as { rustdoc?: { inputs?: unknown } };
+      const config = ExtensionConfig.read();
       assert.deepEqual(
-        config.rustdoc?.inputs,
+        config.rustdoc.inputs,
         inputs,
         "the extension dropped its configured input",
+      );
+      for (const malformed of [null, "invalid", [null], [{}]]) {
+        assert.throws(() => RustdocConfig.read(malformed), /rustdoc.inputs/);
+      }
+      for (const field of Object.keys(inputs[0])) {
+        const missing: Record<string, unknown> = { ...inputs[0] };
+        delete missing[field];
+        assert.throws(() => RustdocConfig.read([missing]), /rustdoc.inputs/);
+        for (const value of [null, 1, "", "   "]) {
+          assert.throws(
+            () => RustdocConfig.read([{ ...inputs[0], [field]: value }]),
+            /rustdoc.inputs/,
+          );
+        }
+      }
+      assert.throws(
+        () => RustdocConfig.read([{ ...inputs[0], targetKind: "proc-macro" }]),
+        /targetKind/,
       );
       await withTimeout(
         vscode.commands.executeCommand(EXTENSION_COMMANDS.restartServer),

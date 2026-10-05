@@ -63,7 +63,15 @@ export class LanguageClientSession implements vscode.Disposable {
       return this.clientStatus.isRunning();
     }
 
-    const config = ExtensionConfig.read();
+    let config: ExtensionConfig;
+    try {
+      config = ExtensionConfig.read();
+    } catch (error) {
+      this.clientStatus.failed(String(error));
+      this.extensionLog.error(`rust-glancer configuration is invalid: ${String(error)}`);
+      void vscode.window.showErrorMessage(`Rust Glancer configuration is invalid: ${String(error)}`);
+      return false;
+    }
     const server = ResolvedServer.discover(config, this.extensionUri, this.workspaceFolder);
     const statusDetails = {
       workspaceRoot: this.workspaceFolder.uri.fsPath,
@@ -85,7 +93,8 @@ export class LanguageClientSession implements vscode.Disposable {
         diagnostics: config.diagnostics,
         indexing: config.indexing,
         cargo: config.cargo,
-        cache: config.cache,
+          cache: config.cache,
+          rustdoc: config.rustdoc,
       },
       middleware: this.middleware(),
     };

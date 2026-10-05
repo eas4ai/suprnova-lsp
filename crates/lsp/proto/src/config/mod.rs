@@ -4,6 +4,7 @@ mod cargo;
 mod cfg;
 mod diagnostics;
 mod indexing;
+mod rustdoc;
 mod sysroot;
 
 use gen_lsp_types::LspAny;
@@ -16,6 +17,7 @@ pub use self::{
     cfg::AnalysisCfgConfig,
     diagnostics::DiagnosticsConfig,
     indexing::{IndexingPerformancePreference, PackageBatchSize},
+    rustdoc::{RustdocConfig, RustdocInputConfig, RustdocTargetKind},
     sysroot::SysrootDiscovery,
 };
 

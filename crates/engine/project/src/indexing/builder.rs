@@ -6,7 +6,7 @@ use anyhow::Context as _;
 use rg_body_ir::BodyIrBuildPolicy;
 use rg_workspace::{CargoMetadataConfig, WorkspaceLoweringConfig, WorkspaceMetadata};
 
-use super::initial::build_resident_state;
+use super::{compiler::CompilerImports, initial::build_resident_state};
 use crate::{
     BuildProcessMemory, IndexingPerformancePreference, PackageBatchSize, PackageResidencyPolicy,
     Project, ProjectMemoryHooks, ProjectMemoryPurgePoint, SplitIndexingMode, StartupCacheLoad,
@@ -16,6 +16,7 @@ use crate::{
 };
 
 /// One compiler export selected for an exact Cargo package, target, and nominal type.
+#[derive(Debug, Clone)]
 pub struct RustdocInput {
     pub manifest_path: PathBuf,
     pub target_name: String,
@@ -127,8 +128,15 @@ impl ProjectBuilder {
     }
 
     pub fn build(self) -> anyhow::Result<Project> {
-        let compiler_imports =
-            super::compiler::CompilerImports::read(&self.workspace, &self.rustdoc_inputs)?;
+        let compiler_imports = CompilerImports::read(&self.workspace, &self.rustdoc_inputs)?;
+        self.build_from_compiler_imports(compiler_imports)
+    }
+
+    /// Rebuild with facts captured by an earlier generation, without reopening external exports.
+    pub(crate) fn build_from_compiler_imports(
+        self,
+        compiler_imports: CompilerImports,
+    ) -> anyhow::Result<Project> {
         let mut memory_sampler = self.memory_sampler;
         // Claim an instance before startup probing so all cache reads and writes belong to this
         // project/LSP owner.
