@@ -104,7 +104,14 @@ impl EditorFixture {
 #[tokio::test]
 async fn edt_004_rejects_invalid_startup_without_replacing_the_previous_project() {
     for preference in ["faster-builds", "lower-peak-memory"] {
-        for violation in ["missing", "format", "duplicate", "target", "reference"] {
+        for violation in [
+            "missing",
+            "format",
+            "duplicate",
+            "target",
+            "kind",
+            "reference",
+        ] {
             let fixture = EditorFixture::new();
             fixture.initialize(preference, true).await;
             let path = fixture.lsp.fixture.path("api.json");
@@ -122,6 +129,7 @@ async fn edt_004_rejects_invalid_startup_without_replacing_the_previous_project(
                         .push(input);
                 }
                 "target" => options["rustdoc"]["inputs"][0]["targetName"] = json!("absent_target"),
+                "kind" => options["rustdoc"]["inputs"][0]["targetKind"] = json!("bin"),
                 "reference" => {
                     // Remove the declaration still referenced by Model::query's signature.
                     let mut export: serde_json::Value =
