@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 
@@ -20,6 +21,31 @@ probe = mechanism.editor.module("automatic_probe_test", ROOT / "tools/automatic-
 
 
 class Integrity(unittest.TestCase):
+    def test_current_barrier_rejects_historical_success_and_obsolete_failures(self):
+        async def check():
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                value = probe.AutomaticProbe({"root": str(root), "control": str(root / "control"),
+                    "events": str(root / "events"), "artifactRoot": str(root / "outputs")})
+                def event(generation, state):
+                    return {"monotonicNs": 1, "params": {"workspaceRoot": str(root),
+                        "generation": generation, "state": state, "message": state}}
+                value.client = SimpleNamespace(exited=False, observed=[event(1, "current"),
+                    event(2, "pending"), event(1, "failed")])
+                async def complete():
+                    await asyncio.sleep(0.04)
+                    value.client.observed.append(event(2, "current"))
+                completion = asyncio.create_task(complete())
+                try:
+                    current = await value.status("current", timeout=1)
+                    self.assertEqual(current["generation"], 2)
+                finally:
+                    await completion
+                value.client.observed.extend([event(3, "failed"), event(2, "current")])
+                with self.assertRaisesRegex(AssertionError, "worker failed"):
+                    await value.status("current", timeout=1)
+        asyncio.run(check())
+
     def test_observation_requires_exact_attempted_cases_and_matching_exit(self):
         report = {"cases": {"no-worker": {"passed": True, "attempted": True, "evidence": {"noCompiler": True}}}}
         self.assertEqual(mechanism.observation(report, "disabled", 0), report)

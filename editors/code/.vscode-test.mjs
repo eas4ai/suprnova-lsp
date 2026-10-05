@@ -1,5 +1,5 @@
 import { defineConfig } from "@vscode/test-cli";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,12 +7,19 @@ import { fileURLToPath } from "node:url";
 const extensionRoot = dirname(fileURLToPath(import.meta.url));
 const userDataDir = mkdtempSync(resolve(tmpdir(), "rust-glancer-user-data-"));
 const extensionsDir = mkdtempSync(resolve(tmpdir(), "rust-glancer-extensions-"));
+const workspaceFile = resolve(userDataDir, "acceptance.code-workspace");
+// Tests add genuine Cargo roots. Start in workspace mode so adding the first one cannot
+// leave a single-folder conversion pending and block every subsequent folder addition.
+writeFileSync(
+  workspaceFile,
+  JSON.stringify({ folders: [{ path: resolve(extensionRoot, "../../test_targets") }] }),
+);
 
 export default defineConfig({
   files: "out/test/**/*.test.js",
   version: vscodeTestVersion(),
   extensionDevelopmentPath: extensionRoot,
-  workspaceFolder: resolve(extensionRoot, "../../test_targets"),
+  workspaceFolder: workspaceFile,
   env: {
     RUST_GLANCER_VSCODE_USER_DATA_DIR: userDataDir,
   },

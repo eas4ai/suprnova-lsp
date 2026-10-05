@@ -43,7 +43,9 @@ suite("Rust Glancer extension", () => {
     );
   });
 
-  test("serves both Rust projects through one server and survives reindex and restart", async () => {
+  test("serves both Rust projects through one server and survives reindex and restart", async function () {
+    // Several separately bounded startup/reindex operations share this workflow's deadline.
+    this.timeout(180_000);
     const simple = await vscode.workspace.openTextDocument(
       vscode.Uri.joinPath(projects, "simple_crate", "src", "lib.rs"),
     );

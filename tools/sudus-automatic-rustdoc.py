@@ -23,7 +23,8 @@ LIFECYCLE = {"discovery", "producer", "debounce", "unsaved-duplicate", "live-ref
 EXPECTED = {"initial": LIFECYCLE, "batched": LIFECYCLE,
             "disabled": {"no-worker"}, "unrelated": {"no-worker"}, "prepared": {"prepared"},
             "timeout": {"timeout-cleanup"}, "shutdown": {"shutdown-cleanup"},
-            "missing-producer": {"missing-producer"}, "user-initial": {"genuine-user"},
+              "missing-producer": {"missing-producer"}, "artifact-failure": {"artifact-recovery"},
+              "user-initial": {"genuine-user"},
             "user-batched": {"genuine-user"}, "source-initial": {"source-user"},
             "source-batched": {"source-user"}}
 EDITOR_CASE = "Rust Glancer extension AUT-001 sends automatic worker policy through the editor client"
@@ -109,7 +110,7 @@ def assess(tests, editor_passed, reports, traces, retained, described):
         "AUT-005": both("stale-disk", "obsolete-failure", "targets"),
         "AUT-006": both("live-refresh", "models", "targets", "invalid-schema", "invalid-reference", "failed-recovery"),
         "AUT-007": described and editor_passed and both("failed-recovery", "invalid-schema", "bounded-output")
-                   and one("missing-producer") and one("timeout"),
+                     and one("missing-producer") and one("timeout") and one("artifact-failure"),
         "AUT-008": both("live-refresh") and one("user-initial") and one("user-batched"),
     }
     memory = retained and set(traces) == set(EXPECTED) and all(
@@ -295,6 +296,7 @@ async def main():
         for mode in ["timeout", "shutdown"]:
             await probe(mode, initial, mode, controlMode="hold", timeoutMs=5000 if mode == "timeout" else 900000)
         await probe("missing-producer", initial, "missing-producer", automatic={"toolchain": "missing-automatic-rustdoc-producer"})
+        await probe("artifact-failure", initial, "artifact-failure")
 
         original = (user.APP / "src/models/user.rs").read_text()
         signature = "pub fn verify_password(&self, password: &str) -> Result<bool, FrameworkError> {"

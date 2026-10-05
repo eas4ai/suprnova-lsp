@@ -11,7 +11,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use anyhow::Context as _;
 use rg_lsp_proto::AnalysisConfig;
 use rg_workspace::SavedWorkspaceInputs;
 use tokio::sync::{Mutex, Semaphore, watch};
@@ -66,7 +65,7 @@ impl RustdocWorkers {
             self.client.clone(),
             Arc::clone(&self.permit),
             Arc::clone(&self.artifact_directories),
-        )?;
+        );
         roots.insert(root, Arc::clone(&worker));
         drop(roots);
         worker.trigger(true).await
@@ -148,13 +147,14 @@ impl RustdocWorkers {
         for worker in roots.values() {
             worker.cancel();
         }
+        let mut result = Ok(());
         for worker in roots.into_values() {
-            worker
-                .join()
-                .await
-                .context("drain automatic rustdoc worker")?;
+            if let Err(error) = worker.join().await {
+                tracing::error!(error = %format!("{error:#}"), "failed to join automatic compiler worker");
+                result = Err(error.context("drain automatic rustdoc worker"));
+            }
         }
-        Ok(())
+        result
     }
 }
 

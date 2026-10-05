@@ -12,8 +12,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    ffi::OsStr,
-    path::{Component, Path},
+    path::Path,
     time::{Duration, Instant},
 };
 
@@ -407,9 +406,7 @@ impl WatchedProjectPath {
     }
 
     fn identity(root: &NormalizedPathBuf, path: &NormalizedPathBuf) -> Option<FileIdentity> {
-        if Self::is_ignored(root.as_path(), path.as_path())
-            || !Self::is_project_input(path.as_path())
-        {
+        if !Self::is_watched_project_input(root.as_path(), path.as_path()) {
             return None;
         }
 
@@ -420,33 +417,8 @@ impl WatchedProjectPath {
         !Self::is_ignored(root, path)
     }
 
-    fn is_project_input(path: &Path) -> bool {
-        let file_name = path.file_name().and_then(OsStr::to_str);
-        path.extension().and_then(OsStr::to_str) == Some("rs")
-            || matches!(
-                file_name,
-                Some("Cargo.toml" | "Cargo.lock" | "rust-toolchain" | "rust-toolchain.toml")
-            )
-            || (matches!(file_name, Some("config" | "config.toml"))
-                && path.parent().and_then(Path::file_name) == Some(OsStr::new(".cargo")))
-    }
-
     fn is_ignored(root: &Path, path: &Path) -> bool {
-        // Ignore directory names only inside the watched workspace. The workspace itself may live
-        // below an unrelated `target`, `.git`, or dependency directory on the host filesystem.
-        let Ok(relative) = path.strip_prefix(root) else {
-            return true;
-        };
-
-        relative.components().any(|component| {
-            let Component::Normal(name) = component else {
-                return false;
-            };
-            matches!(
-                name.to_str(),
-                Some(".git" | "target" | "node_modules" | ".direnv")
-            )
-        })
+        rg_workspace::SavedWorkspaceInputs::is_ignored(root, path)
     }
 }
 

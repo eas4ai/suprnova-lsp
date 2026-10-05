@@ -1,7 +1,7 @@
 use std::{
     path::{Path, PathBuf},
     sync::{
-        Arc, RwLock,
+        Arc, OnceLock, RwLock,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -28,7 +28,7 @@ pub(super) struct WorkspaceWorker {
     config: AnalysisConfig,
     engine: EngineClient,
     client: Client,
-    artifacts: TempDir,
+    artifacts: OnceLock<TempDir>,
     artifact_directories: Arc<RwLock<Vec<PathBuf>>>,
     changes: watch::Sender<u64>,
     state: Mutex<WorkerState>,
@@ -44,46 +44,14 @@ impl WorkspaceWorker {
         client: Client,
         permit: Arc<Semaphore>,
         artifact_directories: Arc<RwLock<Vec<PathBuf>>>,
-    ) -> anyhow::Result<Arc<Self>> {
-        let parent = config
-            .rustdoc
-            .automatic
-            .artifact_root
-            .as_ref()
-            .map(|path| {
-                if path.is_absolute() {
-                    path.clone()
-                } else {
-                    root.join(path)
-                }
-            })
-            .unwrap_or_else(|| root.join("target/rust-glancer/rustdoc"));
-        std::fs::create_dir_all(&parent)
-            .with_context(|| format!("create rustdoc artifact parent {}", parent.display()))?;
-        let artifacts = tempfile::Builder::new()
-            .prefix(".rust-glancer-rustdoc-")
-            .tempdir_in(parent)
-            .context("claim isolated rustdoc artifacts")?;
-        let resolved_artifacts = artifacts
-            .path()
-            .canonicalize()
-            .context("resolve owned compiler artifact directory")?;
+    ) -> Arc<Self> {
         let (changes, receiver) = watch::channel(0);
-        let mut claimed = artifact_directories
-            .write()
-            .expect("artifact ownership lock is not poisoned");
-        claimed.push(artifacts.path().to_path_buf());
-        if resolved_artifacts != artifacts.path() {
-            // A configured parent can be a symlink back into the watched workspace.
-            claimed.push(resolved_artifacts);
-        }
-        drop(claimed);
         let worker = Arc::new(Self {
             root,
             config,
             engine,
             client,
-            artifacts,
+            artifacts: OnceLock::new(),
             artifact_directories,
             changes,
             state: Mutex::new(WorkerState::default()),
@@ -99,7 +67,7 @@ impl WorkspaceWorker {
             .task
             .try_lock()
             .expect("new worker task slot is uncontended") = Some(task);
-        Ok(worker)
+        worker
     }
 
     pub(super) fn root(&self) -> &Path {
@@ -167,8 +135,8 @@ impl WorkspaceWorker {
     }
 
     pub(super) async fn failed(&self, message: String) {
-        let generation = self.state.lock().await.generation;
-        self.status(generation, "failed", &message).await;
+        let state = self.state.lock().await;
+        self.status(state.generation, "failed", &message).await;
     }
 
     async fn status(&self, generation: u64, state: &str, message: &str) {
@@ -273,6 +241,12 @@ impl WorkspaceWorker {
                     }
                 }
                 Err(error) => {
+                    let state = worker.state.lock().await;
+                    if state.generation != generation {
+                        continue;
+                    }
+                    // Keep the fence through notification delivery, so a newer trigger cannot
+                    // report pending/current before this failed attempt finishes reporting.
                     worker
                         .status(
                             generation,
@@ -282,7 +256,7 @@ impl WorkspaceWorker {
                                 worker.root.display()
                             ),
                         )
-                        .await
+                        .await;
                 }
             }
         }
@@ -293,6 +267,50 @@ impl WorkspaceWorker {
         generation: u64,
         changes: &mut GenerationChanges,
     ) -> anyhow::Result<GenerationResult> {
+        // Claim artifacts inside the attempt. A bad configured parent must report a failed
+        // generation and leave this registered worker able to retry after a save or reindex.
+        if self.artifacts.get().is_none() {
+            let parent = self
+                .config
+                .rustdoc
+                .automatic
+                .artifact_root
+                .as_ref()
+                .map(|path| {
+                    if path.is_absolute() {
+                        path.clone()
+                    } else {
+                        self.root.join(path)
+                    }
+                })
+                .unwrap_or_else(|| self.root.join("target/rust-glancer/rustdoc"));
+            std::fs::create_dir_all(&parent)
+                .with_context(|| format!("create rustdoc artifact parent {}", parent.display()))?;
+            let artifacts = tempfile::Builder::new()
+                .prefix(".rust-glancer-rustdoc-")
+                .tempdir_in(parent)
+                .context("claim isolated rustdoc artifacts")?;
+            let resolved_artifacts = artifacts
+                .path()
+                .canonicalize()
+                .context("resolve owned compiler artifact directory")?;
+            let mut claimed = self
+                .artifact_directories
+                .write()
+                .expect("artifact ownership lock is not poisoned");
+            claimed.push(artifacts.path().to_path_buf());
+            if resolved_artifacts != artifacts.path() {
+                // A configured parent can be a symlink back into the watched workspace.
+                claimed.push(resolved_artifacts);
+            }
+            self.artifacts
+                .set(artifacts)
+                .expect("the serialized worker claims its artifact directory once");
+        }
+        let artifacts = self
+            .artifacts
+            .get()
+            .expect("compiler artifacts were claimed before preparation");
         let inputs = SavedWorkspaceInputs::read(&self.root, &self.artifact_directories())?.digest();
         let captured = self.state.lock().await.saved_inputs;
         if captured != Some(inputs) {
@@ -301,7 +319,7 @@ impl WorkspaceWorker {
         let exported = CompilerPass::new(
             &self.root,
             &self.config,
-            self.artifacts.path(),
+            artifacts.path(),
             generation,
             changes,
         )
