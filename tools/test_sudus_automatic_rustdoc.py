@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 
@@ -21,6 +22,65 @@ probe = mechanism.editor.module("automatic_probe_test", ROOT / "tools/automatic-
 
 
 class Integrity(unittest.TestCase):
+    def test_global_serial_waits_for_the_new_roots_source_readiness(self):
+        async def check():
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                second = root / "second"
+                file = second / "src/lib.rs"
+                file.parent.mkdir(parents=True)
+                file.write_text("let automatic_source = 7u64;\n")
+                value = probe.AutomaticProbe({"root": str(root), "extraRoots": [str(second)],
+                    "control": str(root / "control"), "events": str(root / "events"),
+                    "artifactRoot": str(root / "outputs"), "debounceMs": 1})
+                ready, live, queries = False, True, 0
+                async def notify(*_args):
+                    pass
+                async def wait(predicate, _description, timeout):
+                    nonlocal ready
+                    self.assertEqual(timeout, 300000)
+                    message = {"method": probe.lsp.ACTIVE_WORKSPACE_CHANGED,
+                               "params": {"root": str(second), "state": "ready"}}
+                    self.assertTrue(predicate(message))
+                    wrong = copy.deepcopy(message)
+                    wrong["params"]["root"] = str(root)
+                    self.assertFalse(predicate(wrong), "another root's readiness is not a barrier")
+                    ready = True
+                    return message
+                async def noop(*_args, **_kwargs):
+                    return None
+                async def event(*_args):
+                    return {"pid": 1, "childPid": 2}
+                async def hover(*_args, **_kwargs):
+                    nonlocal queries
+                    self.assertTrue(ready, "source query ran before the new root was ready")
+                    queries += 1
+                    if queries == 1:
+                        raise probe.lsp.LspQueryError('textDocument/hover failed: ' + json.dumps({
+                            "code": -32801, "message": "the document analysis route is still being resolved"}))
+                    return "u64"
+                async def change(*_args):
+                    nonlocal live
+                    live = False
+                async def complete(*_args):
+                    return ["Id"]
+                value.client = SimpleNamespace(notify=notify, wait_for_notification=wait)
+                value.status, value.reindex, value.event = noop, noop, event
+                value.hover, value.change, value.complete = hover, change, complete
+                value.alive = lambda _pid: live
+                value.events = lambda: [{"event": "started", "monotonicNs": time.monotonic_ns()}]
+                value.status_events = lambda **_kwargs: [{"params": {"state": "stale"}}]
+                value.texts[root / "src/lib.rs"] = "source"
+                self.assertTrue((await value.global_serial())["serial"])
+                self.assertEqual(queries, 2)
+                live = True
+                async def failed_hover(*_args, **_kwargs):
+                    raise probe.lsp.LspQueryError('textDocument/hover failed: {"code": -32603, "message": "bug"}')
+                value.hover = failed_hover
+                with self.assertRaisesRegex(probe.lsp.LspQueryError, "bug"):
+                    await value.global_serial()
+        asyncio.run(check())
+
     def test_server_refresh_request_cannot_complete_a_client_query_with_the_same_id(self):
         async def check():
             client = probe.lsp.LspClient.__new__(probe.lsp.LspClient)

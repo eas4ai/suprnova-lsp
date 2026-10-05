@@ -518,7 +518,30 @@ class AutomaticProbe:
         child = await self.event("child", since)
         second = Path(self.plan["extraRoots"][0]).resolve()
         await self.open(second / "src/lib.rs")
-        assert "u64" in await self.hover(second / "src/lib.rs", "automatic_source", timeout=300000)
+        # Opening a new root resolves its source route asynchronously. Wait for that
+        # root, while the first compiler stays held, before testing query responsiveness.
+        readiness = await self.client.wait_for_notification(
+            lambda message: message.get("method") == lsp.ACTIVE_WORKSPACE_CHANGED
+            and (message.get("params") or {}).get("root") in {str(second), second.as_uri()}
+            and (message.get("params") or {}).get("state") in {"ready", "failed"},
+            "second workspace source readiness", 300000)
+        assert readiness["params"]["state"] == "ready", readiness
+        # Workspace readiness precedes didOpen's final route publication. Retry only
+        # that precise transient response briefly; a blocked route or other query error fails.
+        route_deadline = time.monotonic() + 5
+        route_retries = 0
+        pending_route = 'textDocument/hover failed: ' + json.dumps({
+            "code": -32801, "message": "the document analysis route is still being resolved"})
+        while True:
+            try:
+                source = await self.hover(second / "src/lib.rs", "automatic_source", timeout=300000)
+                break
+            except lsp.LspQueryError as error:
+                if str(error) != pending_route or time.monotonic() >= route_deadline:
+                    raise
+                route_retries += 1
+                await asyncio.sleep(0.02)
+        assert "u64" in source
         await asyncio.sleep(self.plan.get("debounceMs", 2000) / 1000 + 1)
         starts = [e for e in self.events() if e["event"] == "started" and e["monotonicNs"] >= since]
         assert len(starts) == 1 and self.alive(child["pid"]), "automatic exports overlapped across workspaces"
@@ -534,7 +557,8 @@ class AutomaticProbe:
                    for e in self.status_events(since=since)), "obsolete generated API was never marked stale"
         second_columns = await self.complete(second / "src/lib.rs", "let automatic_column = post::Column::")
         assert "Score" not in second_columns and "Rank" not in second_columns, "compiler facts leaked between roots"
-        return {"secondRoot": str(second), "heldFirstRoot": child, "serial": True}
+        return {"secondRoot": str(second), "heldFirstRoot": child, "serial": True,
+                "sourceRoutePendingRetries": route_retries}
 
     async def missing_producer(self):
         failed = await self.status("failed", timeout=15)
