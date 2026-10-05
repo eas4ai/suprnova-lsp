@@ -30,6 +30,55 @@ export interface ExtensionConfig {
   readonly cargo: CargoConfig;
   readonly cache: CacheConfig;
   readonly diagnostics: DiagnosticsConfig;
+  readonly rustdoc: RustdocConfig;
+}
+
+export interface RustdocConfig {
+  readonly inputs: RustdocInputConfig[];
+}
+
+export interface RustdocInputConfig {
+  readonly workspaceRoot: string;
+  readonly manifestPath: string;
+  readonly targetName: string;
+  readonly targetKind: "lib" | "bin";
+  readonly exportPath: string;
+  readonly itemPath: string;
+}
+
+export namespace RustdocConfig {
+  export function read(value: unknown): RustdocConfig {
+    if (!Array.isArray(value)) {
+      throw new Error("rust-glancer.rustdoc.inputs must be an array");
+    }
+    // These identities select a compiler model. Silently skipping a malformed entry would
+    // start an engine without the model the developer explicitly selected.
+    const inputs = value.map((input: unknown, index: number): RustdocInputConfig => {
+      if (!isRecord(input)) {
+        throw new Error(`rust-glancer.rustdoc.inputs[${index}] must be an object`);
+      }
+      const requiredString = (field: string): string => {
+        const fieldValue = input[field];
+        if (typeof fieldValue !== "string" || fieldValue.trim().length === 0) {
+          throw new Error(`rust-glancer.rustdoc.inputs[${index}].${field} must be a nonempty string`);
+        }
+        return fieldValue;
+      };
+      const targetKind = requiredString("targetKind");
+      if (targetKind !== "lib" && targetKind !== "bin") {
+        throw new Error(`rust-glancer.rustdoc.inputs[${index}].targetKind must be lib or bin`);
+      }
+      return {
+        workspaceRoot: requiredString("workspaceRoot"),
+        manifestPath: requiredString("manifestPath"),
+        targetName: requiredString("targetName"),
+        targetKind,
+        exportPath: requiredString("exportPath"),
+        itemPath: requiredString("itemPath"),
+      };
+    });
+    return { inputs };
+  }
 }
 
 export interface CfgConfig {
@@ -122,6 +171,7 @@ export namespace ExtensionConfig {
         ),
         extraEnv: normalizeStringRecord(readUnknownRecord(config, "diagnostics.extraEnv")),
       },
+      rustdoc: RustdocConfig.read(config.get<unknown>("rustdoc.inputs", [])),
     };
   }
 }

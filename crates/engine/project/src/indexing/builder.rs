@@ -16,6 +16,7 @@ use crate::{
 };
 
 /// One compiler export selected for an exact Cargo package, target, and nominal type.
+#[derive(Debug, Clone)]
 pub struct RustdocInput {
     pub manifest_path: PathBuf,
     pub target_name: String,

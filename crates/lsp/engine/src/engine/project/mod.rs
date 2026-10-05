@@ -190,6 +190,7 @@ impl ProjectCoordinator {
                 .package_batch_size(configuration.package_batch_size)
                 .split_indexing_mode(SplitIndexingMode::EarlyStart)
                 .package_residency_policy(configuration.package_residency_policy)
+                .rustdoc_inputs(configuration.rustdoc_inputs.clone())
                 .memory_hooks(Arc::clone(&self.memory_hooks))
                 .build();
             match result {
@@ -200,7 +201,12 @@ impl ProjectCoordinator {
                         stale_retries,
                         &error,
                     ) else {
-                        return Err(error).context("build LSP analysis project");
+                        return Err(error).with_context(|| {
+                            format!(
+                                "build LSP analysis project for {}",
+                                workspace_root.display()
+                            )
+                        });
                     };
                     stale_retries = stale_retries.saturating_add(1);
                 }

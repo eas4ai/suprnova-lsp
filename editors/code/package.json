@@ -259,6 +259,59 @@
             "type": "string"
           },
           "description": "Additional environment variables for Cargo diagnostics. Use this for compiler flags such as { \"RUSTFLAGS\": \"--cfg tokio_unstable\" }."
+        },
+        "rust-glancer.rustdoc.inputs": {
+          "scope": "window",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "required": [
+              "workspaceRoot",
+              "manifestPath",
+              "targetName",
+              "targetKind",
+              "exportPath",
+              "itemPath"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "workspaceRoot": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Exact Cargo workspace root. Relative paths require exactly one editor workspace folder."
+              },
+              "manifestPath": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Owning package manifest, absolute or relative to workspaceRoot."
+              },
+              "targetName": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Analyzed Cargo target name."
+              },
+              "targetKind": {
+                "type": "string",
+                "enum": [
+                  "lib",
+                  "bin"
+                ],
+                "description": "Analyzed Cargo target kind."
+              },
+              "exportPath": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Prepared rustdoc JSON file, absolute or relative to workspaceRoot."
+              },
+              "itemPath": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Fully qualified compiler item path, such as devlist::models::user::User."
+              }
+            }
+          },
+          "description": "Import prepared rustdoc JSON declarations for explicitly selected models. Restart the Rust Glancer server after changing these inputs or their exports. Macro changes are not automatically synchronized."
         }
       }
     }

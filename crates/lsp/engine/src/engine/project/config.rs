@@ -3,7 +3,7 @@
 use rg_lsp_proto::{
     AnalysisConfig, CargoMetadataTarget as ProtoCargoMetadataTarget,
     IndexingPerformancePreference as ProtoIndexingPerformancePreference,
-    PackageResidencyPolicy as ProtoPackageResidencyPolicy,
+    PackageResidencyPolicy as ProtoPackageResidencyPolicy, RustdocTargetKind,
     SysrootDiscovery as ProtoSysrootDiscovery,
 };
 use rg_project::{IndexingPerformancePreference, PackageBatchSize, PackageResidencyPolicy};
@@ -18,6 +18,7 @@ pub(crate) struct ProjectConfiguration {
     pub(super) indexing_preference: IndexingPerformancePreference,
     pub(super) package_batch_size: PackageBatchSize,
     pub(super) discover_sysroot: bool,
+    pub(super) rustdoc_inputs: Vec<rg_project::RustdocInput>,
 }
 
 impl From<AnalysisConfig> for ProjectConfiguration {
@@ -66,6 +67,21 @@ impl From<AnalysisConfig> for ProjectConfiguration {
             indexing_preference,
             package_batch_size,
             discover_sysroot: matches!(config.sysroot_discovery, ProtoSysrootDiscovery::Auto),
+            rustdoc_inputs: config
+                .rustdoc
+                .inputs
+                .into_iter()
+                .map(|input| rg_project::RustdocInput {
+                    manifest_path: input.manifest_path,
+                    target_name: input.target_name,
+                    target_kind: match input.target_kind {
+                        RustdocTargetKind::Lib => rg_workspace::TargetKind::Lib,
+                        RustdocTargetKind::Bin => rg_workspace::TargetKind::Bin,
+                    },
+                    export_path: input.export_path,
+                    item_path: input.item_path,
+                })
+                .collect(),
         }
     }
 }
