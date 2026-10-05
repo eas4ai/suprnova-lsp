@@ -311,7 +311,7 @@
               }
             }
           },
-          "description": "Prepared inputs automatically synchronize generated macro APIs without a restart."
+          "description": "Import prepared rustdoc JSON declarations for explicitly selected models. Restart the Rust Glancer server after changing these inputs or their exports. Macro changes are not automatically synchronized."
         }
       }
     }

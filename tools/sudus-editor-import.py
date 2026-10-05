@@ -271,7 +271,7 @@ async def main():
         if not cargo:
             raise ValueError("Cargo executable missing")
         shim = tools / "cargo"
-        shim.write_text(f"#!{sys.executable}\nimport os, sys, subprocess\nsubprocess.run(['rustdoc', '--version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)\nargs = sys.argv[1:]\nif args and args[0] == 'metadata':\n    args += ['--locked', '--offline']\nos.execv({cargo!r}, ['cargo', *args])\n")
+        shim.write_text(f"#!{sys.executable}\nimport os, sys\nargs = sys.argv[1:]\nif args and args[0] == 'metadata':\n    args += ['--locked', '--offline']\nos.execv({cargo!r}, ['cargo', *args])\n")
         shim.chmod(0o755)
         query_env = dict(environment, PATH=str(tools) + os.pathsep + environment["PATH"])
         original = (user.APP / "src/models/user.rs").read_text()
