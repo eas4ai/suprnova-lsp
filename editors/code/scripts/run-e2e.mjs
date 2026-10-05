@@ -20,10 +20,25 @@ if (!existsSync(testCli)) {
   fail(`Expected local VS Code test CLI does not exist: ${testCli}. Run npm install.`);
 }
 
+let fixtureEnvironment = {};
+if (process.env.RUST_GLANCER_AUTOMATIC_RUSTDOC_FIXTURE === undefined) {
+  const prepared = spawnSync("python3", [join(workspaceRoot, "tools/prepare-automatic-editor-fixture.py")], {
+    cwd: workspaceRoot,
+    env: process.env,
+    encoding: "utf8",
+    timeout: 150_000,
+  });
+  if (prepared.error !== undefined || prepared.status !== 0) {
+    fail(`Could not prepare automatic model fixture: ${prepared.error?.message ?? prepared.stderr}`);
+  }
+  fixtureEnvironment = JSON.parse(prepared.stdout);
+}
+
 const result = spawnSync(process.execPath, [testCli, ...process.argv.slice(2)], {
   cwd: extensionRoot,
   env: {
     ...process.env,
+    ...fixtureEnvironment,
     RUST_GLANCER_EXTENSION_TEST: "1",
     __RUST_GLANCER_SERVER: server,
   },
