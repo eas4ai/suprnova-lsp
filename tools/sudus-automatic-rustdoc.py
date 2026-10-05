@@ -197,7 +197,8 @@ async def main():
         trace = work / "process.exec"
         code, _ = await run(mode, "strace", ["-f", "-s", "4096", "-e", "trace=execve,execveat",
             "-o", str(trace), sys.executable, str(ROOT / "tools/automatic-rustdoc-probe.py"), str(path)],
-            env=env, timeout=30 * 60_000)
+            env=env, timeout=(plan["workerWaitSeconds"] + 600) * 1000
+            if scenario == "devlist" else 30 * 60_000)
         report = observation(json.loads(Path(plan["report"]).read_text()), mode, code)
         after = {str(p): user.digest(p.read_bytes()) for p in root.rglob("*")
                  if p.is_file() and (p.suffix == ".rs" or p.name in {"Cargo.toml", "Cargo.lock"})
@@ -325,6 +326,13 @@ async def main():
         if code != 0:
             raise ValueError("sysroot unavailable")
         sources = user.source_inventory(metadata, Path(sysroot.strip()) / "lib/rustlib/src/rust/library")
+        # The producer deadline applies to each serial command. A cold multi-target
+        # application also needs preparation and replacement indexing after its exports.
+        workspace_target_count = sum(
+            bool(set(target["kind"]) & {"lib", "rlib", "dylib", "staticlib", "cdylib", "bin"})
+            for package in metadata["packages"] if package["id"] in metadata["workspace_members"]
+            for target in package["targets"])
+        worker_wait_seconds = 900 * (workspace_target_count + 1)
         for mode, preference in [("initial", "faster-builds"), ("batched", "lower-peak-memory")]:
             comparison = {"packages": user.package_identity(metadata), "sources": sources,
                 "sourceTextSha256": user.digest(overlay.encode()), "compiler": compiler, "targetCfg": cfg,
@@ -332,7 +340,8 @@ async def main():
                 "configuration": user.producer_configuration(), "queryWorkload": ["query", "without", "filter", "source", "methods", "isolation", "inlay"]}
             for prefix, scenario, automatic in [("user", "devlist", {}), ("source", "devlist-source", {"enabled": False})]:
                 report = await probe(f"{prefix}-{mode}", user.APP, scenario, preference,
-                    documents=[{"file": "src/models/user.rs", "text": overlay}], automatic=automatic, cargo={"target": user.TARGET})
+                    documents=[{"file": "src/models/user.rs", "text": overlay}], automatic=automatic,
+                    cargo={"target": user.TARGET}, workerWaitSeconds=worker_wait_seconds)
                 report["comparison"] = comparison
         if sources != user.source_inventory(metadata, Path(sysroot.strip()) / "lib/rustlib/src/rust/library"):
             raise ValueError("application, dependency or sysroot inputs changed")

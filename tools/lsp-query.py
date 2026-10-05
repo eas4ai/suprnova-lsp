@@ -737,7 +737,9 @@ class LspClient:
                 log_file.close()
 
     async def _on_message(self, message: Dict[str, Any]) -> None:
-        if "id" in message and message["id"] in self.pending:
+        # The two peers allocate request IDs independently. A server refresh request can
+        # share an ID with our hover; only a response may complete that pending query.
+        if "method" not in message and "id" in message and message["id"] in self.pending:
             future = self.pending.pop(message["id"])
             if not future.done():
                 future.set_result(message)

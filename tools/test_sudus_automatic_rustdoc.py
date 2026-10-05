@@ -21,6 +21,26 @@ probe = mechanism.editor.module("automatic_probe_test", ROOT / "tools/automatic-
 
 
 class Integrity(unittest.TestCase):
+    def test_server_refresh_request_cannot_complete_a_client_query_with_the_same_id(self):
+        async def check():
+            client = probe.lsp.LspClient.__new__(probe.lsp.LspClient)
+            future = asyncio.get_running_loop().create_future()
+            client.pending = {7: future}
+            sent = []
+            async def send(message):
+                sent.append(message)
+            client.send = send
+            await client._on_message({"jsonrpc": "2.0", "id": 7,
+                                      "method": "workspace/inlayHint/refresh"})
+            self.assertFalse(future.done(), "server request stole the pending hover response")
+            self.assertIs(client.pending[7], future)
+            self.assertEqual(sent, [{"jsonrpc": "2.0", "id": 7, "result": None}])
+            response = {"jsonrpc": "2.0", "id": 7, "result": {"contents": "fresh column"}}
+            await client._on_message(response)
+            self.assertEqual(await future, response)
+            self.assertEqual(client.pending, {})
+        asyncio.run(check())
+
     def test_current_barrier_rejects_historical_success_and_obsolete_failures(self):
         async def check():
             with tempfile.TemporaryDirectory() as directory:

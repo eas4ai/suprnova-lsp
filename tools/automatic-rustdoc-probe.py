@@ -525,7 +525,9 @@ class AutomaticProbe:
         self.set_control("real")
         path = self.root / "src/lib.rs"
         await self.change(path, self.texts[path] + "\n// cancel first root for queued second root\n")
-        await self.status("current", since, timeout=180, root=second)
+        # This root has a cold compiler directory. Use the startup budget rather than
+        # the shorter warm-refresh budget while retaining the same no-overlap proof.
+        await self.status("current", since, timeout=self.plan.get("workerWaitSeconds", 900), root=second)
         await self.status("current", since, timeout=180)
         assert not self.alive(child["pid"]) and not self.alive(child["childPid"])
         assert any(e["params"].get("state") == "stale" or e["params"].get("freshness") == "stale"
