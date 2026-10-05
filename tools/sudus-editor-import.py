@@ -299,7 +299,8 @@ async def main():
             plan = {"file": "src/models/user.rs", "text": overlay, "format": "json", "readinessBarrier": "ready",
                     "deferredBarrier": "before-queries", "idleMemory": True, "queries": queries,
                     "initializationOptions": {"cfg": {"test": False}, "cache": {"packageResidency": "workspace"},
-                        "indexing": {"performancePreference": preference}, "rustdoc": {"inputs": [] if mode.startswith("source-") else [input_entry]}}}
+                          "indexing": {"performancePreference": preference}, "rustdoc": {
+                              "automatic": {"enabled": False}, "inputs": [] if mode.startswith("source-") else [input_entry]}}}
             plan_path = directory / f"{mode}-plan.json"
             plan_path.write_text(json.dumps(plan))
             trace_path = directory / f"{mode}.exec"

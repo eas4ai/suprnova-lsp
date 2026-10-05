@@ -55,7 +55,8 @@ impl EditorFixture {
         };
         json!({
             "sysroot": {"discovery": "disabled"}, "cache": {"packageResidency": "workspace"},
-            "indexing": {"performancePreference": preference}, "rustdoc": {"inputs": inputs}
+            "indexing": {"performancePreference": preference},
+            "rustdoc": {"automatic": {"enabled": false}, "inputs": inputs}
         })
     }
 
