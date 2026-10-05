@@ -127,6 +127,58 @@ suite("Rust Glancer extension", () => {
     await completeInEditor(document);
   });
 
+  test("AUT-001 sends automatic worker policy through the editor client", async function () {
+    this.timeout(1_000_000);
+    const root = process.env.RUST_GLANCER_AUTOMATIC_RUSTDOC_FIXTURE;
+    assert.ok(root, "the acceptance runner must supply its owned compiler fixture");
+    const policy = {
+      enabled: true,
+      debounceMs: 2000,
+      toolchain: "nightly-2026-08-19",
+      timeoutMs: 900000,
+      jobs: 2,
+      artifactRoot: process.env.RUST_GLANCER_AUTOMATIC_RUSTDOC_ARTIFACTS,
+    };
+    assert.ok(policy.artifactRoot, "compiler artifacts must stay in the acceptance directory");
+    const settings = vscode.workspace.getConfiguration("rust-glancer");
+    const previous = settings.get<unknown>("rustdoc.automatic");
+    const previousInputs = settings.get<unknown>("rustdoc.inputs");
+    try {
+      await settings.update("rustdoc.automatic", policy, vscode.ConfigurationTarget.Global);
+      await settings.update("rustdoc.inputs", [], vscode.ConfigurationTarget.Global);
+      const config = JSON.parse(JSON.stringify(ExtensionConfig.read()));
+      assert.deepEqual(config.rustdoc.automatic, policy, "the extension dropped worker policy");
+      await settings.update("rustdoc.automatic", null, vscode.ConfigurationTarget.Global);
+      assert.throws(() => ExtensionConfig.read(), /rustdoc.automatic/);
+      await settings.update("rustdoc.automatic", policy, vscode.ConfigurationTarget.Global);
+      const folder = vscode.Uri.file(root);
+      assert.ok(vscode.workspace.updateWorkspaceFolders(
+        vscode.workspace.workspaceFolders?.length ?? 0, 0,
+        { uri: folder, name: "automatic-models" },
+      ));
+      await waitFor("automatic workspace registered",
+        () => vscode.workspace.getWorkspaceFolder(folder), (value) => value !== undefined);
+      await withTimeout(vscode.commands.executeCommand(EXTENSION_COMMANDS.restartServer),
+        "restart automatic editor server", 30_000);
+      const document = await vscode.workspace.openTextDocument(
+        vscode.Uri.file(path.join(root, "src/lib.rs")),
+      );
+      await vscode.window.showTextDocument(document);
+      await waitForReadyWorkspace("automatic-models");
+      await waitFor("automatic model hover", async () => {
+        const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+          "vscode.executeHoverProvider", document.uri,
+          document.positionAt(document.getText().indexOf("automatic_post")),
+        );
+        return (hovers ?? []).flatMap((hover) => hover.contents.map((content) =>
+          typeof content === "string" ? content : content.value)).join("\n");
+      }, (value) => value.includes("Builder<Post>"), 900_000);
+    } finally {
+      await settings.update("rustdoc.automatic", previous, vscode.ConfigurationTarget.Global);
+      await settings.update("rustdoc.inputs", previousInputs, vscode.ConfigurationTarget.Global);
+    }
+  });
+
   test("EDT-001 sends a configured compiler model through the editor client", async () => {
     const root = path.resolve(projects.fsPath, "../crates/engine/rustdoc/fixtures/model-default");
     const inputs = [
