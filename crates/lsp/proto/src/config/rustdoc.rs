@@ -9,24 +9,6 @@ pub struct RustdocConfig {
     pub inputs: Vec<RustdocInputConfig>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RustdocInputConfig {
-    pub workspace_root: PathBuf,
-    pub manifest_path: PathBuf,
-    pub target_name: String,
-    pub target_kind: RustdocTargetKind,
-    pub export_path: PathBuf,
-    pub item_path: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum RustdocTargetKind {
-    Lib,
-    Bin,
-}
-
 impl RustdocConfig {
     pub fn from_initialization_options(options: Option<&LspAny>) -> anyhow::Result<Self> {
         let Some(value) = options
@@ -53,6 +35,17 @@ impl RustdocConfig {
             .collect::<anyhow::Result<Vec<_>>>()?;
         Ok(Self { inputs })
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RustdocInputConfig {
+    pub workspace_root: PathBuf,
+    pub manifest_path: PathBuf,
+    pub target_name: String,
+    pub target_kind: RustdocTargetKind,
+    pub export_path: PathBuf,
+    pub item_path: String,
 }
 
 impl RustdocInputConfig {
@@ -92,4 +85,11 @@ impl RustdocInputConfig {
         // Preserve the spelling of paths and compiler identities; only the server resolves paths.
         Ok(value)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RustdocTargetKind {
+    Lib,
+    Bin,
 }

@@ -188,6 +188,25 @@ async fn edt_004_saved_body_and_reindex_keep_the_imported_api() {
             .await
             .unwrap();
         fixture.assert_imported().await;
+        // A new target changes the graph that owns captured signature slots. Reject the
+        // candidate and keep querying the previous generation until the server is restarted.
+        let manifest = fixture.lsp.fixture.path("Cargo.toml");
+        let text = fs::read_to_string(&manifest).unwrap();
+        fs::write(
+            &manifest,
+            format!("{text}\n[[bin]]\nname = \"new_target\"\npath = \"src/main.rs\"\n"),
+        )
+        .unwrap();
+        fs::write(fixture.lsp.fixture.path("src/main.rs"), "fn main() {}\n").unwrap();
+        let error = fixture
+            .lsp
+            .service
+            .clone()
+            .reindex_workspace(context::current())
+            .await
+            .expect_err("reindex must not replay captured identities against a changed graph");
+        assert!(error.to_string().contains("restart"), "{error}");
+        fixture.assert_imported().await;
     }
 }
 

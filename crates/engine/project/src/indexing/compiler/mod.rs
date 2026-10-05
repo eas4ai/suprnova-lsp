@@ -26,6 +26,32 @@ pub(crate) struct CompilerImports {
 }
 
 impl CompilerImports {
+    /// Captured signatures contain package and target slots, including dependency crate roots.
+    /// Replaying them against a different graph could attach a declaration to another owner.
+    pub(crate) fn validate_workspace_replay(
+        &self,
+        previous: &WorkspaceMetadata,
+        refreshed: &WorkspaceMetadata,
+    ) -> anyhow::Result<()> {
+        if self.declarations.is_empty() {
+            return Ok(());
+        }
+        let previous = previous.packages();
+        let refreshed = refreshed.packages();
+        let stable = previous.len() == refreshed.len()
+            && previous.iter().zip(refreshed).all(|(old, new)| {
+                old.id == new.id
+                    && old.dependencies == new.dependencies
+                    && rg_parse::Package::analyzed_targets(old)
+                        == rg_parse::Package::analyzed_targets(new)
+            });
+        ensure!(
+            stable,
+            "Cargo graph changed identities used by captured rustdoc declarations; restart the server with prepared exports for the new graph",
+        );
+        Ok(())
+    }
+
     pub(super) fn read(
         workspace: &WorkspaceMetadata,
         inputs: &[RustdocInput],

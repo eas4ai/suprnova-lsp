@@ -202,10 +202,7 @@ impl ProjectCoordinator {
                         &error,
                     ) else {
                         return Err(error).with_context(|| {
-                            format!(
-                                "build LSP analysis project for {}",
-                                workspace_root.display()
-                            )
+                            format!("build LSP analysis project for {}", root.display())
                         });
                     };
                     stale_retries = stale_retries.saturating_add(1);
