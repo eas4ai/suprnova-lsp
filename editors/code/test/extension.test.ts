@@ -141,6 +141,7 @@ suite("Rust Glancer extension", () => {
     ];
     const settings = vscode.workspace.getConfiguration("rust-glancer");
     const previous = settings.get<unknown>("rustdoc.inputs");
+    const modelFolder = vscode.Uri.file(root);
     let document: vscode.TextDocument | undefined;
     try {
       await settings.update("rustdoc.inputs", null, vscode.ConfigurationTarget.Global);
@@ -179,6 +180,18 @@ suite("Rust Glancer extension", () => {
         () => RustdocConfig.read([{ ...inputs[0], targetKind: "proc-macro" }]),
         /targetKind/,
       );
+      // The model lives outside test_targets. Make it an editor workspace before restarting
+      // so the server's ordinary folder boundary permits this genuine fixture's document.
+      assert.ok(vscode.workspace.updateWorkspaceFolders(
+        vscode.workspace.workspaceFolders?.length ?? 0,
+        0,
+        { uri: modelFolder, name: "model-default" },
+      ));
+      await waitFor(
+        "model editor workspace registered",
+        async () => vscode.workspace.getWorkspaceFolder(modelFolder),
+        (folder) => folder?.uri.toString() === modelFolder.toString(),
+      );
       await withTimeout(
         vscode.commands.executeCommand(EXTENSION_COMMANDS.restartServer),
         "restart configured editor server",
@@ -205,10 +218,10 @@ suite("Rust Glancer extension", () => {
         ),
         "hover configured generated model",
       );
-      assert.ok(
-        JSON.stringify(hovers).includes("Builder<Post>"),
-        `trait default query missing: ${JSON.stringify(hovers)}`,
-      );
+      const hoverText = (hovers ?? []).flatMap((hover) =>
+        hover.contents.map((content) => typeof content === "string" ? content : content.value),
+      ).join("\n");
+      assert.ok(hoverText.includes("Builder<Post>"), `trait default query missing: ${hoverText}`);
       const completionOffset = document.getText().indexOf("Post::query") + "Post::".length;
       const completions = await withTimeout(
         vscode.commands.executeCommand<vscode.CompletionList>(
@@ -233,6 +246,8 @@ suite("Rust Glancer extension", () => {
         await vscode.commands.executeCommand("workbench.action.files.revert");
       }
       await settings.update("rustdoc.inputs", previous, vscode.ConfigurationTarget.Global);
+      // The runner discards this isolated editor window; keeping its additional workspace
+      // until shutdown avoids another asynchronous workspace conversion during cleanup.
     }
   });
 });
