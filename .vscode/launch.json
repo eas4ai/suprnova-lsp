@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Rust Glancer Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/editors/code",
+        "${workspaceFolder}"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/editors/code/dist/**/*.js"
+      ],
+      "preLaunchTask": "rust-glancer: compile VS Code extension"
+    }
+  ]
+}
