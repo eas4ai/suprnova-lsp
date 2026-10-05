@@ -11,6 +11,41 @@ const DETAILS: StatusDetails = {
 };
 
 describe("client status state precedence", () => {
+  it("keeps generated freshness scoped to its root and rejects obsolete status", () => {
+    const status = clientStatus();
+    status.starting(DETAILS);
+    status.ready(DETAILS);
+    status.activeWorkspace("/workspace/a", "ready", undefined, false);
+    status.rustdocStatus(
+      {
+        workspaceRoot: "/workspace/b",
+        generation: 2,
+        state: "failed",
+        message: "producer missing; install and reindex",
+      },
+      false,
+    );
+    assert.equal(render(status), "ready: $(check) Rust Glancer: ready [a]");
+    status.activeWorkspace("/workspace/b", "ready", undefined, false);
+    assert.match(render(status), /generated APIs failed/);
+    assert.match(status.snapshot().details?.generatedApiMessage ?? "", /install and reindex/);
+    status.rustdocStatus(
+      { workspaceRoot: "/workspace/b", generation: 3, state: "current", message: "current" },
+      false,
+    );
+    status.rustdocStatus(
+      { workspaceRoot: "/workspace/b", generation: 2, state: "failed", message: "late failure" },
+      false,
+    );
+    assert.match(render(status), /generated APIs current/);
+    status.refresh(true);
+    assert.equal(status.snapshot().status.state, "stale");
+    assert.match(render(status), /generated APIs current/);
+    status.starting(DETAILS);
+    status.ready(DETAILS);
+    status.activeWorkspace("/workspace/b", "ready", undefined, false);
+    assert.doesNotMatch(render(status), /generated APIs/);
+  });
   it("lets engine state, dirty files, and diagnostics win in that order", () => {
     const status = clientStatus();
     status.starting(DETAILS);

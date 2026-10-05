@@ -20,6 +20,7 @@ mod methods;
 mod notifications;
 mod project_watcher;
 mod recent_editor_saves;
+mod rustdoc_worker;
 mod stdio;
 
 #[cfg(test)]

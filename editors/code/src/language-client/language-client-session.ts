@@ -20,6 +20,7 @@ import {
   type ActiveWorkspaceState,
   type ClientStatusSnapshot,
   type DeferredIndexingOutcome,
+  type RustdocStatusParams,
 } from "../status/client-status";
 import { StatusView } from "../status/status-view";
 import { isRustFile } from "../utils/lsp-utils";
@@ -69,7 +70,9 @@ export class LanguageClientSession implements vscode.Disposable {
     } catch (error) {
       this.clientStatus.failed(String(error));
       this.extensionLog.error(`rust-glancer configuration is invalid: ${String(error)}`);
-      void vscode.window.showErrorMessage(`Rust Glancer configuration is invalid: ${String(error)}`);
+      void vscode.window.showErrorMessage(
+        `Rust Glancer configuration is invalid: ${String(error)}`,
+      );
       return false;
     }
     const server = ResolvedServer.discover(config, this.extensionUri, this.workspaceFolder);
@@ -93,8 +96,8 @@ export class LanguageClientSession implements vscode.Disposable {
         diagnostics: config.diagnostics,
         indexing: config.indexing,
         cargo: config.cargo,
-          cache: config.cache,
-          rustdoc: config.rustdoc,
+        cache: config.cache,
+        rustdoc: config.rustdoc,
       },
       middleware: this.middleware(),
     };
@@ -130,6 +133,12 @@ export class LanguageClientSession implements vscode.Disposable {
           status.root,
           status.state,
           status.message,
+          this.isActiveRustDocumentDirty(),
+        );
+      }),
+      client.onNotification(SERVER_NOTIFICATIONS.rustdocStatus, (params) => {
+        this.clientStatus.rustdocStatus(
+          params as RustdocStatusParams,
           this.isActiveRustDocumentDirty(),
         );
       }),
@@ -201,7 +210,8 @@ export class LanguageClientSession implements vscode.Disposable {
     this.clientState = undefined;
 
     if (client !== undefined) {
-      await client.stop();
+      // Keep the transport open while owned compiler trees and queued source queries drain.
+      await client.stop(30_000);
       this.extensionLog.info("rust-glancer client stopped");
     }
 

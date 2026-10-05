@@ -47,9 +47,9 @@ pub use self::{
     change::{AnalysisChangeSummary, ChangedFile, SavedFileChange},
     indexing::{
         AnalysisSurface, BodyPublication, BodyPublicationOutcome, IndexingPerformancePreference,
-        PackageBatchSize, ProjectBuilder, RustdocInput, SavedBodyBuildInputs, SavedBodyProducts,
-        SplitIndexing, SplitIndexingMode, SplitIndexingProgress, SplitIndexingStage,
-        StartupCacheLoad,
+        PackageBatchSize, ProjectBuilder, RustdocInput, RustdocTargetExport, SavedBodyBuildInputs,
+        SavedBodyProducts, SplitIndexing, SplitIndexingMode, SplitIndexingProgress,
+        SplitIndexingStage, StartupCacheLoad,
     },
     memory::{ProjectMemoryHooks, ProjectMemoryPurgePoint},
     profile::{BUILD_CHECKPOINTS, BuildProcessMemory, ProcessMemorySampler},

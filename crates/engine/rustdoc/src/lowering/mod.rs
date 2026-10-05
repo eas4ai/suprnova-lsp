@@ -253,7 +253,12 @@ impl TypeApiView<'_> {
         } else {
             path.absolute = true;
         }
-        path.resolved_crate = match self.crate_roots.and_then(|roots| roots.get(&names[0])) {
+        // `crate::` belongs to the importing target. A binary and its library may share the
+        // same crate name; looking up that spelling would redirect binary signatures to the library.
+        path.resolved_crate = match (!local)
+            .then(|| self.crate_roots.and_then(|roots| roots.get(&names[0])))
+            .flatten()
+        {
             Some(Some(crate_ref)) => Some(*crate_ref),
             Some(None) => bail!(
                 "rustdoc defining crate {} is ambiguous in the dependency closure",

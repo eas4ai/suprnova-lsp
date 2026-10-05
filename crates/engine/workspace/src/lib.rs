@@ -6,6 +6,7 @@ mod lower;
 mod model;
 mod path;
 mod rustc;
+mod saved_inputs;
 mod sysroot;
 
 #[cfg(test)]
@@ -20,6 +21,7 @@ pub use self::{
         TargetKind, WorkspaceMetadata,
     },
     rustc::RustcTarget,
+    saved_inputs::SavedWorkspaceInputs,
     sysroot::{SysrootCrate, SysrootSources},
 };
 

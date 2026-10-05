@@ -17,7 +17,7 @@ pub use self::{
     cfg::AnalysisCfgConfig,
     diagnostics::DiagnosticsConfig,
     indexing::{IndexingPerformancePreference, PackageBatchSize},
-    rustdoc::{RustdocConfig, RustdocInputConfig, RustdocTargetKind},
+    rustdoc::{RustdocAutomaticConfig, RustdocConfig, RustdocInputConfig, RustdocTargetKind},
     sysroot::SysrootDiscovery,
 };
 

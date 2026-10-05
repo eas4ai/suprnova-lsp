@@ -25,6 +25,15 @@ pub struct RustdocInput {
     pub item_path: String,
 }
 
+/// One immutable automatic export whose local model owners are selected by compiler traits.
+#[derive(Debug, Clone)]
+pub struct RustdocTargetExport {
+    pub manifest_path: PathBuf,
+    pub target_name: String,
+    pub target_kind: rg_workspace::TargetKind,
+    pub export_path: PathBuf,
+}
+
 /// Fluent construction API for a fresh analysis project.
 pub struct ProjectBuilder {
     workspace: WorkspaceMetadata,
@@ -39,6 +48,7 @@ pub struct ProjectBuilder {
     memory_sampler: BuildMemorySampler,
     memory_hooks: Arc<dyn ProjectMemoryHooks>,
     rustdoc_inputs: Vec<RustdocInput>,
+    rustdoc_targets: Vec<RustdocTargetExport>,
 }
 
 impl ProjectBuilder {
@@ -56,6 +66,7 @@ impl ProjectBuilder {
             memory_sampler: BuildMemorySampler::disabled(),
             memory_hooks: Arc::new(NoopProjectMemoryHooks),
             rustdoc_inputs: Vec::new(),
+            rustdoc_targets: Vec::new(),
         }
     }
 
@@ -66,6 +77,11 @@ impl ProjectBuilder {
 
     pub fn rustdoc_inputs(mut self, inputs: Vec<RustdocInput>) -> Self {
         self.rustdoc_inputs = inputs;
+        self
+    }
+
+    pub fn rustdoc_targets(mut self, targets: Vec<RustdocTargetExport>) -> Self {
+        self.rustdoc_targets = targets;
         self
     }
 
@@ -128,7 +144,8 @@ impl ProjectBuilder {
     }
 
     pub fn build(self) -> anyhow::Result<Project> {
-        let compiler_imports = CompilerImports::read(&self.workspace, &self.rustdoc_inputs)?;
+        let compiler_imports =
+            CompilerImports::read(&self.workspace, &self.rustdoc_inputs, &self.rustdoc_targets)?;
         self.build_from_compiler_imports(compiler_imports)
     }
 

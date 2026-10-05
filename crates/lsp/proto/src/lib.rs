@@ -14,6 +14,7 @@ mod file_uri;
 mod folding;
 mod notifications;
 mod query;
+mod rustdoc;
 mod saved_source;
 mod semantic_tokens;
 mod service;
@@ -29,8 +30,8 @@ pub use self::{
     config::{
         AnalysisCfgConfig, AnalysisConfig, CargoMetadataConfig, CargoMetadataTarget,
         DiagnosticsConfig, EngineConfig, IndexingPerformancePreference, PackageBatchSize,
-        PackageResidencyPolicy, RustdocConfig, RustdocInputConfig, RustdocTargetKind,
-        SysrootDiscovery,
+        PackageResidencyPolicy, RustdocAutomaticConfig, RustdocConfig, RustdocInputConfig,
+        RustdocTargetKind, SysrootDiscovery,
     },
     error::EngineError,
     file_uri::{FileUriError, file_uri_to_path, path_for_editor, path_to_file_uri},
@@ -40,6 +41,7 @@ pub use self::{
         ServiceNotification,
     },
     query::{QueryError, QueryScope, QueryValue},
+    rustdoc::{RustdocGenerationInput, RustdocProducerFile, RustdocTargetExport},
     saved_source::{CapturedSourceInput, SaveProposal, SavedProjectChanges},
     semantic_tokens::{SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES, semantic_tokens_legend},
     service::{

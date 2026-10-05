@@ -11,7 +11,7 @@ use rg_item_tree::CompilerTypeDeclarations;
 use rg_std::{ExpectedUnique, MemorySize};
 use rg_workspace::WorkspaceMetadata;
 
-use super::builder::RustdocInput;
+use super::builder::{RustdocInput, RustdocTargetExport};
 use crate::{PackageResidency, PackageResidencyPlan};
 
 #[cfg(test)]
@@ -55,14 +55,37 @@ impl CompilerImports {
     pub(super) fn read(
         workspace: &WorkspaceMetadata,
         inputs: &[RustdocInput],
+        targets: &[RustdocTargetExport],
     ) -> anyhow::Result<Self> {
         let mut declarations = Vec::new();
         let mut selected = HashSet::new();
         let mut affected_ids = HashSet::new();
-        for input in inputs {
-            let manifest = input.manifest_path.canonicalize().with_context(|| {
-                format!("resolve rustdoc manifest {}", input.manifest_path.display())
-            })?;
+        // Prepared owners and automatic targets share the same exact package/target routing.
+        // Read each automatic target once even when several models implement both framework traits.
+        let exports = inputs
+            .iter()
+            .map(|input| {
+                (
+                    &input.manifest_path,
+                    &input.target_name,
+                    &input.target_kind,
+                    &input.export_path,
+                    Some(input.item_path.as_str()),
+                )
+            })
+            .chain(targets.iter().map(|input| {
+                (
+                    &input.manifest_path,
+                    &input.target_name,
+                    &input.target_kind,
+                    &input.export_path,
+                    None,
+                )
+            }));
+        for (manifest_path, target_name, target_kind, export_path, item_path) in exports {
+            let manifest = manifest_path
+                .canonicalize()
+                .with_context(|| format!("resolve rustdoc manifest {}", manifest_path.display()))?;
             let (package_slot, package) = workspace
                 .packages()
                 .iter()
@@ -75,55 +98,71 @@ impl CompilerImports {
                     )
                 })?;
             let targets = rg_parse::Package::analyzed_targets(package);
-            let mut matches = targets.iter().enumerate().filter(|(_, target)| {
-                target.name == input.target_name && target.kind == input.target_kind
-            });
+            let mut matches = targets
+                .iter()
+                .enumerate()
+                .filter(|(_, target)| target.name == *target_name && &target.kind == target_kind);
             let (target_slot, _) = matches.next().with_context(|| {
                 format!(
                     "rustdoc target {} ({}) is absent from {}",
-                    input.target_name,
-                    input.target_kind,
+                    target_name,
+                    target_kind,
                     manifest.display()
                 )
             })?;
             ensure!(
                 matches.next().is_none(),
                 "rustdoc target {} is ambiguous",
-                input.target_name
+                target_name
             );
             let crate_ref = CrateRef {
                 package: PackageSlot(package_slot),
                 crate_id: CrateId(target_slot),
             };
-            ensure!(
-                selected.insert((crate_ref, input.item_path.clone())),
-                "duplicate rustdoc input for {}",
-                input.item_path
-            );
-            let file = std::fs::File::open(&input.export_path)
-                .with_context(|| format!("open rustdoc export {}", input.export_path.display()))?;
+            let file = std::fs::File::open(export_path)
+                .with_context(|| format!("open rustdoc export {}", export_path.display()))?;
             let export = rg_rustdoc::RustdocExport::read(file)
-                .with_context(|| format!("read rustdoc export {}", input.export_path.display()))?;
-            let view = export
-                .type_api(&input.item_path)
-                .with_context(|| format!("select rustdoc owner {}", input.item_path))?;
+                .with_context(|| format!("read rustdoc export {}", export_path.display()))?;
             ensure!(
-                view.path
-                    .first()
-                    .is_some_and(|name| name == &input.target_name.replace('-', "_")),
-                "rustdoc owner {} belongs to another crate target",
-                input.item_path
+                export.crate_name() == target_name.replace('-', "_"),
+                "rustdoc export belongs to another crate target: {target_name}"
             );
-            declarations.extend(
-                export
-                    .lower_type(
-                        &input.item_path,
-                        &Self::crate_roots(workspace, package_slot),
-                    )
-                    .with_context(|| format!("lower rustdoc owner {}", input.item_path))?
-                    .into_iter()
-                    .map(|declarations| (crate_ref, declarations)),
-            );
+            let roots = Self::crate_roots(workspace, package_slot);
+            let owners = if let Some(path) = item_path {
+                vec![path.to_owned()]
+            } else {
+                let framework =
+                    roots.get("suprnova").copied().flatten().context(
+                        "automatic rustdoc target has no unique reachable Suprnova crate",
+                    )?;
+                ensure!(
+                    workspace.packages()[framework.package.0].name == "suprnova",
+                    "automatic rustdoc framework crate is not the resolved Suprnova package"
+                );
+                export.suprnova_model_paths("suprnova")?
+            };
+            for owner in owners {
+                ensure!(
+                    selected.insert((crate_ref, owner.clone())),
+                    "duplicate rustdoc input for {owner}"
+                );
+                let view = export
+                    .type_api(&owner)
+                    .with_context(|| format!("select rustdoc owner {owner}"))?;
+                ensure!(
+                    view.path
+                        .first()
+                        .is_some_and(|name| name == &target_name.replace('-', "_")),
+                    "rustdoc owner {owner} belongs to another crate target"
+                );
+                declarations.extend(
+                    export
+                        .lower_type(&owner, &roots)
+                        .with_context(|| format!("lower rustdoc owner {owner}"))?
+                        .into_iter()
+                        .map(|declarations| (crate_ref, declarations)),
+                );
+            }
             affected_ids.insert(package.id.clone());
         }
         // Cached dependent payloads can refer to the imported package's arena IDs. Rebuild and

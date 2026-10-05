@@ -9,7 +9,11 @@ export interface StatusDetails {
   readonly activeWorkspaceRoot?: string;
   readonly serverCommand?: string;
   readonly serverSource?: string;
+  readonly generatedApiState?: GeneratedApiState;
+  readonly generatedApiMessage?: string;
 }
+
+export type GeneratedApiState = "pending" | "running" | "current" | "stale" | "failed";
 
 export type StatusState =
   | "created"
@@ -30,6 +34,9 @@ export interface StatusSnapshot {
 }
 
 export function statusText(baseText: string, details: StatusDetails | undefined): string {
+  if (details?.generatedApiState !== undefined) {
+    baseText += `; generated APIs ${details.generatedApiState}`;
+  }
   const label = workspaceLabel(details);
   return label === undefined ? baseText : `${baseText} [${label}]`;
 }

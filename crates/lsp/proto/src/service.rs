@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     CodeActionRequestContext, CompletionClientCapabilities, DocumentPositionSnapshot,
     DocumentRangeSnapshot, EditorDocumentSnapshot, EngineConfig, EngineError,
-    FoldingClientCapabilities, GlobalPositionSnapshot, QueryError, QueryValue, SaveProposal,
-    SavedProjectChanges, ServiceNotification,
+    FoldingClientCapabilities, GlobalPositionSnapshot, QueryError, QueryValue,
+    RustdocGenerationInput, SaveProposal, SavedProjectChanges, ServiceNotification,
 };
 
 pub type EngineResult<T> = Result<T, EngineError>;
@@ -42,6 +42,12 @@ pub trait EngineService {
     -> EngineResult<ProjectInitialization>;
 
     async fn initialized() -> EngineResult<()>;
+
+    /// Fence an obsolete compiler request before its successor can publish.
+    async fn rustdoc_requested(generation: u64) -> EngineResult<()>;
+
+    /// Build a fresh immutable candidate outside the analysis lane, then publish in command order.
+    async fn publish_rustdoc(input: RustdocGenerationInput) -> EngineResult<bool>;
 
     /// Move the package containing an open editor path ahead of ordinary deferred work.
     async fn set_deferred_indexing_priority(path: PathBuf, prioritized: bool) -> EngineResult<()>;

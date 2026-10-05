@@ -15,7 +15,10 @@ use rg_lsp_proto::{
 use rg_project::{SavedBodyProducts, SavedFileChange, SplitIndexingProgress};
 use tokio::sync::oneshot;
 
-use super::ProjectConfiguration;
+use super::{
+    ProjectConfiguration,
+    project::{RustdocProjectBuildInputs, RustdocProjectCandidate},
+};
 
 /// Response endpoint owned by one request until the engine dispatcher answers it.
 pub(crate) type EngineResponder<T> = oneshot::Sender<anyhow::Result<T>>;
@@ -34,6 +37,18 @@ pub(crate) enum EngineCommand {
         root: PathBuf,
         configuration: ProjectConfiguration,
         respond_to: EngineResponder<ProjectInitialization>,
+    },
+    RustdocRequested {
+        generation: u64,
+        respond_to: EngineResponder<()>,
+    },
+    RustdocBuildInputs {
+        generation: u64,
+        respond_to: EngineResponder<RustdocProjectBuildInputs>,
+    },
+    PublishRustdoc {
+        candidate: Box<RustdocProjectCandidate>,
+        respond_to: EngineResponder<bool>,
     },
     /// Background repair scheduled when a query proves that saved analysis is stale.
     RecoverStaleSource {

@@ -2,12 +2,14 @@
 """Exercise automatic exports using the repository's existing managed LSP client."""
 
 import asyncio
+import contextlib
 import importlib.util
 import json
 import os
 from pathlib import Path
 import sys
 import time
+import traceback
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,6 +34,8 @@ class ObservedClient(lsp.LspClient):
             if len(self.observed) >= 1024:
                 raise RuntimeError("worker notification observation exceeded its bound")
             self.observed.append({"monotonicNs": time.monotonic_ns(), **message})
+            status = message.get("params") or {}
+            print(f"worker {status.get('workspaceRoot')} generation {status.get('generation')}: {status.get('state')} {str(status.get('message', ''))[:512]}", flush=True)
         await super()._on_message(message)
 
 
@@ -74,9 +78,17 @@ class AutomaticProbe:
         started = time.monotonic()
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            events = self.status_events(state, since, root)
-            if events:
-                return events[-1]["params"]
+            latest = self.status_events(since=since, root=root)
+            if latest:
+                # Follow the editor's generation fence; an earlier success is not a barrier
+                # for newer pending work, and a late old notification cannot replace it.
+                newest = max(e["params"]["generation"] for e in latest)
+                current = next(e["params"] for e in reversed(latest)
+                               if e["params"]["generation"] == newest)
+                if current.get("state") == state:
+                    return current
+                if state == "current" and current.get("state") == "failed":
+                    raise AssertionError(f"worker failed before current: {current.get('message')}")
             if self.client.exited:
                 raise AssertionError("LSP exited before worker status")
             if time.monotonic() - started >= 10 and not self.status_events(root=root):
@@ -146,9 +158,15 @@ class AutomaticProbe:
         try:
             value = await operation()
             self.results[name] = {"passed": True, "attempted": True, "evidence": value}
-        except (AssertionError, RuntimeError, TimeoutError, OSError, ValueError, KeyError) as error:
-            self.results[name] = {"passed": False, "attempted": True, "error": str(error)}
+        except (AssertionError, RuntimeError, TimeoutError, OSError, ValueError, KeyError, lsp.LspQueryError) as error:
+            self.results[name] = {"passed": False, "attempted": True, "error": str(error),
+                                  "traceback": traceback.format_exc(limit=8)}
+            self.set_control("real")
         print(f"automatic case {name}: {'pass' if self.results[name]['passed'] else 'fail'}", flush=True)
+        if not self.results[name]["passed"]:
+            print(self.results[name]["error"], flush=True)
+        if report := self.plan.get("report"):
+            Path(report).write_text(json.dumps({"cases": self.results, "evidence": self.evidence}, indent=2) + "\n")
 
     async def start(self):
         self.client = await ObservedClient.start(Path(self.plan["binary"]), self.root, 300000, False)
@@ -160,6 +178,11 @@ class AutomaticProbe:
                        "timeoutMs": self.plan.get("timeoutMs", 900000), "jobs": 2}}}
         # Omit enabled on the default-discovery run so a future default-off implementation fails.
         options["rustdoc"]["automatic"].update(self.plan.get("automatic", {}))
+        if self.plan["scenario"] == "artifact-failure":
+            self.artifacts.mkdir(parents=True, exist_ok=True)
+            blocked = self.artifacts / "blocked-parent"
+            blocked.write_text("this file prevents compiler directory creation\n")
+            options["rustdoc"]["automatic"]["artifactRoot"] = str(blocked)
         if "inputs" in self.plan:
             options["rustdoc"]["inputs"] = self.plan["inputs"]
         if "cargo" in self.plan:
@@ -302,12 +325,21 @@ class AutomaticProbe:
         await self.status("current", timeout=5)
         self.set_control("late-failure")
         since = time.monotonic_ns()
-        await self.reindex()
-        child = await self.event("child", since)
-        self.set_control("real")
-        path = self.root / "src/lib.rs"
-        await self.change(path, self.texts[path] + "\n// newer saved generation\n")
-        current = await self.status("current", since, timeout=180)
+        reindex = asyncio.create_task(self.reindex())
+        try:
+            child = await self.event("child", since, timeout=180)
+            assert self.alive(child["pid"]) and self.alive(child["childPid"]), "failure must still be pending when superseded"
+            self.set_control("real")
+            path = self.root / "src/lib.rs"
+            saved_at = time.monotonic_ns()
+            await self.change(path, self.texts[path] + "\n// newer saved generation\n")
+            await reindex
+            current = await self.status("current", saved_at, timeout=180)
+        finally:
+            if not reindex.done():
+                reindex.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reindex
         completed = time.monotonic_ns()
         await asyncio.sleep(2.5)
         assert not self.status_events("failed", completed), "obsolete failure replaced current state"
@@ -322,7 +354,13 @@ class AutomaticProbe:
         since = time.monotonic_ns()
         await self.reindex()
         child = await self.event("child", since)
+        assert self.alive(child["pid"]) and self.alive(child["childPid"]), "held compiler was not actually live"
         path = self.root / "src/lib.rs"
+        # Reindex starts deferred body work and clears query caches. Prove the cold query also
+        # finishes with the compiler held, then measure the same already-materialized source query.
+        cold_started = time.monotonic_ns()
+        assert "u64" in await self.hover(path, "automatic_source")
+        cold_elapsed = (time.monotonic_ns() - cold_started) / 1_000_000
         started = time.monotonic_ns()
         assert "u64" in await self.hover(path, "automatic_source", timeout=1000)
         elapsed = (time.monotonic_ns() - started) / 1_000_000
@@ -332,7 +370,7 @@ class AutomaticProbe:
         await self.change(path, self.texts[path] + "\n// supersede held compiler\n")
         await self.status("current", since, timeout=180)
         assert not self.alive(child["pid"]) and not self.alive(child["childPid"]), "compiler descendant survived supersession"
-        return {"elapsedMs": elapsed, "observedChild": child, "cleanup": True}
+        return {"elapsedMs": elapsed, "coldElapsedMs": cold_elapsed, "observedChild": child, "cleanup": True}
 
     @staticmethod
     def alive(pid):
@@ -416,24 +454,36 @@ class AutomaticProbe:
         release.unlink(missing_ok=True)
         self.set_control("real", releaseFile=str(release))
         since = time.monotonic_ns()
-        await self.reindex()
-        await self.event("compiled", since, timeout=180)
-        running = await self.status("running", since, timeout=5)
-        assert type(running.get("generation")) is int, "worker lacked a run identity"
-        path = self.root / "src/lib.rs"
-        changed = self.texts[path].replace("pub title: String,", "pub title: String,\n    pub score: i32,", 1)
-        changed = changed.replace("post::Column::Title", "post::Column::Score")
-        changed_at = time.monotonic_ns()
-        # Release the compiler before the native watcher's quiet wait can notify the worker.
-        # Publication must notice the new disk identity rather than trusting notification order.
-        await self.fs_change(path, changed)
-        self.set_control("real")
-        release.write_text("release\n")
-        await self.status("current", changed_at, timeout=180)
+        reindex = asyncio.create_task(self.reindex())
+        try:
+            compiled = await self.event("compiled", since, timeout=180)
+            assert compiled["code"] == 0 and self.alive(compiled["pid"]), "stale control must hold a successful live export"
+            running = await self.status("running", since, timeout=5)
+            assert type(running.get("generation")) is int, "worker lacked a run identity"
+            path = self.root / "src/lib.rs"
+            changed = self.texts[path].replace("pub title: String,", "pub title: String,\n    pub score: i32,", 1)
+            changed = changed.replace("post::Column::Title", "post::Column::Score")
+            changed_at = time.monotonic_ns()
+            # Release the successful compiler before the native watcher's quiet wait can
+            # notify the worker. Disk identity must reject it independently of that event.
+            await self.fs_change(path, changed)
+            self.set_control("real")
+            release.write_text("release\n")
+            await reindex
+            await self.status("current", changed_at, timeout=180)
+        finally:
+            release.write_text("release\n")
+            self.set_control("real")
+            if not reindex.done():
+                reindex.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reindex
         assert all(e["params"].get("generation") != running["generation"]
                    for e in self.status_events("current", changed_at)), "obsolete compiler run published"
         await self.change(path, changed, save=False, write=False)
-        assert "Score" in await self.hover(path, "Score")
+        hover = await self.hover(path, "Score")
+        self.evidence["staleDiskHover"] = hover
+        assert "Score" in hover, f"fresh saved generated column hover missing: {hover!r}"
         return {"rejectedGeneration": running["generation"], "diskChangedBeforeNotification": True}
 
     async def timeout_or_shutdown(self):
@@ -445,6 +495,20 @@ class AutomaticProbe:
             await asyncio.wait_for(self.client.close(), 15)
         assert not self.alive(child["pid"]) and not self.alive(child["childPid"]), "owned compiler process survived"
         return {"child": child, "cleanup": True}
+
+    async def artifact_failure(self):
+        failed = await self.status("failed", timeout=15)
+        assert "artifact" in failed.get("message", "").lower(), "artifact failure lacked context"
+        assert not self.events(), "compiler launched without an owned artifact directory"
+        blocked = self.artifacts / "blocked-parent"
+        assert blocked.is_file(), "worker deleted an unowned configured path"
+        blocked.unlink()
+        blocked.mkdir()
+        since = time.monotonic_ns()
+        await self.reindex()
+        current = await self.status("current", since, timeout=900)
+        assert "Builder<Post>" in await self.hover(self.root / "src/lib.rs", "automatic_post")
+        return {"failure": failed, "recovery": current, "recoveredWithoutRestart": True}
 
     async def global_serial(self):
         await self.status("current", timeout=5)
@@ -461,7 +525,9 @@ class AutomaticProbe:
         self.set_control("real")
         path = self.root / "src/lib.rs"
         await self.change(path, self.texts[path] + "\n// cancel first root for queued second root\n")
-        await self.status("current", since, timeout=180, root=second)
+        # This root has a cold compiler directory. Use the startup budget rather than
+        # the shorter warm-refresh budget while retaining the same no-overlap proof.
+        await self.status("current", since, timeout=self.plan.get("workerWaitSeconds", 900), root=second)
         await self.status("current", since, timeout=180)
         assert not self.alive(child["pid"]) and not self.alive(child["childPid"])
         assert any(e["params"].get("state") == "stale" or e["params"].get("freshness") == "stale"
@@ -541,7 +607,12 @@ class AutomaticProbe:
                 await self.case(self.plan["scenario"] + "-cleanup", self.timeout_or_shutdown)
             elif self.plan["scenario"] == "missing-producer":
                 await self.case("missing-producer", self.missing_producer)
+            elif self.plan["scenario"] == "artifact-failure":
+                await self.case("artifact-recovery", self.artifact_failure)
             else:
+                selected = self.plan.get("onlyCases")
+                if selected:
+                    await self.status("current", timeout=self.plan.get("workerWaitSeconds", 900))
                 for name, operation in [
                     ("discovery", self.model_queries), ("producer", self.producer_identity),
                     ("debounce", self.debounce), ("unsaved-duplicate", self.unsaved_and_duplicate),
@@ -552,7 +623,9 @@ class AutomaticProbe:
                     ("invalid-schema", lambda: self.failed_candidate("invalid-schema")),
                     ("invalid-reference", lambda: self.failed_candidate("invalid-reference")),
                     ("failed-recovery", lambda: self.failed_candidate("failure")),
-                    ("bounded-output", lambda: self.failed_candidate("flood"))]:
+                      ("bounded-output", lambda: self.failed_candidate("flood"))]:
+                    if selected and name not in selected:
+                        continue
                     await self.case(name, operation)
                 if self.plan.get("extraRoots"):
                     await self.case("global-serial", self.global_serial)

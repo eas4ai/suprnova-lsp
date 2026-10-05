@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 
@@ -20,6 +21,51 @@ probe = mechanism.editor.module("automatic_probe_test", ROOT / "tools/automatic-
 
 
 class Integrity(unittest.TestCase):
+    def test_server_refresh_request_cannot_complete_a_client_query_with_the_same_id(self):
+        async def check():
+            client = probe.lsp.LspClient.__new__(probe.lsp.LspClient)
+            future = asyncio.get_running_loop().create_future()
+            client.pending = {7: future}
+            sent = []
+            async def send(message):
+                sent.append(message)
+            client.send = send
+            await client._on_message({"jsonrpc": "2.0", "id": 7,
+                                      "method": "workspace/inlayHint/refresh"})
+            self.assertFalse(future.done(), "server request stole the pending hover response")
+            self.assertIs(client.pending[7], future)
+            self.assertEqual(sent, [{"jsonrpc": "2.0", "id": 7, "result": None}])
+            response = {"jsonrpc": "2.0", "id": 7, "result": {"contents": "fresh column"}}
+            await client._on_message(response)
+            self.assertEqual(await future, response)
+            self.assertEqual(client.pending, {})
+        asyncio.run(check())
+
+    def test_current_barrier_rejects_historical_success_and_obsolete_failures(self):
+        async def check():
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                value = probe.AutomaticProbe({"root": str(root), "control": str(root / "control"),
+                    "events": str(root / "events"), "artifactRoot": str(root / "outputs")})
+                def event(generation, state):
+                    return {"monotonicNs": 1, "params": {"workspaceRoot": str(root),
+                        "generation": generation, "state": state, "message": state}}
+                value.client = SimpleNamespace(exited=False, observed=[event(1, "current"),
+                    event(2, "pending"), event(1, "failed")])
+                async def complete():
+                    await asyncio.sleep(0.04)
+                    value.client.observed.append(event(2, "current"))
+                completion = asyncio.create_task(complete())
+                try:
+                    current = await value.status("current", timeout=1)
+                    self.assertEqual(current["generation"], 2)
+                finally:
+                    await completion
+                value.client.observed.extend([event(3, "failed"), event(2, "current")])
+                with self.assertRaisesRegex(AssertionError, "worker failed"):
+                    await value.status("current", timeout=1)
+        asyncio.run(check())
+
     def test_observation_requires_exact_attempted_cases_and_matching_exit(self):
         report = {"cases": {"no-worker": {"passed": True, "attempted": True, "evidence": {"noCompiler": True}}}}
         self.assertEqual(mechanism.observation(report, "disabled", 0), report)

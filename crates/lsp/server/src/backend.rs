@@ -299,6 +299,11 @@ impl LanguageServer for Backend {
         fields(rg.method = "didSave", rg.uri = %params.text_document.uri.as_str())
     )]
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        if let Some(path) = methods::uri_to_path(&params.text_document.uri)
+            && let Ok(registry) = self.registry().await
+        {
+            registry.saved_path(path.as_path()).await;
+        }
         methods::text_document::did_save::did_save(&self.lsp_client, &self.inlay_refresher, params)
             .await;
     }
@@ -573,6 +578,9 @@ impl LanguageServer for Backend {
                 data: None,
             });
         };
+        if params.command == crate::commands::REINDEX_WORKSPACE {
+            self.registry().await?.reindex_rustdoc(&engine_client).await;
+        }
         methods::workspace::execute_command::execute_command(engine_client, params).await
     }
 }

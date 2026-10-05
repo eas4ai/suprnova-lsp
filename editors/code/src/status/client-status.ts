@@ -12,7 +12,19 @@ import {
   type WorkDoneProgressReport,
 } from "vscode-languageclient/node";
 
-import { statusText, type StatusDetails, type StatusSnapshot } from "./status-model";
+import {
+  statusText,
+  type GeneratedApiState,
+  type StatusDetails,
+  type StatusSnapshot,
+} from "./status-model";
+
+export interface RustdocStatusParams {
+  readonly workspaceRoot: string;
+  readonly generation: number;
+  readonly state: GeneratedApiState;
+  readonly message: string;
+}
 
 const CARGO_DIAGNOSTICS_PROGRESS_TITLE = "Cargo diagnostics";
 
@@ -59,6 +71,7 @@ export class ClientStatus {
   private activeWorkspaceFailureReason: string | undefined;
   private readonly rootsWithPendingDeferredIndexing = new Set<string>();
   private readonly deferredIndexingFailures = new Map<string, string>();
+  private readonly generatedApis = new Map<string, RustdocStatusParams>();
   private currentStatus: StatusSnapshot = {
     state: "created",
     text: "",
@@ -87,6 +100,7 @@ export class ClientStatus {
     this.activeWorkspaceFailureReason = undefined;
     this.rootsWithPendingDeferredIndexing.clear();
     this.deferredIndexingFailures.clear();
+    this.generatedApis.clear();
     this.details = details;
     this.show("starting", "$(sync~spin) Rust Glancer: starting", () => this.view.starting(details));
   }
@@ -137,6 +151,15 @@ export class ClientStatus {
 
     this.rootsWithPendingDeferredIndexing.add(root);
     this.deferredIndexingFailures.delete(root);
+    this.refresh(isActiveRustDocumentDirty);
+  }
+
+  public rustdocStatus(status: RustdocStatusParams, isActiveRustDocumentDirty: boolean): void {
+    const previous = this.generatedApis.get(status.workspaceRoot);
+    if (previous !== undefined && previous.generation > status.generation) {
+      return;
+    }
+    this.generatedApis.set(status.workspaceRoot, status);
     this.refresh(isActiveRustDocumentDirty);
   }
 
@@ -199,6 +222,16 @@ export class ClientStatus {
     if (!this.running || this.details === undefined) {
       return;
     }
+    const generated = this.generatedApis.get(this.details.activeWorkspaceRoot ?? "");
+    const { generatedApiState: _state, generatedApiMessage: _message, ...details } = this.details;
+    this.details =
+      generated === undefined
+        ? details
+        : {
+            ...details,
+            generatedApiState: generated.state,
+            generatedApiMessage: generated.message,
+          };
     const deferredIndexingFailure = this.deferredIndexingFailureForActiveWorkspace();
 
     // Engine lifecycle wins because the workspace may not have any analysis to serve yet.

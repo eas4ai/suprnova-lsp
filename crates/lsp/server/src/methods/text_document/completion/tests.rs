@@ -593,6 +593,18 @@ impl GatedCompletionEngine {
 }
 
 impl EngineService for GatedCompletionEngine {
+    async fn rustdoc_requested(self, _: context::Context, _: u64) -> EngineResult<()> {
+        panic!("test engine only supports completion")
+    }
+
+    async fn publish_rustdoc(
+        self,
+        _: context::Context,
+        _: rg_lsp_proto::RustdocGenerationInput,
+    ) -> EngineResult<bool> {
+        panic!("test engine only supports completion")
+    }
+
     async fn completion(
         self,
         _: context::Context,

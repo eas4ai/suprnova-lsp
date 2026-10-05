@@ -21,7 +21,7 @@ mod recovery;
 mod split;
 
 pub use self::{
-    builder::{ProjectBuilder, RustdocInput},
+    builder::{ProjectBuilder, RustdocInput, RustdocTargetExport},
     config::{
         IndexingPerformancePreference, PackageBatchSize, SplitIndexingMode, StartupCacheLoad,
     },

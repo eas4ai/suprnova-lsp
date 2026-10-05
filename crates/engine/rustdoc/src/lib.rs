@@ -6,7 +6,7 @@
 mod lowering;
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     io::Read,
 };
 
@@ -43,6 +43,83 @@ pub struct RustdocExport {
 }
 
 impl RustdocExport {
+    pub fn crate_name(&self) -> &str {
+        self.data.index[&self.data.root]
+            .name
+            .as_deref()
+            .expect("validated rustdoc crate name")
+    }
+
+    /// Discover source model owners from the compiler's actual trait and receiver identities.
+    /// The caller first establishes the unique framework crate in the resolved Cargo graph.
+    pub fn suprnova_model_paths(&self, framework_crate: &str) -> anyhow::Result<Vec<String>> {
+        let root = &self.data.index[&self.data.root];
+        let mut owners = BTreeSet::new();
+        for implementation in self.data.index.values() {
+            let ItemEnum::Impl(data) = &implementation.inner else {
+                continue;
+            };
+            if implementation.crate_id != root.crate_id
+                || data.is_synthetic
+                || data.blanket_impl.is_some()
+            {
+                continue;
+            }
+            let Some(trait_) = &data.trait_ else {
+                continue;
+            };
+            let trait_path = self
+                .data
+                .paths
+                .get(&trait_.id)
+                .context("rustdoc model implementation has no trait identity")?;
+            // The short name Model is not evidence. Its defining external crate and full path
+            // must be the framework selected by this package's resolved dependency graph.
+            if trait_path.crate_id == root.crate_id
+                || !self
+                    .data
+                    .external_crates
+                    .get(&trait_path.crate_id)
+                    .is_some_and(|krate| krate.name == framework_crate)
+                || trait_path.kind != ItemKind::Trait
+                || !(trait_path.path == [framework_crate, "eloquent", "EloquentModel"]
+                    || trait_path.path == [framework_crate, "eloquent", "model", "Model"])
+            {
+                continue;
+            }
+            let Type::ResolvedPath(owner) = &data.for_ else {
+                continue;
+            };
+            let path = self
+                .data
+                .paths
+                .get(&owner.id)
+                .context("rustdoc model implementation has no receiver identity")?;
+            ensure!(
+                path.crate_id == root.crate_id,
+                "rustdoc model receiver belongs to another crate"
+            );
+            ensure!(
+                matches!(
+                    path.kind,
+                    ItemKind::Struct | ItemKind::Enum | ItemKind::Union
+                ),
+                "rustdoc model receiver is not a nominal type"
+            );
+            let declaration = self
+                .data
+                .index
+                .get(&owner.id)
+                .context("rustdoc model receiver declaration is missing")?;
+            ensure!(
+                declaration.crate_id == root.crate_id && declaration.inner.item_kind() == path.kind,
+                "rustdoc model receiver path disagrees with its declaration"
+            );
+            owners.insert(path.path.join("::"));
+        }
+        Ok(owners.into_iter().collect())
+    }
+
     /// Lower the selected API and the concrete declarations it references in child modules.
     /// Source owners in the selected module still have to exist; this closure supplies generated
     /// storage types such as `user::Entity`, not replacements for missing source declarations.

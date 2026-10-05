@@ -312,6 +312,51 @@
             }
           },
           "description": "Import prepared rustdoc JSON declarations for explicitly selected models. Restart the Rust Glancer server after changing these inputs or their exports. Macro changes are not automatically synchronized."
+        },
+        "rust-glancer.rustdoc.automatic": {
+          "type": "object",
+          "default": {
+            "enabled": true,
+            "debounceMs": 2000,
+            "toolchain": "nightly-2026-08-19",
+            "timeoutMs": 900000,
+            "jobs": 2
+          },
+          "description": "Generate Suprnova APIs automatically from saved Rust, Cargo manifest/lock/config and toolchain files. Uses the selected installed toolchain without automatic installation. Pending, stale or failed passes preserve the last valid generated API. Changes require a server restart.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "debounceMs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 600000,
+              "default": 2000
+            },
+            "toolchain": {
+              "type": "string",
+              "minLength": 1,
+              "default": "nightly-2026-08-19"
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400000,
+              "default": 900000
+            },
+            "jobs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 256,
+              "default": 2
+            },
+            "artifactRoot": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Parent directory for isolated worker artifacts; relative paths resolve from each Cargo workspace."
+            }
+          }
         }
       }
     }
