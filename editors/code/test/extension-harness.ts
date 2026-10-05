@@ -24,7 +24,7 @@ export async function serverOutput(): Promise<string> {
   return output;
 }
 
-export async function waitForReadyWorkspace(name: string): Promise<void> {
+export async function waitForReadyWorkspace(name: string, timeoutMs = 30_000): Promise<void> {
   // Readiness comes from the active engine's status, so a log line from an earlier server
   // session cannot make a restarted workspace appear ready.
   await waitFor(
@@ -35,7 +35,7 @@ export async function waitForReadyWorkspace(name: string): Promise<void> {
       session.hasClient &&
       session.status.state === "ready" &&
       path.basename(session.status.details.activeWorkspaceRoot ?? "") === name,
-    30_000,
+    timeoutMs,
   );
 }
 

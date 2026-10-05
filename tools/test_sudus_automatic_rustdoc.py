@@ -109,6 +109,8 @@ class Integrity(unittest.TestCase):
                 value.status, value.reindex, value.event, value.hover = status, reindex, event, hover
                 await value.case("held-query-cleanup", value.held_query)
                 self.assertFalse(value.results["held-query-cleanup"]["passed"])
+                with self.assertRaises(ValueError):
+                    await value.case("held-query-cleanup", value.held_query)
         asyncio.run(check())
 
 

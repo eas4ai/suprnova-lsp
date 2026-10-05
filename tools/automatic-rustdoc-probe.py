@@ -141,6 +141,8 @@ class AutomaticProbe:
         assert "error" not in response, response
 
     async def case(self, name, operation):
+        if name in self.results:
+            raise ValueError(f"duplicate acceptance case: {name}")
         try:
             value = await operation()
             self.results[name] = {"passed": True, "attempted": True, "evidence": value}
@@ -177,6 +179,7 @@ class AutomaticProbe:
 
     async def model_queries(self):
         await self.status("current", timeout=self.plan.get("workerWaitSeconds", 900))
+        assert self.status_events("pending"), "startup did not expose pending generated APIs"
         path = self.root / "src/lib.rs"
         for marker, expected in [("automatic_post", "Builder<Post>"), ("automatic_other", "Builder<Other>")]:
             actual = await self.hover(path, marker)
@@ -266,21 +269,31 @@ class AutomaticProbe:
         await self.status("current", timeout=5)
         path = self.root / "src/lib.rs"
         before = await self.hover(path, "automatic_post")
+        columns = await self.complete(path, "let automatic_column = post::Column::")
+        original = self.texts[path]
+        changed = original.replace("pub title: String,", "pub title: String,\n    pub failed_column: i32,", 1)
+        assert changed != original
         self.set_control(mode)
         since = time.monotonic_ns()
-        await self.reindex()
+        await self.change(path, changed)
         failed = await self.status("failed", since, timeout=180)
         assert failed.get("message"), "failed export lacked actionable context"
         if mode == "flood":
             assert len(json.dumps(failed).encode()) < 64 * 1024, "compiler diagnostics were not bounded"
         assert not self.status_events("current", since), "failed candidate reported freshness"
         assert await self.hover(path, "automatic_post") == before, "failed candidate changed published facts"
+        assert sorted(await self.complete(path, "let automatic_column = post::Column::")) == sorted(columns), "partial generated columns published"
+        if mode in {"invalid-schema", "invalid-reference"}:
+            finishes = [e for e in self.events() if e["event"] == "finished" and e["monotonicNs"] >= since]
+            kind = "schema" if mode == "invalid-schema" else "reference"
+            assert any(e.get("code") == 0 and any(m["kind"] == kind for m in e.get("mutations", []))
+                       for e in finishes), "the export was not actually corrupted after successful compilation"
         starts = len([e for e in self.events() if e["event"] == "started"])
         await asyncio.sleep(self.plan.get("debounceMs", 2000) / 1000 + 1)
         assert len([e for e in self.events() if e["event"] == "started"]) == starts, "failure retried without a trigger"
         self.set_control("real")
         since = time.monotonic_ns()
-        await self.reindex()
+        await self.change(path, original)
         await self.status("current", since, timeout=180)
         assert "Builder<Post>" in await self.hover(path, "automatic_post")
         return {"failure": failed, "preserved": True, "recovered": True}
@@ -451,6 +464,8 @@ class AutomaticProbe:
         await self.status("current", since, timeout=180, root=second)
         await self.status("current", since, timeout=180)
         assert not self.alive(child["pid"]) and not self.alive(child["childPid"])
+        assert any(e["params"].get("state") == "stale" or e["params"].get("freshness") == "stale"
+                   for e in self.status_events(since=since)), "obsolete generated API was never marked stale"
         second_columns = await self.complete(second / "src/lib.rs", "let automatic_column = post::Column::")
         assert "Score" not in second_columns and "Rank" not in second_columns, "compiler facts leaked between roots"
         return {"secondRoot": str(second), "heldFirstRoot": child, "serial": True}

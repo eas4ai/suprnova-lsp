@@ -77,6 +77,7 @@ class CargoProbe:
         self.record("compiler", childPid=child.pid)
         code = child.wait()
         exports = []
+        mutations = []
         artifact_root = Path(config["artifactRoot"])
         if code == 0:
             for path in artifact_root.rglob("*.json"):
@@ -88,6 +89,7 @@ class CargoProbe:
                 if mode == "invalid-schema":
                     data["format_version"] = -1
                     path.write_text(json.dumps(data))
+                    mutations.append({"path": str(path), "kind": "schema"})
                 elif mode == "invalid-reference":
                     if not any(entry["path"] == ["automatic_models", "Post"]
                                for entry in data["paths"].values()):
@@ -109,6 +111,7 @@ class CargoProbe:
                     if changed != 1:
                         raise ValueError(f"reference control changed {changed} methods, expected one")
                     path.write_text(json.dumps(data))
+                    mutations.append({"path": str(path), "kind": "reference"})
                 exports.append({"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
         if config.get("releaseFile"):
             self.record("compiled", code=code)
@@ -117,7 +120,7 @@ class CargoProbe:
                 if time.monotonic() >= deadline:
                     raise TimeoutError("controlled compiler release deadline exceeded")
                 time.sleep(0.02)
-        self.record("finished", code=code, exports=exports, metrics=str(metrics))
+        self.record("finished", code=code, exports=exports, mutations=mutations, metrics=str(metrics))
         return code
 
 

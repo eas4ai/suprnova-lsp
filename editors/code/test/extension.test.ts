@@ -1,6 +1,7 @@
 // Keep E2E coverage about working user flows. Detailed completion and cancellation contracts
 // belong in the engine and transport tests, where their inputs and ordering can be controlled.
 import * as assert from "node:assert/strict";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
 
@@ -143,6 +144,9 @@ suite("Rust Glancer extension", () => {
     const settings = vscode.workspace.getConfiguration("rust-glancer");
     const previous = settings.get<unknown>("rustdoc.automatic");
     const previousInputs = settings.get<unknown>("rustdoc.inputs");
+    const controlPath = process.env.AUTOMATIC_RUSTDOC_CONTROL;
+    assert.ok(controlPath, "the acceptance runner must supply its compiler controls");
+    const previousControl = await fs.readFile(controlPath, "utf8");
     try {
       await settings.update("rustdoc.automatic", policy, vscode.ConfigurationTarget.Global);
       await settings.update("rustdoc.inputs", [], vscode.ConfigurationTarget.Global);
@@ -164,7 +168,7 @@ suite("Rust Glancer extension", () => {
         vscode.Uri.file(path.join(root, "src/lib.rs")),
       );
       await vscode.window.showTextDocument(document);
-      await waitForReadyWorkspace("automatic-models");
+      await waitForReadyWorkspace(path.basename(root), 900_000);
       await waitFor("automatic model hover", async () => {
         const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
           "vscode.executeHoverProvider", document.uri,
@@ -173,7 +177,20 @@ suite("Rust Glancer extension", () => {
         return (hovers ?? []).flatMap((hover) => hover.contents.map((content) =>
           typeof content === "string" ? content : content.value)).join("\n");
       }, (value) => value.includes("Builder<Post>"), 900_000);
+      await waitFor("generated API reported current in the editor", clientState,
+        ({ session }) => /generated.*current/i.test(session?.status.text ?? ""));
+      await fs.writeFile(controlPath, JSON.stringify({ mode: "failure", artifactRoot: policy.artifactRoot }));
+      await withTimeout(vscode.commands.executeCommand(EXTENSION_COMMANDS.reindexWorkspace),
+        "request controlled compiler failure");
+      await waitFor("generated API failure visible in the editor", clientState,
+        ({ session }) => /generated.*failed/i.test(session?.status.text ?? ""), 300_000);
+      await fs.writeFile(controlPath, previousControl);
+      await withTimeout(vscode.commands.executeCommand(EXTENSION_COMMANDS.reindexWorkspace),
+        "recover generated editor API");
+      await waitFor("generated API recovered in the editor", clientState,
+        ({ session }) => /generated.*current/i.test(session?.status.text ?? ""), 300_000);
     } finally {
+      await fs.writeFile(controlPath, previousControl);
       await settings.update("rustdoc.automatic", previous, vscode.ConfigurationTarget.Global);
       await settings.update("rustdoc.inputs", previousInputs, vscode.ConfigurationTarget.Global);
     }
