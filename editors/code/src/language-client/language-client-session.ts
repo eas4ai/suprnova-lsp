@@ -210,7 +210,8 @@ export class LanguageClientSession implements vscode.Disposable {
     this.clientState = undefined;
 
     if (client !== undefined) {
-      await client.stop();
+      // Keep the transport open while owned compiler trees and queued source queries drain.
+      await client.stop(30_000);
       this.extensionLog.info("rust-glancer client stopped");
     }
 

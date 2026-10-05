@@ -17,6 +17,7 @@ dissimilar.workspace = true
 futures.workspace = true
 gen-lsp-types = { workspace = true, features = ["url"] }
 rg_analysis.workspace = true
+rg_cfg_eval.workspace = true
 rg_def_map.workspace = true
 rg_ir_model.workspace = true
 rg_lsp_proto.workspace = true
@@ -26,6 +27,7 @@ rg_source.workspace = true
 rg_std.workspace = true
 rg_text.workspace = true
 rg_workspace.workspace = true
+serde_json.workspace = true
 tarpc = { workspace = true, features = ["serde-transport", "serde-transport-json", "tcp", "tokio1"] }
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
@@ -33,7 +35,6 @@ tracing.workspace = true
 [dev-dependencies]
 divan.workspace = true
 expect-test.workspace = true
-serde_json.workspace = true
 test_fixture.workspace = true
 
 [[bench]]

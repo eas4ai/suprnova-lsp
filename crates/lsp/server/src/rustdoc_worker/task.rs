@@ -17,7 +17,9 @@ use tokio::{
 };
 use tower_lsp_server::Client;
 
-use super::{GenerationChanges, RustdocStatus, producer::CompilerPass};
+use super::{
+    GenerationChanges, RustdocStatus, command::ProcessCleanupFailure, producer::CompilerPass,
+};
 use crate::engine_client::EngineClient;
 
 #[derive(Debug)]
@@ -32,14 +34,6 @@ pub(super) struct WorkspaceWorker {
     state: Mutex<WorkerState>,
     task: Mutex<Option<JoinHandle<()>>>,
     stopping: AtomicBool,
-}
-
-#[derive(Debug, Default)]
-struct WorkerState {
-    generation: u64,
-    saved_inputs: Option<[u8; 32]>,
-    published: bool,
-    compiled: bool,
 }
 
 impl WorkspaceWorker {
@@ -70,11 +64,20 @@ impl WorkspaceWorker {
             .prefix(".rust-glancer-rustdoc-")
             .tempdir_in(parent)
             .context("claim isolated rustdoc artifacts")?;
+        let resolved_artifacts = artifacts
+            .path()
+            .canonicalize()
+            .context("resolve owned compiler artifact directory")?;
         let (changes, receiver) = watch::channel(0);
-        artifact_directories
+        let mut claimed = artifact_directories
             .write()
-            .expect("artifact ownership lock is not poisoned")
-            .push(artifacts.path().to_path_buf());
+            .expect("artifact ownership lock is not poisoned");
+        claimed.push(artifacts.path().to_path_buf());
+        if resolved_artifacts != artifacts.path() {
+            // A configured parent can be a symlink back into the watched workspace.
+            claimed.push(resolved_artifacts);
+        }
+        drop(claimed);
         let worker = Arc::new(Self {
             root,
             config,
@@ -156,13 +159,11 @@ impl WorkspaceWorker {
             }
         });
         drop(state);
-        let invalidation = self
-            .engine
+        self.engine
             .call_unconditional("rustdoc_requested", move |engine, context| async move {
                 engine.rustdoc_requested(context, generation).await
             })
-            .await;
-        invalidation
+            .await
     }
 
     pub(super) async fn failed(&self, message: String) {
@@ -210,6 +211,7 @@ impl WorkspaceWorker {
                 _ = changes.wait_for(|current| *current != generation) => continue,
             };
             let Ok(_permit) = acquired else {
+                worker.failed("Compiler scheduling stopped because process cleanup could not be verified; restart the language server".to_owned()).await;
                 return;
             };
             if *changes.borrow() != generation {
@@ -223,6 +225,17 @@ impl WorkspaceWorker {
                 )
                 .await;
             let result = worker.generate(generation, &mut changes).await;
+            if let Err(error) = &result
+                && error.downcast_ref::<ProcessCleanupFailure>().is_some()
+            {
+                // A replacement is unsafe until every previous compiler child is known to be gone.
+                // Closing the shared slot also stops other roots from starting another producer.
+                permit.close();
+                worker
+                    .failed(format!("Generate model APIs: {error:#}"))
+                    .await;
+                return;
+            }
             last_attempt = generation;
             if *changes.borrow() != generation {
                 continue;
@@ -294,6 +307,11 @@ impl WorkspaceWorker {
         )
         .export()
         .await;
+        if let Err(error) = &exported
+            && error.downcast_ref::<ProcessCleanupFailure>().is_some()
+        {
+            return Err(exported.err().expect("cleanup failure is an error"));
+        }
         if *changes.borrow() != generation
             || SavedWorkspaceInputs::read(&self.root, &self.artifact_directories())?.digest()
                 != inputs
@@ -310,6 +328,9 @@ impl WorkspaceWorker {
             workspace_root: self.root.clone(),
             saved_inputs: inputs,
             artifact_directories: self.artifact_directories(),
+            metadata_path: exports.metadata_path,
+            target_cfg: exports.target_cfg,
+            sysroot_library_root: exports.sysroot_library_root,
             exports: exports.targets,
             producer_files: exports.producer_files,
         };
@@ -347,6 +368,14 @@ impl WorkspaceWorker {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Default)]
+struct WorkerState {
+    generation: u64,
+    saved_inputs: Option<[u8; 32]>,
+    published: bool,
+    compiled: bool,
 }
 
 enum GenerationResult {

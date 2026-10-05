@@ -1929,6 +1929,7 @@ dependencies = [
  "futures",
  "gen-lsp-types",
  "rg_analysis",
+ "rg_cfg_eval",
  "rg_def_map",
  "rg_ir_model",
  "rg_lsp_proto",

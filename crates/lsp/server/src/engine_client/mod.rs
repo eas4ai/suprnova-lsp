@@ -193,6 +193,7 @@ impl EngineClient {
                 | "did_save"
                 | "external_project_changes"
                 | "publish_rustdoc"
+                | "rustdoc_requested"
         )
     }
 }
@@ -217,6 +218,7 @@ mod tests {
             "did_save",
             "external_project_changes",
             "publish_rustdoc",
+            "rustdoc_requested",
         ] {
             let context = EngineClient::context(operation);
 

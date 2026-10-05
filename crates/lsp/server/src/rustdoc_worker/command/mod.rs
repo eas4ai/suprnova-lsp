@@ -39,6 +39,19 @@ impl CommandOutput {
     }
 }
 
+#[derive(Debug)]
+pub(super) struct ProcessCleanupFailure;
+
+impl std::fmt::Display for ProcessCleanupFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(
+            "compiler process cleanup could not be verified; restart the language server",
+        )
+    }
+}
+
+impl std::error::Error for ProcessCleanupFailure {}
+
 pub(super) struct SupervisedCommand;
 
 impl SupervisedCommand {
@@ -102,8 +115,9 @@ impl SupervisedCommand {
         })
         .await;
         readers.abort_all();
+        // An output error must not hide a live-tree cleanup failure from the global scheduler.
+        cleanup.context(ProcessCleanupFailure)?;
         let (stdout, stderr) = captures.context("timeout draining compiler output")??;
-        cleanup?;
         Ok(CommandOutput {
             stdout: stdout.0,
             stdout_truncated: stdout.1,

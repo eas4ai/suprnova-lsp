@@ -31,16 +31,18 @@ impl RustdocProjectBuildInputs {
             .cargo_metadata_config
             .clone()
             .locked(true);
-        let metadata = metadata_config
-            .load_metadata_with_target_cfg(self.root.join("Cargo.toml"))
-            .context("load locked Cargo graph for rustdoc candidate")?;
+        let metadata: cargo_metadata::Metadata = serde_json::from_reader(
+            std::fs::File::open(&input.metadata_path)
+                .context("open captured rustdoc Cargo graph")?,
+        )
+        .context("read captured rustdoc Cargo graph")?;
         let workspace = WorkspaceMetadata::lower(
-            metadata.metadata,
-            metadata.target_cfg,
+            metadata,
+            rg_cfg_eval::CfgOptions::from_rustc_cfg_output(&input.target_cfg),
             self.configuration.workspace_lowering_config.clone(),
         )?;
         let sysroot = if self.configuration.discover_sysroot {
-            SysrootSources::discover(workspace.workspace_root())
+            SysrootSources::from_library_root(&input.sysroot_library_root)
         } else {
             None
         };

@@ -24,6 +24,9 @@ pub struct RustdocGenerationInput {
     pub workspace_root: PathBuf,
     pub saved_inputs: [u8; 32],
     pub artifact_directories: Vec<PathBuf>,
+    pub metadata_path: PathBuf,
+    pub target_cfg: String,
+    pub sysroot_library_root: PathBuf,
     pub exports: Vec<RustdocTargetExport>,
     pub producer_files: Vec<RustdocProducerFile>,
 }

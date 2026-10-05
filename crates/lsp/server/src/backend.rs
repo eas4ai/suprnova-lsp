@@ -300,7 +300,8 @@ impl LanguageServer for Backend {
     )]
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         if let Some(path) = methods::uri_to_path(&params.text_document.uri)
-            && let Ok(registry) = self.registry().await {
+            && let Ok(registry) = self.registry().await
+        {
             registry.saved_path(path.as_path()).await;
         }
         methods::text_document::did_save::did_save(&self.lsp_client, &self.inlay_refresher, params)

@@ -183,6 +183,104 @@ fn receive_completion(
 }
 
 #[test]
+fn rustdoc_candidates_use_the_captured_graph_and_reject_late_inputs() {
+    let fixture = fixture_crate(
+        r#"
+        //- /Cargo.toml
+        [package]
+        name = "captured_rustdoc_graph"
+        version = "0.1.0"
+        edition = "2024"
+
+        //- /src/lib.rs
+        pub fn source_value() -> u64 { 7 }
+    "#,
+    );
+    let (sender, _receiver) = mpsc::channel();
+    let recorded = RecordingNotifications::default();
+    let mut project = ProjectCoordinator::new(
+        sender,
+        Arc::new(()),
+        ServiceNotificationsSink::from_publisher(recorded),
+    );
+    project
+        .initialize(
+            fixture.path(""),
+            ProjectConfiguration::from(AnalysisConfig {
+                indexing_preference: IndexingPerformancePreference::LowerPeakMemory,
+                sysroot_discovery: SysrootDiscovery::Disabled,
+                ..AnalysisConfig::default()
+            }),
+        )
+        .unwrap();
+    let metadata = rg_workspace::CargoMetadataConfig::default()
+        .load_metadata_with_target_cfg(fixture.path("Cargo.toml"))
+        .unwrap();
+    let metadata_path = fixture.path("captured-metadata.json");
+    serde_json::to_writer(
+        std::fs::File::create(&metadata_path).unwrap(),
+        &metadata.metadata,
+    )
+    .unwrap();
+    let manifest = std::fs::read(fixture.path("Cargo.toml")).unwrap();
+    let saved_inputs = rg_workspace::SavedWorkspaceInputs::read(&fixture.path(""), &[])
+        .unwrap()
+        .digest();
+    let input = rg_lsp_proto::RustdocGenerationInput {
+        generation: 1,
+        workspace_root: fixture.path(""),
+        saved_inputs,
+        artifact_directories: Vec::new(),
+        metadata_path,
+        target_cfg: "unix\n".to_owned(),
+        sysroot_library_root: fixture.path("missing-sysroot"),
+        exports: Vec::new(),
+        producer_files: Vec::new(),
+    };
+    project.rustdoc_requested(1);
+    let generation = project.project.generation();
+    let inputs = project.rustdoc_build_inputs(1).unwrap();
+    // A fresh Cargo command would reject this manifest. Captured candidate construction must
+    // still finish, and only the publication fence rejects its now-obsolete saved inputs.
+    std::fs::write(fixture.path("Cargo.toml"), "invalid Cargo manifest").unwrap();
+    let candidate = inputs.build(input.clone()).unwrap();
+    assert!(!project.publish_rustdoc(candidate).unwrap());
+    assert_eq!(project.project.generation(), generation);
+    std::fs::write(fixture.path("Cargo.toml"), manifest).unwrap();
+    let candidate = project
+        .rustdoc_build_inputs(1)
+        .unwrap()
+        .build(input.clone())
+        .unwrap();
+    project.rustdoc_requested(2);
+    assert!(!project.publish_rustdoc(candidate).unwrap());
+    assert_eq!(project.project.generation(), generation);
+    let mut input = input;
+    input.generation = 2;
+    let candidate = project
+        .rustdoc_build_inputs(2)
+        .unwrap()
+        .build(input.clone())
+        .unwrap();
+    assert!(project.publish_rustdoc(candidate).unwrap());
+    assert!(project.project.generation() > generation);
+    let published_generation = project.project.generation();
+    let executable = fixture.path("producer-executable");
+    std::fs::write(&executable, "selected producer").unwrap();
+    input.producer_files = vec![rg_lsp_proto::RustdocProducerFile::read(&executable).unwrap()];
+    input.generation = 3;
+    project.rustdoc_requested(3);
+    let candidate = project
+        .rustdoc_build_inputs(3)
+        .unwrap()
+        .build(input)
+        .unwrap();
+    std::fs::write(executable, "replacement producer executable").unwrap();
+    assert!(!project.publish_rustdoc(candidate).unwrap());
+    assert_eq!(project.project.generation(), published_generation);
+}
+
+#[test]
 fn lower_memory_builds_do_not_start_empty_deferred_finishes() {
     let fixture = fixture_crate(
         r#"

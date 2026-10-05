@@ -20,10 +20,10 @@ use std::{
 use anyhow::Context as _;
 use ignore::WalkBuilder;
 use notify_debouncer_full::{
-    DebounceEventResult, Debouncer, NoCache,
+    DebounceEventResult, DebouncedEvent, Debouncer, NoCache,
     notify::{
         Config as NotifyConfig, EventKind, RecommendedWatcher, RecursiveMode,
-        event::{AccessKind, AccessMode},
+        event::{AccessKind, AccessMode, CreateKind, RemoveKind},
     },
 };
 use rg_std::NormalizedPathBuf;
@@ -196,7 +196,7 @@ impl WorkspaceWatcher {
                 // the workspace settle window. Rescan events have no useful paths and must always
                 // reach the snapshot recovery path.
                 events.retain(|event| {
-                    if event.need_rescan() {
+                    if event.need_rescan() || Self::needs_directory_rescan(root, event) {
                         return true;
                     }
 
@@ -219,6 +219,19 @@ impl WorkspaceWatcher {
             }
             Err(errors) => Some(Err(errors)),
         }
+    }
+
+    fn needs_directory_rescan(root: &NormalizedPathBuf, event: &DebouncedEvent) -> bool {
+        // Recursive native watches can miss files written immediately after their parent appears.
+        // Recover from the directory event too, including removals whose children no longer exist.
+        matches!(
+            event.event.kind,
+            EventKind::Create(CreateKind::Folder) | EventKind::Remove(RemoveKind::Folder)
+        ) && event
+            .event
+            .paths
+            .iter()
+            .any(|path| WatchedProjectPath::should_visit(root.as_path(), path))
     }
 
     async fn collect_settled_results(
@@ -295,7 +308,10 @@ impl WorkspaceWatcher {
             .iter()
             .map(|event| event.event.paths.len())
             .sum::<usize>();
-        let need_rescan = !errors.is_empty() || events.iter().any(|event| event.need_rescan());
+        let need_rescan = !errors.is_empty()
+            || events
+                .iter()
+                .any(|event| event.need_rescan() || Self::needs_directory_rescan(root, event));
 
         if need_rescan {
             if events.iter().any(|event| event.need_rescan()) {
@@ -551,12 +567,32 @@ mod tests {
         DebouncedEvent,
         notify::{
             Event, EventKind,
-            event::{AccessKind, AccessMode, DataChange, ModifyKind},
+            event::{AccessKind, AccessMode, CreateKind, DataChange, ModifyKind},
         },
     };
     use test_fixture::fixture_crate;
 
     use super::*;
+
+    #[test]
+    fn a_new_directory_event_rescans_inputs_created_before_recursive_watching() {
+        let fixture = fixture_crate("//- /src/lib.rs\npub struct Post;\n");
+        let root = NormalizedPathBuf::from_absolute(fixture.path("")).unwrap();
+        let mut snapshot = ProjectPathSnapshot::scan(&root, Default::default());
+        let directory = fixture.path(".cargo");
+        std::fs::create_dir(&directory).unwrap();
+        let config = directory.join("config.toml");
+        std::fs::write(&config, "[build]\njobs=1\n").unwrap();
+        // Inotify can deliver the new folder after the file was written, before installing its
+        // recursive watch. The folder event alone must recover the new configuration file.
+        let event = watcher_event(directory, EventKind::Create(CreateKind::Folder));
+        let result = WorkspaceWatcher::project_result(&root, Ok(vec![event]))
+            .expect("folder mutation must reach the snapshot");
+        let changed =
+            WorkspaceWatcher::changed_paths_for_results(&mut snapshot, &root, vec![result]);
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].as_path(), config);
+    }
 
     #[test]
     fn rescans_exclude_only_claimed_compiler_directories_and_watch_cargo_configuration() {

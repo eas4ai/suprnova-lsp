@@ -156,39 +156,76 @@ suite("Rust Glancer extension", () => {
       assert.throws(() => ExtensionConfig.read(), /rustdoc.automatic/);
       await settings.update("rustdoc.automatic", policy, vscode.ConfigurationTarget.Global);
       const folder = vscode.Uri.file(root);
-      assert.ok(vscode.workspace.updateWorkspaceFolders(
-        vscode.workspace.workspaceFolders?.length ?? 0, 0,
-        { uri: folder, name: "automatic-models" },
-      ));
-      await waitFor("automatic workspace registered",
-        () => vscode.workspace.getWorkspaceFolder(folder), (value) => value !== undefined);
-      await withTimeout(vscode.commands.executeCommand(EXTENSION_COMMANDS.restartServer),
-        "restart automatic editor server", 30_000);
+      assert.ok(
+        vscode.workspace.updateWorkspaceFolders(vscode.workspace.workspaceFolders?.length ?? 0, 0, {
+          uri: folder,
+          name: "automatic-models",
+        }),
+      );
+      await waitFor(
+        "automatic workspace registered",
+        () => vscode.workspace.getWorkspaceFolder(folder),
+        (value) => value !== undefined,
+      );
+      await withTimeout(
+        vscode.commands.executeCommand(EXTENSION_COMMANDS.restartServer),
+        "restart automatic editor server",
+        30_000,
+      );
       const document = await vscode.workspace.openTextDocument(
         vscode.Uri.file(path.join(root, "src/lib.rs")),
       );
       await vscode.window.showTextDocument(document);
       await waitForReadyWorkspace(path.basename(root), 900_000);
-      await waitFor("automatic model hover", async () => {
-        const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
-          "vscode.executeHoverProvider", document.uri,
-          document.positionAt(document.getText().indexOf("automatic_post")),
-        );
-        return (hovers ?? []).flatMap((hover) => hover.contents.map((content) =>
-          typeof content === "string" ? content : content.value)).join("\n");
-      }, (value) => value.includes("Builder<Post>"), 900_000);
-      await waitFor("generated API reported current in the editor", clientState,
-        ({ session }) => /generated.*current/i.test(session?.status.text ?? ""));
-      await fs.writeFile(controlPath, JSON.stringify({ mode: "failure", artifactRoot: policy.artifactRoot }));
-      await withTimeout(vscode.commands.executeCommand(EXTENSION_COMMANDS.reindexWorkspace),
-        "request controlled compiler failure");
-      await waitFor("generated API failure visible in the editor", clientState,
-        ({ session }) => /generated.*failed/i.test(session?.status.text ?? ""), 300_000);
+      await waitFor(
+        "automatic model hover",
+        async () => {
+          const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+            "vscode.executeHoverProvider",
+            document.uri,
+            document.positionAt(document.getText().indexOf("automatic_post")),
+          );
+          return (hovers ?? [])
+            .flatMap((hover) =>
+              hover.contents.map((content) =>
+                typeof content === "string" ? content : content.value,
+              ),
+            )
+            .join("\n");
+        },
+        (value) => value.includes("Builder<Post>"),
+        900_000,
+      );
+      await waitFor("generated API reported current in the editor", clientState, ({ session }) =>
+        /generated.*current/i.test(session?.status.text ?? ""),
+      );
+      await fs.writeFile(
+        controlPath,
+        JSON.stringify({ mode: "failure", artifactRoot: policy.artifactRoot }),
+      );
+      await withTimeout(
+        vscode.commands.executeCommand(EXTENSION_COMMANDS.reindexWorkspace),
+        "request controlled compiler failure",
+        300_000,
+      );
+      await waitFor(
+        "generated API failure visible in the editor",
+        clientState,
+        ({ session }) => /generated.*failed/i.test(session?.status.text ?? ""),
+        300_000,
+      );
       await fs.writeFile(controlPath, previousControl);
-      await withTimeout(vscode.commands.executeCommand(EXTENSION_COMMANDS.reindexWorkspace),
-        "recover generated editor API");
-      await waitFor("generated API recovered in the editor", clientState,
-        ({ session }) => /generated.*current/i.test(session?.status.text ?? ""), 300_000);
+      await withTimeout(
+        vscode.commands.executeCommand(EXTENSION_COMMANDS.reindexWorkspace),
+        "recover generated editor API",
+        300_000,
+      );
+      await waitFor(
+        "generated API recovered in the editor",
+        clientState,
+        ({ session }) => /generated.*current/i.test(session?.status.text ?? ""),
+        300_000,
+      );
     } finally {
       await fs.writeFile(controlPath, previousControl);
       await settings.update("rustdoc.automatic", previous, vscode.ConfigurationTarget.Global);
@@ -226,11 +263,7 @@ suite("Rust Glancer extension", () => {
       );
       await settings.update("rustdoc.inputs", inputs, vscode.ConfigurationTarget.Global);
       const config = ExtensionConfig.read();
-      assert.deepEqual(
-        config.rustdoc.inputs,
-        inputs,
-        "the extension dropped its configured input",
-      );
+      assert.deepEqual(config.rustdoc.inputs, inputs, "the extension dropped its configured input");
       for (const malformed of [null, "invalid", [null], [{}]]) {
         assert.throws(() => RustdocConfig.read(malformed), /rustdoc.inputs/);
       }
@@ -251,11 +284,12 @@ suite("Rust Glancer extension", () => {
       );
       // The model lives outside test_targets. Make it an editor workspace before restarting
       // so the server's ordinary folder boundary permits this genuine fixture's document.
-      assert.ok(vscode.workspace.updateWorkspaceFolders(
-        vscode.workspace.workspaceFolders?.length ?? 0,
-        0,
-        { uri: modelFolder, name: "model-default" },
-      ));
+      assert.ok(
+        vscode.workspace.updateWorkspaceFolders(vscode.workspace.workspaceFolders?.length ?? 0, 0, {
+          uri: modelFolder,
+          name: "model-default",
+        }),
+      );
       await waitFor(
         "model editor workspace registered",
         async () => vscode.workspace.getWorkspaceFolder(modelFolder),
@@ -287,9 +321,11 @@ suite("Rust Glancer extension", () => {
         ),
         "hover configured generated model",
       );
-      const hoverText = (hovers ?? []).flatMap((hover) =>
-        hover.contents.map((content) => typeof content === "string" ? content : content.value),
-      ).join("\n");
+      const hoverText = (hovers ?? [])
+        .flatMap((hover) =>
+          hover.contents.map((content) => (typeof content === "string" ? content : content.value)),
+        )
+        .join("\n");
       assert.ok(hoverText.includes("Builder<Post>"), `trait default query missing: ${hoverText}`);
       const completionOffset = document.getText().indexOf("Post::query") + "Post::".length;
       const completions = await withTimeout(

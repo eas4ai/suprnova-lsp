@@ -14,6 +14,9 @@ use super::{GenerationChanges, command::SupervisedCommand};
 pub(super) struct PreparedExports {
     pub(super) targets: Vec<RustdocTargetExport>,
     pub(super) producer_files: Vec<rg_lsp_proto::RustdocProducerFile>,
+    pub(super) metadata_path: PathBuf,
+    pub(super) target_cfg: String,
+    pub(super) sysroot_library_root: PathBuf,
     // Paths handed to the engine belong to this immutable staging directory, not Cargo's cache.
     _staging: TempDir,
 }
@@ -129,7 +132,7 @@ impl<'a> CompilerPass<'a> {
 
     async fn producer(&mut self) -> anyhow::Result<ProducerIdentity> {
         let mut paths = Vec::new();
-        for program in ["rustc", "rustdoc"] {
+        for program in ["rustc", "rustdoc", "cargo"] {
             let mut command = self.command("rustup", None);
             command.args([
                 "which",
@@ -152,6 +155,7 @@ impl<'a> CompilerPass<'a> {
         let mut producer = ProducerIdentity {
             rustc: paths.remove(0),
             rustdoc: paths.remove(0),
+            cargo: paths.remove(0),
             identity: [0; 32],
         };
         producer.identity = self.producer_identity(&producer).await?;
@@ -160,7 +164,11 @@ impl<'a> CompilerPass<'a> {
 
     async fn producer_identity(&mut self, producer: &ProducerIdentity) -> anyhow::Result<[u8; 32]> {
         let mut identity = blake3::Hasher::new();
-        for (path, argument) in [(&producer.rustc, "-vV"), (&producer.rustdoc, "--version")] {
+        for (path, argument) in [
+            (&producer.rustc, "-vV"),
+            (&producer.rustdoc, "--version"),
+            (&producer.cargo, "--version"),
+        ] {
             let mut command = self.command(path, Some(producer));
             command.arg(argument);
             identity.update(
@@ -177,13 +185,6 @@ impl<'a> CompilerPass<'a> {
                 .context("producer modification time precedes the identity epoch")?;
             identity.update(&modified.as_nanos().to_le_bytes());
         }
-        let mut cargo = self.command("cargo", Some(producer));
-        cargo.arg("--version");
-        identity.update(
-            &self
-                .run(&mut cargo, "verify selected Cargo producer", 32 * 1024)
-                .await?,
-        );
         Ok(*identity.finalize().as_bytes())
     }
 
@@ -204,21 +205,63 @@ impl<'a> CompilerPass<'a> {
                 .to_owned()
             }
         };
+        anyhow::ensure!(
+            matches!(
+                std::path::Path::new(&target)
+                    .components()
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                [std::path::Component::Normal(_)]
+            ),
+            "automatic rustdoc requires a target triple, not a target path: {target}"
+        );
         let source_graph = self.graph(&target, None).await?;
         let targets = source_graph.targets()?;
         let staging = tempfile::Builder::new()
             .prefix("export-")
             .tempdir_in(self.artifacts)
             .context("claim immutable rustdoc generation artifacts")?;
+        // Candidate construction receives this exact graph rather than running more unowned
+        // commands in the engine. Full metadata lives only in the temporary handoff directory.
+        let metadata_path = staging.path().join("metadata.json");
+        serde_json::to_writer(
+            std::fs::File::create(&metadata_path)?,
+            &source_graph.metadata,
+        )
+        .context("stage captured Cargo graph")?;
+        let mut command = self.command("rustc", None);
+        command.args(["--print", "cfg", "--target", &target]);
+        let target_cfg = String::from_utf8(
+            self.run(
+                &mut command,
+                "capture analysis target configuration",
+                32 * 1024,
+            )
+            .await?,
+        )
+        .context("decode analysis target configuration")?;
+        let mut command = self.command("rustc", None);
+        command.args(["--print", "sysroot"]);
+        let sysroot = String::from_utf8(
+            self.run(&mut command, "capture analysis sysroot", 32 * 1024)
+                .await?,
+        )
+        .context("decode analysis sysroot")?;
+        anyhow::ensure!(!sysroot.trim().is_empty(), "analysis sysroot path is empty");
+        let sysroot_library_root =
+            PathBuf::from(sysroot.trim()).join("lib/rustlib/src/rust/library");
         if targets.is_empty() {
             return Ok(PreparedExports {
                 targets: Vec::new(),
                 producer_files: Vec::new(),
+                metadata_path,
+                target_cfg,
+                sysroot_library_root,
                 _staging: staging,
             });
         }
         let producer = self.producer().await?;
-        let producer_files = [&producer.rustc, &producer.rustdoc]
+        let producer_files = [&producer.rustc, &producer.rustdoc, &producer.cargo]
             .into_iter()
             .map(|path| rg_lsp_proto::RustdocProducerFile::read(path))
             .collect::<std::io::Result<Vec<_>>>()?;
@@ -311,6 +354,9 @@ impl<'a> CompilerPass<'a> {
         Ok(PreparedExports {
             targets: exports,
             producer_files,
+            metadata_path,
+            target_cfg,
+            sysroot_library_root,
             _staging: staging,
         })
     }
@@ -319,6 +365,7 @@ impl<'a> CompilerPass<'a> {
 struct ProducerIdentity {
     rustc: PathBuf,
     rustdoc: PathBuf,
+    cargo: PathBuf,
     identity: [u8; 32],
 }
 

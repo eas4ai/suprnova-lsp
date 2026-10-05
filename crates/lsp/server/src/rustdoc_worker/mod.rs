@@ -55,6 +55,10 @@ impl RustdocWorkers {
         if roots.contains_key(&root) {
             return Ok(());
         }
+        anyhow::ensure!(
+            !self.permit.is_closed(),
+            "compiler scheduling has stopped; restart the language server"
+        );
         let worker = WorkspaceWorker::spawn(
             root.clone(),
             config,
@@ -138,6 +142,8 @@ impl RustdocWorkers {
     }
 
     pub(crate) async fn shutdown(&self) -> anyhow::Result<()> {
+        // Also fence registration racing a source engine's startup completion.
+        self.permit.close();
         let roots = std::mem::take(&mut *self.roots.lock().await);
         for worker in roots.values() {
             worker.cancel();
