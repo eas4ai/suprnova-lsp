@@ -1,6 +1,6 @@
 # Plan 01 — Measure the Delay
 
-Status: Approved 2026-10-06; execution pending. Requirements: RSP-001; establish the baselines for RSP-002/006.
+Status: Approved 2026-10-06; observer preparation in progress, commitment start pending. Requirements: RSP-001; establish the baselines for RSP-002/006.
 
 ## Deliverables
 
@@ -58,6 +58,27 @@ if active windows are short. Do not pad an active series with settled requests.
 Controlled owned fixtures keep publication work pending for race observations;
 they cannot replace genuine application latency results.
 
+Before selecting a fix, add an **automatic-disabled source control** in both modes.
+Use the same baseline binary, saved `verify_password` query, application inputs,
+residency, logging, process limits and cache conditions. Change only
+`rustdoc.automatic.enabled` to `false`; use the same peak-sampling policy on both
+sides and disclose any measurement differences. Keep its results separate from
+the required automatic-enabled acceptance series. Observe deferred start/finish
+and independently published document readiness; require no worker notifications.
+Sample settled idle RSS after deferred work and requests finish. This control
+distinguishes saved-body preparation from worker contention and replacement
+indexing; it does not establish generated-model latency.
+
+The fork review also names candidate construction and final input hashing as
+possible worker costs. Candidate construction already runs outside the analysis
+lane. Time the two synchronous saved-input scans in `WorkspaceWorker::generate`,
+the final scan/publication in `ProjectCoordinator::publish_rustdoc`, and the
+resulting deferred generation separately. Use owned fixture saves to compare
+body-only and generated-API changes; do not edit the protected framework or use
+Devlist disk edits for these controls. Do not replace content identity with an
+mtime-only shortcut or skip publication without preserving owner/target identity,
+saved-generation fencing and the normal saved-source update.
+
 The existing invocation shape is:
 
 ```sh
@@ -100,3 +121,22 @@ RSP-001 evidence exists and the observer detects its violating controls. The
 baseline includes correct results, background events, stage attribution, cleanup,
 and idle observations. The chosen implementation names actual trace entries.
 No production scheduling or body-analysis change is included in this plan.
+
+## Initial diagnostic evidence
+
+Small bounded Devlist diagnostics reproduced a slow first source hover in
+`faster-builds`: 775 ms with automatic export enabled, and 694 ms with it disabled.
+The disabled control measured 692 ms in analysis, zero native queue milliseconds,
+and 692 ms in saved-file preparation. `lower-peak-memory` first hovers were 3.4 ms
+and 4.5 ms respectively. These are individual diagnostic observations, not p95
+acceptance series or proof that worker costs are negligible. The control retained
+five idle samples in each mode and verified owned-process cleanup.
+
+Artifacts are under `target/agent-debug/runs/`; the source runs are
+`20261006T232457455Z-rsp-diagnostic-1907489-7ccd2b` and
+`20261006T233527684Z-rsp-diagnostic-1952041-af34a7`. Earlier runs also retain the
+unavailable-route, open-file-limit and premature-idle failures. The successful
+diagnostics explicitly use a process-local open-file limit of 4096. The default
+1024 failure remains disclosed; raising that limit is not a production fix.
+Full cohorts, generated overlap, matched before/after idle pairs, complete RSP
+mechanism controls and the commitment start remain pending.
