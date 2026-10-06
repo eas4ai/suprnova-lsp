@@ -1,0 +1,29 @@
+/**
+ * Central registry of command identifiers used by the extension and the language server.
+ *
+ * Keeping command strings here prevents package manifest commands, VS Code registrations, hover
+ * links, tests, and LSP execute-command calls from drifting apart.
+ */
+export const EXTENSION_COMMANDS = {
+  showServerActions: "rust-glancer.showServerActions",
+  startServer: "rust-glancer.startServer",
+  restartServer: "rust-glancer.restartServer",
+  stopServer: "rust-glancer.stopServer",
+  reindexWorkspace: "rust-glancer.reindexWorkspace",
+  openLogs: "rust-glancer.openLogs",
+  goToTypeFromHover: "rust-glancer.gotoTypeFromHover",
+  goToImplementationFromHover: "rust-glancer.gotoImplementationFromHover",
+  testGetState: "rust-glancer.test.getState",
+  testGetOutput: "rust-glancer.test.getOutput",
+} as const;
+
+export const SERVER_COMMANDS = {
+  reindexWorkspace: "rust-glancer.internal.reindexWorkspace",
+} as const;
+
+export const SERVER_NOTIFICATIONS = {
+  rustdocStatus: "rust-glancer/rustdocStatus",
+  activeWorkspaceChanged: "rust-glancer/activeWorkspaceChanged",
+  deferredIndexingStarted: "rust-glancer/deferredIndexingStarted",
+  deferredIndexingFinished: "rust-glancer/deferredIndexingFinished",
+} as const;
