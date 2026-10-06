@@ -25,20 +25,37 @@ class IdentityIntegrity(unittest.TestCase):
         self.protocol = {"passed": True}
         self.regressions = {"AUT": True, "EDT": True}
 
-    def test_workflow_cargo_selectors_must_name_workspace_packages(self):
+    def source_results_with_replacement(self, relative_path, replacements):
         read_text = Path.read_text
-        ci = ROOT / ".github/workflows/ci.yml"
-        for selector in ["suprnova-lsp-zed", "rust-glancer-zed"]:
-            def read(path, *args, **kwargs):
-                text = read_text(path, *args, **kwargs)
-                if path == ci:
-                    text = text.replace("-p suprnova-lsp-zed", f"-p {selector}")
-                    text = text.replace("-p rust-glancer-zed", f"-p {selector}")
-                return text
+        target = ROOT / relative_path
 
-            with mock.patch.object(Path, "read_text", read):
-                self.assertEqual(identity.source_observations()["results"]["IDN-004"],
-                                 selector == "rust-glancer-zed", selector)
+        def read(path, *args, **kwargs):
+            text = read_text(path, *args, **kwargs)
+            if path == target:
+                for before, after in replacements:
+                    text = text.replace(before, after)
+            return text
+
+        with mock.patch.object(Path, "read_text", read):
+            return identity.source_observations()["results"]
+
+    def test_workflow_cargo_selectors_must_name_workspace_packages(self):
+        for selector in ["suprnova-lsp-zed", "rust-glancer-zed"]:
+            results = self.source_results_with_replacement(".github/workflows/ci.yml", [
+                ("-p suprnova-lsp-zed", f"-p {selector}"),
+                ("-p rust-glancer-zed", f"-p {selector}"),
+            ])
+            self.assertEqual(results["IDN-004"], selector == "rust-glancer-zed", selector)
+
+    def test_codspeed_environment_must_reach_the_benchmark_consumer(self):
+        for variable in ["RUST_GLANCER_BENCH_TARGETS", "SUPRNOVA_LSP_BENCH_TARGETS"]:
+            results = self.source_results_with_replacement("crates/engine/project/benches/shared/mod.rs", [
+                ("RUST_GLANCER_BENCH_TARGETS", variable),
+                ("SUPRNOVA_LSP_BENCH_TARGETS", variable),
+            ])
+            for requirement in ["IDN-003", "IDN-004"]:
+                self.assertEqual(results[requirement], variable == "SUPRNOVA_LSP_BENCH_TARGETS",
+                                 (requirement, variable))
 
     def test_each_requirement_rejects_its_observed_violation(self):
         self.assertTrue(all(identity.assess(self.sources, True, self.packages, self.protocol, self.regressions).values()))

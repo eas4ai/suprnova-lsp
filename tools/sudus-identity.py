@@ -63,6 +63,12 @@ def source_observations(root=ROOT):
                      for member in workspace_manifest["members"]}
     selected_packages = re.findall(r'(?<!\S)-p\s+([\w-]+)', entrypoints)
     valid_packages = bool(selected_packages) and all(name in package_names for name in selected_packages)
+    benchmark = (root / "crates/engine/project/benches/shared/mod.rs").read_text()
+    codspeed = (root / ".github/workflows/codspeed.yml").read_text()
+    benchmark_variables = re.findall(r'^\s+(SUPRNOVA_LSP_[A-Z_]+):', codspeed, re.MULTILINE)
+    valid_benchmark_env = bool(benchmark_variables) and all(
+        f'std::env::var("{variable}")' in benchmark for variable in benchmark_variables)
+    valid_benchmark_env = valid_benchmark_env and "RUST_GLANCER_BENCH_TARGETS" not in benchmark
     old_entrypoint = re.search(r'(?<![/\w])rust-glancer(?=[\s"\'`.-]|$)',
                               entrypoints.replace("rust-glancer-zed", ""))
     licenses = all(hashlib.sha256((root / name).read_bytes()).hexdigest() == digest
@@ -83,12 +89,13 @@ def source_observations(root=ROOT):
             and '"SUPRNOVA_LSP_ENGINE_ID"' in log and '"suprnova-lsp-log/v1"' in log
             and 'CACHE_DIR_NAME: &str = "suprnova_lsp"' in cache
             and '"target/suprnova-lsp/rustdoc"' in worker and '"rust-glancer"' not in client
-            and not re.search(r'"(?:__)?RUST_GLANCER_[A-Z_]+"', client + server + log),
+            and not re.search(r'"(?:__)?RUST_GLANCER_[A-Z_]+"', client + server + log)
+            and valid_benchmark_env,
         "IDN-004": package.get("repository", {}).get("url") == "https://github.com/eas4ai/suprnova-lsp"
             and workspace.get("repository") == "https://github.com/eas4ai/suprnova-lsp"
             and workspace.get("license") == "MIT OR Apache-2.0"
             and "Igor Aleksanov <popzxc@yandex.ru>" in workspace.get("authors", [])
-            and licenses and old_entrypoint is None and valid_packages
+            and licenses and old_entrypoint is None and valid_packages and valid_benchmark_env
             and (root / "README.md").read_text().startswith("# Suprnova LSP")
             and (root / "editors/code/README.md").read_text().startswith("# Suprnova LSP")
             and "Rust Glancer" in (root / "README.md").read_text()
