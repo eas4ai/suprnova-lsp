@@ -154,6 +154,8 @@ class Integrity(unittest.TestCase):
             client = probe.lsp.LspClient.__new__(probe.lsp.LspClient)
             future = asyncio.get_running_loop().create_future()
             client.pending = {7: future}
+            client.request_observations = None
+            client.lifecycle_observations = None
             sent = []
             async def send(message):
                 sent.append(message)

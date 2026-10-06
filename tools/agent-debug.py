@@ -3,6 +3,7 @@
 """Run bounded suprnova-lsp debugging workflows with owned artifacts and cleanup."""
 
 import asyncio
+import contextlib
 import errno
 import json
 import os
@@ -820,6 +821,22 @@ async def run_supervised(
         "metrics": metrics,
         "cleanup": cleanup,
     }
+
+
+async def observe_command(
+    spec: CommandSpec,
+    cwd: Path,
+    environment: Dict[str, str],
+    output_directory: Path,
+    timeout_ms: int,
+) -> Tuple[Dict[str, Any], str]:
+    """Retain quiet acceptance logs; return real nonzero exits but reject incomplete runs."""
+    with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+        result = await run_supervised(spec, cwd, environment, output_directory, timeout_ms)
+    invalid = result.get("timedOut") or result.get("spawnError") or result.get("signal") or type(result.get("code")) is not int
+    if invalid or result.get("cleanup", {}).get("verifiedEmpty") is not True:
+        raise ValueError(f"observation or owned-process cleanup incomplete: {output_directory}")
+    return result, (output_directory / "stdout.log").read_text()
 
 
 def exit_code_for(result: Dict[str, Any]) -> int:

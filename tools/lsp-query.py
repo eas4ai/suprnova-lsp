@@ -30,10 +30,17 @@ MAX_PROTOCOL_MESSAGE_BYTES = 64 * 1024 * 1024
 SHUTDOWN_TIMEOUT_MS = 5_000
 PROCESS_EXIT_GRACE_MS = 2_000
 MAX_QUEUED_NOTIFICATIONS = 64
+MAX_OBSERVED_REQUESTS = 2048
+MAX_OBSERVED_EVENTS = 2048
 
 ACTIVE_WORKSPACE_CHANGED = "suprnova-lsp/activeWorkspaceChanged"
 SERVER_STATUS = "experimental/serverStatus"
 TRACKED_NOTIFICATIONS = {ACTIVE_WORKSPACE_CHANGED, SERVER_STATUS}
+LIFECYCLE_NOTIFICATIONS = TRACKED_NOTIFICATIONS | {
+    "suprnova-lsp/rustdocStatus",
+    "suprnova-lsp/deferredIndexingStarted",
+    "suprnova-lsp/deferredIndexingFinished",
+}
 
 TOOL_ROOT = Path(__file__).resolve().parent.parent
 
@@ -491,6 +498,9 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
     readiness_barrier = plan.get("readinessBarrier", "ready")
     if readiness_barrier not in {"ready", "none"}:
         fail("readinessBarrier must be ready or none")
+    document_barrier = plan.get("documentReadinessBarrier", False)
+    if type(document_barrier) is not bool:
+        fail("documentReadinessBarrier must be a boolean")
     deferred_barrier = plan.get("deferredBarrier", "none")
     if deferred_barrier not in {"none", "before-queries", "after-queries"}:
         fail("deferredBarrier must be none, before-queries, or after-queries")
@@ -530,6 +540,7 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
         "format": output_format,
         "initializationOptions": initialization_options,
         "readinessBarrier": readiness_barrier,
+        "documentReadinessBarrier": document_barrier,
         "deferredBarrier": deferred_barrier,
         "idleMemory": idle_memory,
     }
@@ -543,6 +554,93 @@ def release_binary(options: Options) -> Path:
     if not binary.is_file():
         fail("--binary is not a file: {}".format(binary))
     return binary
+
+
+class TransportObservations:
+    """Bounded pipe evidence; replies remain owned by their ordinary request futures."""
+
+    def __init__(self) -> None:
+        self.requests = {}
+        self.events = []
+        self.stages = []
+        self.log_buffer = bytearray()
+        self.stage_changed = asyncio.Event()
+
+    def begin(self, request_id: int, method: str) -> None:
+        if len(self.requests) >= MAX_OBSERVED_REQUESTS:
+            raise LspQueryError("request observation limit exceeded")
+        self.requests[request_id] = {"id": request_id, "method": method, "status": "pending"}
+
+    def written(self, message: Dict[str, Any]) -> None:
+        if "method" in message and message.get("id") in self.requests:
+            self.requests[message["id"]]["writtenNs"] = time.monotonic_ns()
+        elif message.get("method") == "$/cancelRequest":
+            row = self.requests.get(message.get("params", {}).get("id"))
+            if row is not None:
+                row["cancelWrittenNs"] = time.monotonic_ns()
+
+    def response(self, message: Dict[str, Any], received_ns: int) -> None:
+        row = self.requests[message["id"]]
+        row["receivedNs"] = received_ns
+        row["durationNs"] = received_ns - row["writtenNs"]
+        row["status"] = "rpc-error" if "error" in message else "success"
+        if "error" in message:
+            row["errorCode"] = message["error"].get("code")
+
+    def notification(self, message: Dict[str, Any], received_ns: int) -> None:
+        if message["method"] not in LIFECYCLE_NOTIFICATIONS:
+            return
+        if len(self.events) >= MAX_OBSERVED_EVENTS:
+            raise LspQueryError("lifecycle observation limit exceeded")
+        # Waiters consume notifications and idle snapshots supersede older ones.
+        # Keep the event evidence first, retaining only bounded scalar metadata.
+        params = {}
+        for key, value in (message.get("params") or {}).items():
+            if key not in {"state", "workspaceRoot", "root", "generation", "health", "quiescent", "outcome", "message"}:
+                continue
+            if isinstance(value, str) and len(value) > 4096:
+                raise LspQueryError("lifecycle observation field limit exceeded")
+            if value is None or isinstance(value, (str, bool, int)):
+                params[key] = value
+        self.events.append({"method": message["method"], "receivedNs": received_ns, "params": params})
+
+    def failed(self, request_id: int, error: BaseException) -> None:
+        row = self.requests[request_id]
+        if row["status"] != "pending":
+            return
+        if isinstance(error, asyncio.TimeoutError):
+            row["status"] = "timeout"
+        elif isinstance(error, asyncio.CancelledError):
+            row["status"] = "caller-cancelled"
+        else:
+            row["status"] = "transport-error"
+
+    def finished(self, request_id: int) -> None:
+        self.requests[request_id]["finishedNs"] = time.monotonic_ns()
+
+    def stderr(self, chunk: bytes) -> None:
+        self.log_buffer.extend(chunk)
+        if len(self.log_buffer) > MAX_FILE_BYTES:
+            raise LspQueryError("observed server log line exceeds its bound")
+        lines = self.log_buffer.split(b"\n")
+        self.log_buffer = bytearray(lines.pop())
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if not isinstance(event, dict) or event.get("schema") != "suprnova-lsp-log/v1":
+                continue
+            message = event.get("message", "")
+            if message not in {"editor document analysis route published", "analysis query started", "analysis query completed"}:
+                continue
+            if len(self.stages) >= MAX_OBSERVED_EVENTS:
+                raise LspQueryError("stage observation limit exceeded")
+            fields = event.get("fields") or {}
+            if not isinstance(fields, dict) or len(fields) > 32 or len(json.dumps(fields)) > 4096:
+                raise LspQueryError("observed stage fields exceed their bound")
+            self.stages.append({"message": message, "fields": fields, "observedNs": time.monotonic_ns()})
+            self.stage_changed.set()
 
 
 class LspClient:
@@ -562,6 +660,9 @@ class LspClient:
         self.stderr_tail = bytearray()
         self.exited = False
         self.protocol_error: Optional[Exception] = None
+        self.observation = None
+        self.request_observations = None
+        self.lifecycle_observations = None
         output_directory = os.environ.get("SUPRNOVA_LSP_AGENT_DEBUG_OUTPUT_DIR")
         self.server_log_file = (
             Path(output_directory) / "lsp-server.stderr.log" if output_directory else None
@@ -571,6 +672,14 @@ class LspClient:
         self.stdout_task = asyncio.create_task(self._read_stdout())
         self.stderr_task = asyncio.create_task(self._read_stderr())
         self.exit_task = asyncio.create_task(self._watch_exit())
+
+    def enable_observations(self) -> None:
+        """Retain bounded metadata for timing experiments, without response payloads."""
+        if self.request_observations is not None:
+            raise LspQueryError("transport observations are already enabled")
+        self.observation = TransportObservations()
+        self.request_observations = self.observation.requests
+        self.lifecycle_observations = self.observation.events
 
     @classmethod
     async def start(
@@ -660,6 +769,8 @@ class LspClient:
             if not future.done():
                 future.set_exception(error)
         self.notification_waiters.clear()
+        if self.observation is not None:
+            self.observation.stage_changed.set()
 
     async def _watch_exit(self) -> int:
         return_code = await self.process.wait()
@@ -689,6 +800,9 @@ class LspClient:
                 if content_length < 0 or content_length > MAX_PROTOCOL_MESSAGE_BYTES:
                     raise RuntimeError("invalid LSP Content-Length {}".format(content_length))
                 body = await self.process.stdout.readexactly(content_length)
+                # Capture the complete pipe read, before JSON parsing or waking a waiter.
+                if self.request_observations is not None:
+                    self.received_ns = time.monotonic_ns()
                 message = json.loads(body.decode("utf-8"))
                 if not isinstance(message, dict):
                     raise RuntimeError("LSP message must be a JSON object")
@@ -712,6 +826,8 @@ class LspClient:
                 if not chunk:
                     return
                 self.stderr_tail.extend(chunk)
+                if self.request_observations is not None:
+                    self.observation.stderr(chunk)
                 if len(self.stderr_tail) > STDERR_TAIL_BYTES:
                     del self.stderr_tail[: len(self.stderr_tail) - STDERR_TAIL_BYTES]
                 if log_file is not None:
@@ -732,6 +848,9 @@ class LspClient:
                 if self.show_logs:
                     sys.stderr.buffer.write(chunk)
                     sys.stderr.buffer.flush()
+        except Exception as error:
+            self.protocol_error = error
+            self._fail_waiting(error)
         finally:
             if log_file is not None:
                 log_file.close()
@@ -740,12 +859,16 @@ class LspClient:
         # The two peers allocate request IDs independently. A server refresh request can
         # share an ID with our hover; only a response may complete that pending query.
         if "method" not in message and "id" in message and message["id"] in self.pending:
+            if self.request_observations is not None:
+                self.observation.response(message, self.received_ns)
             future = self.pending.pop(message["id"])
             if not future.done():
                 future.set_result(message)
             return
 
         if "id" not in message and message.get("method"):
+            if self.lifecycle_observations is not None:
+                self.observation.notification(message, self.received_ns)
             for index, waiter in enumerate(self.notification_waiters):
                 if waiter["predicate"](message):
                     self.notification_waiters.pop(index)
@@ -775,6 +898,8 @@ class LspClient:
         if self.process.stdin is None or self.process.stdin.is_closing():
             raise RuntimeError("LSP stdin is closed")
         body = json.dumps(message, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        if self.request_observations is not None:
+            self.observation.written(message)
         self.process.stdin.write(
             "Content-Length: {}\r\n\r\n".format(len(body)).encode("ascii") + body
         )
@@ -790,6 +915,8 @@ class LspClient:
             raise self.protocol_error
         request_id = self.next_id
         self.next_id += 1
+        if self.request_observations is not None:
+            self.observation.begin(request_id, method)
         future = asyncio.get_running_loop().create_future()
         self.pending[request_id] = future
         cancellation = None
@@ -816,16 +943,18 @@ class LspClient:
                     )
                 )
             return response
-        except asyncio.TimeoutError as error:
+        except (Exception, asyncio.CancelledError) as error:
+            if self.request_observations is not None:
+                self.observation.failed(request_id, error)
             self.pending.pop(request_id, None)
             future.cancel()
-            raise RuntimeError("timeout waiting for {}".format(method)) from error
-        except Exception:
-            self.pending.pop(request_id, None)
-            future.cancel()
+            if isinstance(error, asyncio.TimeoutError):
+                raise RuntimeError("timeout waiting for {}".format(method)) from error
             raise
 
         finally:
+            if self.request_observations is not None:
+                self.observation.finished(request_id)
             if cancellation is not None:
                 cancellation.cancel()
                 with suppress(asyncio.CancelledError):
@@ -833,6 +962,32 @@ class LspClient:
 
     async def notify(self, method: str, params: Any) -> None:
         await self.send({"jsonrpc": "2.0", "method": method, "params": params})
+
+    async def wait_for_document_ready(self, path: Path) -> None:
+        """Wait for route publication without issuing a query that could prepare analysis."""
+        if self.observation is None:
+            raise LspQueryError("document readiness requires transport observations")
+
+        async def wait() -> None:
+            while True:
+                self.observation.stage_changed.clear()
+                route = next((event for event in reversed(self.observation.stages)
+                              if event["message"] == "editor document analysis route published"
+                              and event["fields"].get("path") == str(path)), None)
+                if route is not None:
+                    if route["fields"].get("ready") is not True:
+                        raise LspQueryError("document analysis route is unavailable")
+                    return
+                if self.protocol_error is not None:
+                    raise self.protocol_error
+                if self.exited:
+                    raise LspQueryError("LSP exited before document route publication")
+                await self.observation.stage_changed.wait()
+
+        try:
+            await asyncio.wait_for(wait(), self.timeout_ms / 1000)
+        except asyncio.TimeoutError as error:
+            raise LspQueryError("timeout waiting for document route publication; enable rg_lsp_server=debug logging") from error
 
     async def wait_for_notification(
         self,
@@ -1096,6 +1251,7 @@ async def run(argv: Sequence[str]) -> None:
     file_path = plan["file"]
     uri = file_path.as_uri()
     client = await LspClient.start(binary, root, options.timeout_ms, options.show_logs)
+    client.enable_observations()
     results = []
     idle_memory = None
     indexing_finished = asyncio.Event()
@@ -1110,7 +1266,7 @@ async def run(argv: Sequence[str]) -> None:
                 "rootUri": root.as_uri(),
                 "workspaceFolders": [{"uri": root.as_uri(), "name": root.name}],
                 "capabilities": {
-                    "experimental": {"serverStatusNotification": True},
+                    "experimental": {"serverStatusNotification": True, "rustdocStatusNotification": True},
                     "workspace": {"workspaceEdit": {"documentChanges": True}},
                     "textDocument": {
                         "hover": {"contentFormat": ["markdown", "plaintext"]},
@@ -1158,6 +1314,8 @@ async def run(argv: Sequence[str]) -> None:
         # body indexes opt into the stronger deferred barrier instead of inventing sleeps.
         if plan["readinessBarrier"] == "ready":
             await wait_until_ready(client, options.timeout_ms)
+        if plan["documentReadinessBarrier"]:
+            await client.wait_for_document_ready(file_path)
         if plan["deferredBarrier"] == "before-queries":
             await wait_until_indexing_settled(client, options.timeout_ms)
             if memory_task is not None:
@@ -1183,6 +1341,7 @@ async def run(argv: Sequence[str]) -> None:
                             "col": position["character"] + 1,
                         },
                         "elapsedMs": round(elapsed_ms, 3),
+                        "transport": client.request_observations[response["id"]],
                         "text": hover_text(response.get("result")),
                         "raw": response.get("result"),
                     }
@@ -1322,7 +1481,17 @@ async def run(argv: Sequence[str]) -> None:
                 with contextlib.suppress(asyncio.CancelledError):
                     await memory_task
         finally:
-            await client.close()
+            try:
+                await client.close()
+            finally:
+                if client.server_log_file is not None:
+                    # Failed queries still belong to the experiment. Keep their ledger even
+                    # when the CLI cannot produce its ordinary successful results document.
+                    (client.server_log_file.parent / "lsp-transport.json").write_text(json.dumps({
+                        "transport": list(client.request_observations.values()),
+                        "lifecycle": client.lifecycle_observations,
+                        "stages": client.observation.stages,
+                    }, indent=2) + "\n")
 
     output = {
         "file": os.path.relpath(str(file_path), str(root)),
@@ -1333,6 +1502,9 @@ async def run(argv: Sequence[str]) -> None:
         },
         "results": results,
         "idleMemory": idle_memory,
+        "transport": list(client.request_observations.values()),
+        "lifecycle": client.lifecycle_observations,
+        "stages": client.observation.stages,
     }
 
     if options.json_output or plan["format"] == "json":

@@ -136,9 +136,16 @@ impl SessionRoute {
             tracing::debug!("ignored duplicate editor session route publication");
             return;
         }
+        let ready = matches!(&resolved, SessionRouteState::Ready(_));
         *state = resolved;
         drop(state);
         self.publication.finish();
+        tracing::debug!(
+            path = %self.publication.path.display(),
+            session = ?self.publication.session,
+            ready,
+            "editor document analysis route published"
+        );
     }
 
     pub(crate) fn engine_client(&self) -> Result<EngineClient, Arc<str>> {
