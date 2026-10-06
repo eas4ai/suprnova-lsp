@@ -106,7 +106,7 @@ def package_observations(vsix, archive, binary, root=ROOT):
     with zipfile.ZipFile(vsix) as contents:
         manifest = json.loads(contents.read("extension/package.json"))
         bundled = hashlib.sha256(contents.read(f"extension/server/{executable}")).hexdigest()
-        license_text = contents.read("extension/LICENSE").decode()
+        license_text = contents.read("extension/LICENSE.txt").decode()
         assets = contents.namelist()
         xml = ET.fromstring(contents.read("extension.vsixmanifest"))
         install_ids = [node.attrib for node in xml.iter() if node.tag.rsplit("}", 1)[-1] == "Identity"]
