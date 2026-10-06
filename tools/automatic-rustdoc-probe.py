@@ -454,7 +454,9 @@ class AutomaticProbe:
         await self.fs_change(extra, source)
         since = time.monotonic_ns()
         await self.fs_change(manifest, original + '\n[[bin]]\nname = "extra_model"\npath = "src/extra.rs"\n')
-        await self.status("current", since, timeout=180)
+        # Target changes rebuild the whole workspace. Use the cold-start readiness
+        # budget for both addition and removal, rather than the saved-edit budget.
+        await self.status("current", since, timeout=self.plan.get("workerWaitSeconds", 900))
         await self.open(extra)
         assert "Builder<ExtraPost>" in await self.hover(extra, "automatic_binary")
         starts = [e for e in self.events() if e["event"] == "started" and e["monotonicNs"] >= since]
@@ -463,7 +465,7 @@ class AutomaticProbe:
         await self.fs_change(manifest, original)
         extra.unlink()
         await self.client.notify("textDocument/didClose", {"textDocument": {"uri": extra.as_uri()}})
-        await self.status("current", since, timeout=180)
+        await self.status("current", since, timeout=self.plan.get("workerWaitSeconds", 900))
         starts = [e for e in self.events() if e["event"] == "started" and e["monotonicNs"] >= since]
         assert starts and not any("extra_model" in e["args"] for e in starts)
         assert "Builder<Post>" in await self.hover(self.root / "src/lib.rs", "automatic_post")
