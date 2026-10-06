@@ -101,8 +101,8 @@ just agent-debug --isolated-cache compare-dirty \
   compare-lsp rust_analyzer_dirty --format json
 ```
 
-On Windows, use `RUST_GLANCER_COMPARE_LSP_RUST_ANALYZER` with
-`rust-glancer compare-lsp`; the managed agent-debug runner is for macOS/Linux.
+On Windows, use `SUPRNOVA_LSP_COMPARE_LSP_RUST_ANALYZER` with
+`suprnova-lsp compare-lsp`; the managed agent-debug runner is for macOS/Linux.
 Linux and Windows CI install rust-analyzer and rust-src through rustup.
 
 CI compares results with the latest available main-branch baseline. A fixture
