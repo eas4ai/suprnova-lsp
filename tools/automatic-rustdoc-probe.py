@@ -27,7 +27,18 @@ runner = helpers.module("automatic_agent_debug", ROOT / "tools/agent-debug.py")
 class ObservedClient(lsp.LspClient):
     def __init__(self, *args):
         self.observed = []
+        self.query_workload = []
         super().__init__(*args)
+
+    async def send(self, message):
+        if message.get("method") in {"textDocument/hover", "textDocument/completion", "textDocument/inlayHint"}:
+            if len(self.query_workload) >= 1024:
+                raise RuntimeError("query workload observation exceeded its bound")
+            # Request ids differ between sessions. Keep the actual method and coordinates
+            # so idle comparisons cannot substitute a planned workload for executed queries.
+            self.query_workload.append(json.loads(json.dumps({
+                "method": message["method"], "params": message["params"]})))
+        await super().send(message)
 
     async def _on_message(self, message):
         if "id" not in message and message.get("method") == STATUS:
@@ -573,18 +584,22 @@ class AutomaticProbe:
         assert "u64" in await self.hover(self.root / "src/lib.rs", "automatic_source")
         return {"failure": failed, "sourceAvailable": True}
 
-    async def devlist(self):
-        current = await self.status("current", timeout=self.plan.get("workerWaitSeconds", 900))
+    async def devlist(self, automatic=True):
+        current = (await self.status("current", timeout=self.plan.get("workerWaitSeconds", 900))
+                   if automatic else None)
         await lsp.wait_until_indexing_settled(self.client, 300000)
         self.indexing_finished.set()
         self.evidence["indexingMemory"] = await self.memory_task
         document = self.plan["documents"][0]
         path = self.root / document["file"]
+        # Both modes execute the same requests before idle sampling. Only the expectations
+        # for generated declarations differ, so a new query cannot silently skew one side.
         for marker in ["edt_query", "edt_without", "edt_filter"]:
-            assert "Builder<User>" in await self.hover(path, marker), marker
+            assert ("Builder<User>" in await self.hover(path, marker)) == automatic, marker
         assert "Result<bool, FrameworkError>" in await self.hover(path, "edt_source")
         methods = await self.complete(path, "let edt_query = User::")
-        assert all(methods.count(name) == 1 for name in ["query", "without_global_scopes", "filter"]), methods
+        assert all(methods.count(name) == (1 if automatic else 0)
+                   for name in ["query", "without_global_scopes", "filter"]), methods
         other = await self.complete(path, "let edt_other = User::")
         assert all(name not in other for name in ["query", "without_global_scopes", "filter"]), other
         source_methods = await self.complete(path, "self.verify_password", delta=5)
@@ -596,23 +611,12 @@ class AutomaticProbe:
         for marker in ["edt_query", "edt_without", "edt_filter"]:
             line = self.texts[path][:self.texts[path].index("let " + marker)].count("\n")
             matching = [h for h in hints.get("result", []) if h["position"]["line"] == line]
-            assert any("Builder<User>" in json.dumps(h["label"]) for h in matching), marker
+            generated = any("Builder<User>" in json.dumps(h["label"]) for h in matching)
+            assert generated == automatic, marker
         memory = await self.client.idle_memory()
-        return {"status": current, "hover": True, "inlay": True, "completion": True,
-                "source": True, "isolation": True, "idleMemory": memory, "events": self.events()}
-
-    async def source_devlist(self):
-        await lsp.wait_until_indexing_settled(self.client, 300000)
-        self.indexing_finished.set()
-        self.evidence["indexingMemory"] = await self.memory_task
-        document = self.plan["documents"][0]
-        path = self.root / document["file"]
-        for marker in ["edt_query", "edt_without", "edt_filter"]:
-            assert "Builder<User>" not in await self.hover(path, marker)
-        methods = await self.complete(path, "let edt_query = User::")
-        assert all(name not in methods for name in ["query", "without_global_scopes", "filter"])
-        assert "Result<bool, FrameworkError>" in await self.hover(path, "edt_source")
-        memory = await self.client.idle_memory()
+        if automatic:
+            return {"status": current, "hover": True, "inlay": True, "completion": True,
+                    "source": True, "isolation": True, "idleMemory": memory, "events": self.events()}
         assert not self.events(), "source-only control started a producer"
         return {"sourceOnly": True, "source": True, "idleMemory": memory}
 
@@ -628,7 +632,7 @@ class AutomaticProbe:
             if self.plan["scenario"] == "devlist":
                 await self.case("genuine-user", self.devlist)
             elif self.plan["scenario"] == "devlist-source":
-                await self.case("source-user", self.source_devlist)
+                await self.case("source-user", lambda: self.devlist(automatic=False))
             elif self.plan["scenario"] == "disabled":
                 await self.case("no-worker", self.no_worker)
             elif self.plan["scenario"] == "prepared":
@@ -671,6 +675,7 @@ class AutomaticProbe:
                     await asyncio.wait_for(self.client.close(), 15)
                 finally:
                     self.evidence["notifications"] = self.client.observed
+                    self.evidence["queryWorkload"] = self.client.query_workload
                     self.evidence["events"] = self.events()
                     # Failed cleanup remains a failed observation. The bounded runner also
                     # cleans the known compiler groups so a deliberately broken worker test
