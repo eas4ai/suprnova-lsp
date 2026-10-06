@@ -35,6 +35,11 @@ class LedgerIntegrity(unittest.TestCase):
                            "params": {"root": str(observation.APP), "state": "ready"}}],
             "stages": [{"message": "editor document analysis route published", "observedNs": 95,
                         "fields": {"path": str(observation.APP / "src/models/user.rs"), "ready": True}}]}
+        for _ in range(3):
+            self.report["stages"].extend([
+                {"message": "analysis query completed", "fields": {"query": "hover", "status": "ok", "queued_ms": "0", "elapsed_ms": "0"}},
+                {"message": "document analysis prepared", "fields": {"query": "hover", "source": "saved_exact", "elapsed_us": "0"}},
+            ])
 
     def test_small_diagnostic_never_claims_acceptance(self):
         result = observation.Diagnostic.source_observation(self.report)
@@ -74,8 +79,14 @@ class LedgerIntegrity(unittest.TestCase):
                        [dict(self.report["lifecycle"][0], params={"root": "/other", "state": "ready"})]]:
             with self.assertRaisesRegex(ValueError, "readiness"):
                 observation.Diagnostic.source_observation(dict(self.report, lifecycle=events))
+        stages = [event for event in self.report["stages"] if event["message"] != "editor document analysis route published"]
         with self.assertRaisesRegex(ValueError, "route"):
-            observation.Diagnostic.source_observation(dict(self.report, stages=[]))
+            observation.Diagnostic.source_observation(dict(self.report, stages=stages))
+
+    def test_missing_queue_evidence_cannot_pass_diagnostic(self):
+        del self.report["stages"][1]["fields"]["queued_ms"]
+        with self.assertRaisesRegex(ValueError, "stage durations"):
+            observation.Diagnostic.source_observation(self.report)
 
 
 class PipeTiming(unittest.IsolatedAsyncioTestCase):
@@ -253,6 +264,28 @@ class PipeTiming(unittest.IsolatedAsyncioTestCase):
 
 
 class FailedCliEvidence(unittest.IsolatedAsyncioTestCase):
+    async def test_disappearing_proc_task_is_tolerated_only_for_peak_sampling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            process = root / "1"
+            process.mkdir()
+            (process / "cmdline").write_bytes(b"/repo/suprnova-lsp\0lsp\0")
+            (process / "statm").write_text("10 2 0")
+            client = lsp.LspClient.__new__(lsp.LspClient)
+            client.process = SimpleNamespace(pid=1)
+            original = Path.iterdir
+
+            def disappeared(path):
+                if path == process / "task":
+                    raise ProcessLookupError("process exited during task enumeration")
+                return original(path)
+
+            with patch.object(lsp, "Path", side_effect=lambda value: root if value == "/proc" else Path(value)), \
+                 patch.object(Path, "iterdir", side_effect=disappeared, autospec=True):
+                self.assertEqual(client.owned_rss(False), {"1": 2 * lsp.os.sysconf("SC_PAGE_SIZE")})
+                with self.assertRaises(ProcessLookupError):
+                    client.owned_rss(True)
+
     async def test_supervisor_retains_nonzero_control_exit_but_rejects_incomplete_cleanup(self):
         runner = observation.helpers.module("responsiveness_test_runner", ROOT / "tools/agent-debug.py")
         with tempfile.TemporaryDirectory() as directory:

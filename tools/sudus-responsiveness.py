@@ -101,10 +101,46 @@ class Diagnostic:
                 raise ValueError("document route readiness was not observed before hover")
             durations.append(row["durationNs"])
         return {"firstNs": durations[0], "repeatedNs": durations[1:],
+                "stages": cls.stage_observations(report, sent),
                 "diagnosticP95Ns": cls.percentile(durations, 95), "maxNs": max(durations),
                 "acceptance": "unverified: diagnostic counts are below the RSP minimum"}
 
-    async def run(self, modes, no_build):
+    @staticmethod
+    def stage_observations(report, sent):
+        """Join native stage durations to this strictly sequential diagnostic workload."""
+        completed = [event["fields"] for event in report.get("stages", [])
+                     if event.get("message") == "analysis query completed" and event.get("fields", {}).get("query") == "hover"]
+        prepared = [event["fields"] for event in report.get("stages", [])
+                    if event.get("message") == "document analysis prepared" and event.get("fields", {}).get("query") == "hover"]
+        if len(completed) != len(sent) or len(prepared) != len(sent):
+            raise ValueError("sequential hover stage attribution is missing or duplicated")
+        stages = []
+        for row, execution, preparation in zip(sent, completed, prepared):
+            if execution.get("status") != "ok" or preparation.get("source") != "saved_exact":
+                raise ValueError("stage attribution does not describe successful saved-file hover")
+            fields = [execution.get("queued_ms"), execution.get("elapsed_ms"), preparation.get("elapsed_us")]
+            if any(type(value) not in {str, int} or not str(value).isdigit() for value in fields):
+                raise ValueError("stage durations are absent or malformed")
+            stages.append({"id": row["id"], "transportNs": row["durationNs"], "queuedNs": int(fields[0]) * 1_000_000,
+                           "executionNs": int(fields[1]) * 1_000_000, "preparationNs": int(fields[2]) * 1000,
+                           "correlation": "one outstanding hover; all three lifecycle/preparation observations in request order"})
+        return stages
+
+    @staticmethod
+    def configure_limits(nofile_soft):
+        """Apply only explicitly requested Linux process limits and record both values."""
+        if not sys.platform.startswith("linux"):
+            raise ValueError("this diagnostic requires Linux for its owned-process RSS observations")
+        import resource
+        limits = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if nofile_soft is not None:
+            if not 1024 <= nofile_soft <= limits[1]:
+                raise ValueError("requested open-file limit is outside the inherited hard limit")
+            resource.setrlimit(resource.RLIMIT_NOFILE, (nofile_soft, limits[1]))
+        return {"inherited": list(limits), "effective": list(resource.getrlimit(resource.RLIMIT_NOFILE))}
+
+    async def run(self, modes, no_build, nofile_soft=None):
+        limits = self.configure_limits(nofile_soft)
         runner = helpers.module("responsiveness_runner", ROOT / "tools/agent-debug.py")
         runner.install_signal_handlers()
         directory = runner.create_run_directory("rsp-diagnostic")
@@ -127,7 +163,8 @@ class Diagnostic:
                 raise ValueError(f"{label}: observation failed; inspect {output}")
             return text
 
-        identity = {"purpose": "diagnostic, not RSP acceptance", "application": str(APP),
+        identity = {"purpose": "source/stage diagnostic, not RSP acceptance or idle-memory proof", "application": str(APP),
+                    "openFileLimits": limits,
                     "sources": original, "frameworkRevision": REVISION, "buildProfile": "release",
                     "producerToolchain": "nightly-2026-08-19",
                     "cacheState": "existing LSP/compiler caches; fresh owned export artifact root",
@@ -158,7 +195,7 @@ class Diagnostic:
             identity["binarySha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
             for mode in modes:
                 plan = {"file": "src/models/user.rs", "format": "json", "readinessBarrier": "ready", "documentReadinessBarrier": True,
-                    "deferredBarrier": "after-queries", "idleMemory": True,
+                    "deferredBarrier": "after-queries", "idleMemory": False,
                     "queries": [{"kind": "hover", "label": f"source-{n}", "marker": "pub fn verify_password", "delta": 7} for n in range(3)],
                     "initializationOptions": {"cfg": {"test": False}, "cache": {"packageResidency": "workspace"},
                         "indexing": {"performancePreference": mode}, "rustdoc": {"automatic": {
@@ -198,9 +235,10 @@ if __name__ == "__main__":
                         help="small source workload; emits no passing Sudus requirement verdicts")
     parser.add_argument("--mode", choices=MODES, action="append")
     parser.add_argument("--no-build", action="store_true", help="intentionally use an existing managed optimized binary")
+    parser.add_argument("--nofile-soft", type=int, help="explicit open-file limit for this diagnostic process and its children only")
     options = parser.parse_args()
     try:
-        asyncio.run(Diagnostic().run(options.mode or MODES, options.no_build))
+        asyncio.run(Diagnostic().run(options.mode or MODES, options.no_build, options.nofile_soft))
     except (ValueError, RuntimeError, OSError, KeyError) as error:
         print(f"responsiveness observation incomplete: {error}", file=sys.stderr)
         sys.exit(2)
