@@ -25,6 +25,8 @@ impl SavedWorkspaceInputs {
         walker
             .hidden(false)
             .parents(false)
+            // Cargo reads these inputs even when editor search rules hide them.
+            .ignore(false)
             .git_ignore(false)
             .git_global(false)
             .git_exclude(false)

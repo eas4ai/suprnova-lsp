@@ -1,6 +1,17 @@
 use super::SavedWorkspaceInputs;
 
 #[test]
+fn search_ignore_rules_cannot_hide_saved_compiler_inputs() {
+    let fixture = test_fixture::fixture_crate("//- /src/lib.rs\npub struct Post;\n");
+    let root = fixture.path("");
+    let original = SavedWorkspaceInputs::read(&root, &[]).unwrap();
+    std::fs::write(root.join(".ignore"), "src/lib.rs\n").unwrap();
+    assert_eq!(SavedWorkspaceInputs::read(&root, &[]).unwrap(), original);
+    std::fs::write(root.join("src/lib.rs"), "pub struct Changed;\n").unwrap();
+    assert_ne!(SavedWorkspaceInputs::read(&root, &[]).unwrap(), original);
+}
+
+#[test]
 fn fingerprints_saved_contents_additions_and_removals_without_artifact_noise() {
     let fixture = test_fixture::fixture_crate("//- /src/lib.rs\npub struct Post;\n");
     let root = fixture.path("");
