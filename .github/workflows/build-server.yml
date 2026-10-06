@@ -33,11 +33,11 @@ jobs:
         shell: bash
         run: |
           rustc -vV | sed -n 's/^host: /target=/p' >> "$GITHUB_OUTPUT"
-      - name: Build rust-glancer
+      - name: Build suprnova-lsp
         env:
           RUST_TARGET: ${{ steps.host.outputs.target }}
         shell: bash
-        run: cargo build --release --locked -p rust-glancer --target "$RUST_TARGET"
+        run: cargo build --release --locked -p suprnova-lsp --target "$RUST_TARGET"
       # Artifact downloads do not retain executable permissions. A tar archive
       # keeps them intact for the Linux and macOS consumers.
       - name: Archive server
@@ -45,15 +45,15 @@ jobs:
           RUST_TARGET: ${{ steps.host.outputs.target }}
         shell: bash
         run: |
-          server=rust-glancer
+          server=suprnova-lsp
           if [ "$RUNNER_OS" = Windows ]; then
-            server=rust-glancer.exe
+            server=suprnova-lsp.exe
           fi
-          tar -cf rust-glancer.tar -C "target/$RUST_TARGET/release" "$server"
+          tar -cf suprnova-lsp.tar -C "target/$RUST_TARGET/release" "$server"
       - name: Upload server
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: rust-glancer-${{ inputs.os }}
-          path: rust-glancer.tar
+          name: suprnova-lsp-${{ inputs.os }}
+          path: suprnova-lsp.tar
           if-no-files-found: error
           retention-days: 1

@@ -168,7 +168,7 @@ impl DiagnosticsHandle {
         let mut hasher = DefaultHasher::new();
         workspace_root.hash(&mut hasher);
         format!(
-            "rust-glancer/diagnostics/{:x}/{generation}",
+            "suprnova-lsp/diagnostics/{:x}/{generation}",
             hasher.finish()
         )
     }

@@ -1,16 +1,25 @@
-# Rust Glancer
+# Suprnova LSP
 
-An experimental LSP implementation that is optimized for low memory usage and
-~instant editor restarts.
+An experimental Rust language server for Suprnova applications, optimized for
+low idle memory and fast editor restarts. It imports compiler-produced rustdoc
+JSON for generated model APIs without running rust-analyzer.
 
 This project aims to be 90% complete, being complete enough for day-to-day work
 without trying to be rust-analyzer 2.0.
 
-See [the project docs](https://rust-glancer.github.io/docs) for more details.
+This fork lives at [eas4ai/suprnova-lsp](https://github.com/eas4ai/suprnova-lsp).
 
 ## Installation
 
-Covered in [docs](https://rust-glancer.github.io/docs/usage/INSTALL.html).
+Build the server with `cargo build --release --locked -p suprnova-lsp`.
+For VS Code, run `npm ci` and `npm run package:vsix` in `editors/code`, then
+install the generated local VSIX. See the [extension guide](editors/code/README.md)
+for configuration and development commands.
+
+The extension ID is `eas4ai.suprnova-lsp`. Settings and commands use
+`suprnova-lsp.*`; copy desired upstream settings to that prefix manually.
+Automatic rustdoc exports use a two-second debounce. Explicit prepared exports
+use `suprnova-lsp.rustdoc.inputs`. Server logging uses `SUPRNOVA_LSP_LOG`.
 
 ## AI use disclaimer
 
@@ -26,6 +35,10 @@ So if it is slop, then it is _my_ slop, and the best way to help is to tell me w
 wrong. This way I will be able to learn something and hopefully make the project better.
 
 ## Acknowledgements
+
+[Rust Glancer](https://github.com/rust-glancer/rust-glancer), created by Igor
+Aleksanov, provides this fork's language-server foundation. Its original author
+credits and dual license are preserved.
 
 [rust-analyzer](https://github.com/rust-lang/rust-analyzer) is an obvious inspiration, motivation, source of learning material and the place where I've hijacked a ton of ideas. Rust is lucky to have such a great LSP, and everyone working on it is awesome.
 

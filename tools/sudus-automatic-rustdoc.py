@@ -27,7 +27,7 @@ EXPECTED = {"initial": LIFECYCLE, "batched": LIFECYCLE,
               "user-initial": {"genuine-user"},
             "user-batched": {"genuine-user"}, "source-initial": {"source-user"},
             "source-batched": {"source-user"}}
-EDITOR_CASE = "Rust Glancer extension AUT-001 sends automatic worker policy through the editor client"
+EDITOR_CASE = "Suprnova LSP extension AUT-001 sends automatic worker policy through the editor client"
 
 
 spec = importlib.util.spec_from_file_location("automatic_editor_mechanism", ROOT / "tools/sudus-editor-import.py")
@@ -84,7 +84,7 @@ def peak(metrics):
 
 def settings_ok():
     package = json.loads((ROOT / "editors/code/package.json").read_text())
-    setting = package["contributes"]["configuration"]["properties"].get("rust-glancer.rustdoc.automatic", {})
+    setting = package["contributes"]["configuration"]["properties"].get("suprnova-lsp.rustdoc.automatic", {})
     defaults = setting.get("default", {})
     description = setting.get("markdownDescription", setting.get("description", "")).lower()
     return (isinstance(defaults, dict) and defaults.get("enabled") is True
@@ -305,10 +305,10 @@ async def main():
         editor_control.write_text(json.dumps({"mode": "real", "artifactRoot": str(editor_work / "artifacts")}))
         editor_env = dict(environment, PATH=str(proxy_tools) + os.pathsep + environment["PATH"],
             AUTOMATIC_RUSTDOC_CONTROL=str(editor_control), AUTOMATIC_RUSTDOC_EVENTS=str(editor_work / "events.jsonl"),
-            AUTOMATIC_RUSTDOC_REAL_CARGO=real_cargo, RUST_GLANCER_TEST_SERVER=str(binary),
-            RUST_GLANCER_EXTENSION_TEST_GREP="AUT-001 sends", RUST_GLANCER_EXTENSION_TEST_REPORT=str(editor_report),
-            RUST_GLANCER_AUTOMATIC_RUSTDOC_FIXTURE=str(initial),
-            RUST_GLANCER_AUTOMATIC_RUSTDOC_ARTIFACTS=str(editor_work / "artifacts"))
+            AUTOMATIC_RUSTDOC_REAL_CARGO=real_cargo, SUPRNOVA_LSP_TEST_SERVER=str(binary),
+            SUPRNOVA_LSP_EXTENSION_TEST_GREP="AUT-001 sends", SUPRNOVA_LSP_EXTENSION_TEST_REPORT=str(editor_report),
+            SUPRNOVA_LSP_AUTOMATIC_RUSTDOC_FIXTURE=str(initial),
+            SUPRNOVA_LSP_AUTOMATIC_RUSTDOC_ARTIFACTS=str(editor_work / "artifacts"))
         code, _ = await run("editor", "xvfb-run", ["-a", "npm", "run", "test:e2e:prebuilt"],
                             env=editor_env, cwd=ROOT / "editors/code", timeout=20 * 60_000)
         previous = editor.EDITOR_CASE

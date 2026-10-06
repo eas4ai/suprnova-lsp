@@ -17,20 +17,20 @@ import {
   waitForReadyWorkspace,
 } from "./extension-harness";
 
-suite("Rust Glancer extension", () => {
+suite("Suprnova LSP extension", () => {
   let projects: vscode.Uri;
 
   suiteSetup(async () => {
-    const extension = vscode.extensions.getExtension("rust-glancer.rust-glancer");
-    assert.ok(extension, "VS Code should load Rust Glancer");
+    const extension = vscode.extensions.getExtension("suprnova-lsp.suprnova-lsp");
+    assert.ok(extension, "VS Code should load Suprnova LSP");
     projects = vscode.Uri.file(path.resolve(extension.extensionPath, "../../test_targets"));
-    await withTimeout(extension.activate(), "activate Rust Glancer", 30_000);
+    await withTimeout(extension.activate(), "activate Suprnova LSP", 30_000);
   });
 
   teardown(async function () {
     if (this.currentTest?.state === "failed") {
       const evidence = await Promise.allSettled([clientState(), serverOutput()]);
-      const reportPath = process.env.RUST_GLANCER_EXTENSION_TEST_REPORT;
+      const reportPath = process.env.SUPRNOVA_LSP_EXTENSION_TEST_REPORT;
       if (reportPath !== undefined) {
         // VS Code can omit large console objects. Keep the full failure evidence
         // beside the managed test report so compiler diagnostics survive.
@@ -108,7 +108,7 @@ suite("Rust Glancer extension", () => {
 
     await withTimeout(
       vscode.commands.executeCommand(EXTENSION_COMMANDS.stopServer),
-      "stop Rust Glancer",
+      "stop Suprnova LSP",
     );
     await waitFor(
       "server stopped",
@@ -120,7 +120,7 @@ suite("Rust Glancer extension", () => {
 
     await withTimeout(
       vscode.commands.executeCommand(EXTENSION_COMMANDS.startServer),
-      "start Rust Glancer again",
+      "start Suprnova LSP again",
       30_000,
     );
     await waitForReadyWorkspace("moderate_crate");
@@ -152,7 +152,7 @@ suite("Rust Glancer extension", () => {
 
   test("AUT-001 sends automatic worker policy through the editor client", async function () {
     this.timeout(1_000_000);
-    const root = process.env.RUST_GLANCER_AUTOMATIC_RUSTDOC_FIXTURE;
+    const root = process.env.SUPRNOVA_LSP_AUTOMATIC_RUSTDOC_FIXTURE;
     assert.ok(root, "the acceptance runner must supply its owned compiler fixture");
     const policy = {
       enabled: true,
@@ -160,10 +160,10 @@ suite("Rust Glancer extension", () => {
       toolchain: "nightly-2026-08-19",
       timeoutMs: 900000,
       jobs: 2,
-      artifactRoot: process.env.RUST_GLANCER_AUTOMATIC_RUSTDOC_ARTIFACTS,
+      artifactRoot: process.env.SUPRNOVA_LSP_AUTOMATIC_RUSTDOC_ARTIFACTS,
     };
     assert.ok(policy.artifactRoot, "compiler artifacts must stay in the acceptance directory");
-    const settings = vscode.workspace.getConfiguration("rust-glancer");
+    const settings = vscode.workspace.getConfiguration("suprnova-lsp");
     const previous = settings.get<unknown>("rustdoc.automatic");
     const previousInputs = settings.get<unknown>("rustdoc.inputs");
     const controlPath = process.env.AUTOMATIC_RUSTDOC_CONTROL;
@@ -200,7 +200,7 @@ suite("Rust Glancer extension", () => {
       await vscode.window.showTextDocument(document);
       const automaticState = async () => {
         const state = await clientState();
-        const reportPath = process.env.RUST_GLANCER_EXTENSION_TEST_REPORT;
+        const reportPath = process.env.SUPRNOVA_LSP_EXTENSION_TEST_REPORT;
         if (reportPath !== undefined) {
           await fs.writeFile(`${reportPath}.worker-state.json`, JSON.stringify(state, null, 2));
         }
@@ -290,7 +290,7 @@ suite("Rust Glancer extension", () => {
         itemPath: "rustdoc_macro_support::Post",
       },
     ];
-    const settings = vscode.workspace.getConfiguration("rust-glancer");
+    const settings = vscode.workspace.getConfiguration("suprnova-lsp");
     const previous = settings.get<unknown>("rustdoc.inputs");
     const modelFolder = vscode.Uri.file(root);
     let document: vscode.TextDocument | undefined;

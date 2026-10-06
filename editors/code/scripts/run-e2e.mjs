@@ -8,9 +8,9 @@ import { fileURLToPath } from "node:url";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const extensionRoot = resolve(scriptDir, "..");
 const workspaceRoot = resolve(extensionRoot, "../..");
-const executableName = process.platform === "win32" ? "rust-glancer.exe" : "rust-glancer";
+const executableName = process.platform === "win32" ? "suprnova-lsp.exe" : "suprnova-lsp";
 const server =
-  process.env.RUST_GLANCER_TEST_SERVER ?? join(workspaceRoot, "target", "release", executableName);
+  process.env.SUPRNOVA_LSP_TEST_SERVER ?? join(workspaceRoot, "target", "release", executableName);
 const testCli = join(extensionRoot, "node_modules", "@vscode", "test-cli", "out", "bin.mjs");
 
 if (!existsSync(server)) {
@@ -21,7 +21,7 @@ if (!existsSync(testCli)) {
 }
 
 let fixtureEnvironment = {};
-if (process.env.RUST_GLANCER_AUTOMATIC_RUSTDOC_FIXTURE === undefined) {
+if (process.env.SUPRNOVA_LSP_AUTOMATIC_RUSTDOC_FIXTURE === undefined) {
   const prepared = spawnSync(
     "python3",
     [join(workspaceRoot, "tools/prepare-automatic-editor-fixture.py")],
@@ -45,8 +45,8 @@ const result = spawnSync(process.execPath, [testCli, ...process.argv.slice(2)], 
   env: {
     ...process.env,
     ...fixtureEnvironment,
-    RUST_GLANCER_EXTENSION_TEST: "1",
-    __RUST_GLANCER_SERVER: server,
+    SUPRNOVA_LSP_EXTENSION_TEST: "1",
+    __SUPRNOVA_LSP_SERVER: server,
   },
   stdio: "inherit",
 });

@@ -33,7 +33,7 @@ const READY_TIMEOUT: Duration = Duration::from_secs(120);
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(120);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 const PROCESS_EXIT_TIMEOUT: Duration = Duration::from_secs(120);
-const RUST_GLANCER_READY_METHOD: &str = "rust-glancer/activeWorkspaceChanged";
+const SUPRNOVA_LSP_READY_METHOD: &str = "suprnova-lsp/activeWorkspaceChanged";
 const SERVER_STATUS_METHOD: &str = "experimental/serverStatus";
 
 /// One live LSP server with the client-side transport needed to drive it.
@@ -210,7 +210,7 @@ impl RunningServer {
                 let started_at = Instant::now();
                 self.wait_until_indexing_settled()
                     .await
-                    .context("Waiting for rust-glancer quiescence after readiness failed")?;
+                    .context("Waiting for suprnova-lsp quiescence after readiness failed")?;
                 let settle_latency = started_at.elapsed();
                 tracing::info!(
                     server = self.kind.display_name(),
@@ -615,7 +615,7 @@ impl RunningServer {
     }
 
     fn rust_glancer_readiness(notification: &ServerNotification) -> ReadinessNotification {
-        if notification.method() != RUST_GLANCER_READY_METHOD {
+        if notification.method() != SUPRNOVA_LSP_READY_METHOD {
             return ReadinessNotification::Ignore;
         }
 

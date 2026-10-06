@@ -252,7 +252,7 @@ fn rejects_malformed_override_entries() {
     assert!(
         error
             .to_string()
-            .contains("rust-glancer cargo.overrides[0].features[0]"),
+            .contains("suprnova-lsp cargo.overrides[0].features[0]"),
         "{error:?}",
     );
 }

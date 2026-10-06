@@ -9,7 +9,7 @@ use std::{env, ffi::OsString};
 use anyhow::Context as _;
 use serde_json::{Value, json};
 
-const RUST_ANALYZER_ENV: &str = "RUST_GLANCER_COMPARE_LSP_RUST_ANALYZER";
+const RUST_ANALYZER_ENV: &str = "SUPRNOVA_LSP_COMPARE_LSP_RUST_ANALYZER";
 
 /// Server implementation used for one side of the comparison.
 #[derive(Debug, Clone, Copy)]
@@ -21,7 +21,7 @@ pub(super) enum ServerKind {
 impl ServerKind {
     pub(super) fn display_name(self) -> &'static str {
         match self {
-            Self::RustGlancer => "rust-glancer",
+            Self::RustGlancer => "suprnova-lsp",
             Self::RustAnalyzer => "rust-analyzer",
         }
     }
@@ -31,7 +31,7 @@ impl ServerKind {
         match self {
             Self::RustGlancer => {
                 let executable = env::current_exe()
-                    .context("Resolving current rust-glancer executable failed")?;
+                    .context("Resolving current suprnova-lsp executable failed")?;
                 Ok(CommandSpec::new(executable, [OsString::from("lsp")]))
             }
             Self::RustAnalyzer => {

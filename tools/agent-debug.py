@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Run bounded rust-glancer debugging workflows with owned artifacts and cleanup."""
+"""Run bounded suprnova-lsp debugging workflows with owned artifacts and cleanup."""
 
 import asyncio
 import errno
@@ -23,7 +23,7 @@ TOOL_FILE = Path(__file__).resolve()
 WORKSPACE_ROOT = TOOL_FILE.parent.parent
 DEBUG_ROOT = WORKSPACE_ROOT / "target" / "agent-debug"
 BUILD_ROOT = DEBUG_ROOT / "build"
-RUST_GLANCER_PACKAGE = "rust-glancer"
+SUPRNOVA_LSP_PACKAGE = "suprnova-lsp"
 MODES = {"analyze", "compare-lsp", "fixture", "help", "last", "lsp-query", "test"}
 ADMINISTRATIVE_MODES = {"fixture", "last"}
 MANAGED_TMPDIR_MODES = {"analyze", "compare-lsp", "lsp-query"}
@@ -99,13 +99,13 @@ Usage:
 Runner options (must appear before the mode):
   --timeout <duration>          Per-run timeout with a required suffix: 90s, 5m, or 1h
   --measure                     Record OS time and peak RSS for runtime runs (not the build)
-  --log <filter>                Set RUST_GLANCER_LOG for the debugged process
+  --log <filter>                Set SUPRNOVA_LSP_LOG for the debugged process
   --backtrace                   Set RUST_BACKTRACE=1
   --full-backtrace              Set RUST_BACKTRACE=full
   --env <name=value>            Repeatable runtime environment override
   --build-profile <profile>     release (default) or debug
   --no-build                    Intentionally use the existing managed binary
-  --sample-on-timeout           On macOS, sample owned rust-glancer processes before cleanup
+  --sample-on-timeout           On macOS, sample owned suprnova-lsp processes before cleanup
   --repeat <count>              Number of measured/debug runs (default 1, max {MAX_REPETITIONS})
   --warmup <count>              Unmeasured warm-up runs (default 0, max {MAX_WARMUPS})
   --isolated-cache [name]       Put CARGO_TARGET_DIR under target/agent-debug/cache
@@ -307,7 +307,7 @@ def host_target() -> str:
 
 
 def rust_glancer_binary(profile: str) -> Path:
-    return BUILD_ROOT / host_target() / profile / "rust-glancer"
+    return BUILD_ROOT / host_target() / profile / "suprnova-lsp"
 
 
 def build_spec(options: RunnerOptions) -> CommandSpec:
@@ -316,7 +316,7 @@ def build_spec(options: RunnerOptions) -> CommandSpec:
     args = ["build", "--target-dir", str(BUILD_ROOT), "--target", host_target()]
     if options.build_profile == "release":
         args.append("--release")
-    args.extend(["-p", RUST_GLANCER_PACKAGE])
+    args.extend(["-p", SUPRNOVA_LSP_PACKAGE])
     return CommandSpec("cargo", args)
 
 
@@ -355,19 +355,19 @@ def runtime_environment(
     environment = dict(os.environ)
 
     # Cargo-backed tests create standalone projects through `tempfile`. Putting those projects
-    # below rust-glancer changes Cargo workspace discovery, so only runtime debugging modes use
+    # below suprnova-lsp changes Cargo workspace discovery, so only runtime debugging modes use
     # the runner-owned scratch directory by default.
     if mode in MANAGED_TMPDIR_MODES:
         environment["TMPDIR"] = str(run_directory / "tmp")
-    environment["RUST_GLANCER_AGENT_DEBUG"] = "1"
+    environment["SUPRNOVA_LSP_AGENT_DEBUG"] = "1"
     environment.update(options.environment)
 
     if options.log_filter is not None:
-        environment["RUST_GLANCER_LOG"] = options.log_filter
+        environment["SUPRNOVA_LSP_LOG"] = options.log_filter
     if options.backtrace is not None:
         environment["RUST_BACKTRACE"] = options.backtrace
     if options.rust_analyzer is not None:
-        environment["RUST_GLANCER_COMPARE_LSP_RUST_ANALYZER"] = options.rust_analyzer
+        environment["SUPRNOVA_LSP_COMPARE_LSP_RUST_ANALYZER"] = options.rust_analyzer
     if options.isolated_cache is not None:
         cache = DEBUG_ROOT / "cache" / options.isolated_cache
         cache.mkdir(parents=True, exist_ok=True)
@@ -551,7 +551,7 @@ async def sample_owned_processes(snapshot: Dict[str, Any], output_directory: Pat
     rust_glancer = [
         entry
         for entry in snapshot["processes"]
-        if "rust-glancer" in entry["command"] and "lsp-engine" not in entry["command"]
+        if "suprnova-lsp" in entry["command"] and "lsp-engine" not in entry["command"]
     ]
     targets = (engines if engines else rust_glancer)[:2]
     results = []
@@ -575,7 +575,7 @@ async def clean_owned_process_group(
         return cleanup
 
     # Only inspect and signal the session created for this command. This keeps cleanup independent
-    # from every other rust-glancer process running on the developer's machine.
+    # from every other suprnova-lsp process running on the developer's machine.
     initial = process_group_snapshot(process_id)
     initial_failed = snapshot_inspection_failed(initial)
     initial_pids = [entry["pid"] for entry in initial["processes"]]
@@ -701,7 +701,7 @@ async def run_supervised(
     started_monotonic = asyncio.get_running_loop().time()
 
     child_environment = dict(environment)
-    child_environment["RUST_GLANCER_AGENT_DEBUG_OUTPUT_DIR"] = str(output_directory)
+    child_environment["SUPRNOVA_LSP_AGENT_DEBUG_OUTPUT_DIR"] = str(output_directory)
     try:
         child = await asyncio.create_subprocess_exec(
             launched.command,
@@ -932,7 +932,7 @@ async def run_managed_workflow(
     write_json(
         run_directory / "metadata.json",
         {
-            "schema": "rust-glancer-agent-debug/v1",
+            "schema": "suprnova-lsp-agent-debug/v1",
             "mode": mode,
             "modeArgs": normalized_arguments,
             "startedAt": utc_timestamp(),

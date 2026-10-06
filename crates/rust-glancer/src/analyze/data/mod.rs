@@ -66,7 +66,7 @@ impl AnalyzeReport {
 
     pub(crate) fn document(&self, include_analysis_setup: bool) -> ReportDocument {
         let mut document = ReportDocument::builder("analyze")
-            .title("rust-glancer analysis built")
+            .title("suprnova-lsp analysis built")
             .section("project", |section| {
                 section.group("summary", "Summary");
                 self.project.append_document(section);

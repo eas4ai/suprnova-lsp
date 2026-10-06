@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: ./.github/actions/download-server
         with:
-          name: rust-glancer-${{ inputs.os }}
+          name: suprnova-lsp-${{ inputs.os }}
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 24.18.0
@@ -65,7 +65,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/download-server
         with:
-          name: rust-glancer-${{ inputs.os }}
+          name: suprnova-lsp-${{ inputs.os }}
           path: target/${{ needs.build-server.outputs.target }}/release
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
@@ -104,7 +104,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: ./.github/actions/download-server
         with:
-          name: rust-glancer-${{ inputs.os }}
+          name: suprnova-lsp-${{ inputs.os }}
       - name: Fetch rust-analyzer fixture
         shell: bash
         run: ./test_targets/bench_fixtures/fetch-rust-analyzer.sh
@@ -114,8 +114,8 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force .ci/lsp | Out-Null
-          $env:RUST_GLANCER_COMPARE_LSP_RUST_ANALYZER = rustup which rust-analyzer
-          & ./target/release/rust-glancer.exe compare-lsp rust_analyzer `
+          $env:SUPRNOVA_LSP_COMPARE_LSP_RUST_ANALYZER = rustup which rust-analyzer
+          & ./target/release/suprnova-lsp.exe compare-lsp rust_analyzer `
             --path test_targets/bench_fixtures/rust-analyzer `
             --format json > .ci/lsp/result.json
           if ($LASTEXITCODE -ne 0) {

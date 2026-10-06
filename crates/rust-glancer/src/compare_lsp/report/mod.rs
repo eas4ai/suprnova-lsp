@@ -60,7 +60,7 @@ impl LspComparisonReport {
     }
 
     pub(crate) fn document(&self) -> ReportDocument {
-        let document = ReportDocument::builder("compare_lsp").title("rust-glancer LSP comparison");
+        let document = ReportDocument::builder("compare_lsp").title("suprnova-lsp LSP comparison");
         let document = self.fixture.append_section(document);
         let document = ServerReport::append_section(document, &self.servers);
         let document = MethodAggregateReport::append_section(document, &self.aggregates);

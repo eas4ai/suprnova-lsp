@@ -381,7 +381,7 @@ mod tests {
             .params(json!({
                 "items": [
                     {"section": "rust-analyzer"},
-                    {"section": "rust-glancer"}
+                    {"section": "suprnova-lsp"}
                 ],
             }))
             .finish();

@@ -5,25 +5,25 @@
  * links, tests, and LSP execute-command calls from drifting apart.
  */
 export const EXTENSION_COMMANDS = {
-  showServerActions: "rust-glancer.showServerActions",
-  startServer: "rust-glancer.startServer",
-  restartServer: "rust-glancer.restartServer",
-  stopServer: "rust-glancer.stopServer",
-  reindexWorkspace: "rust-glancer.reindexWorkspace",
-  openLogs: "rust-glancer.openLogs",
-  goToTypeFromHover: "rust-glancer.gotoTypeFromHover",
-  goToImplementationFromHover: "rust-glancer.gotoImplementationFromHover",
-  testGetState: "rust-glancer.test.getState",
-  testGetOutput: "rust-glancer.test.getOutput",
+  showServerActions: "suprnova-lsp.showServerActions",
+  startServer: "suprnova-lsp.startServer",
+  restartServer: "suprnova-lsp.restartServer",
+  stopServer: "suprnova-lsp.stopServer",
+  reindexWorkspace: "suprnova-lsp.reindexWorkspace",
+  openLogs: "suprnova-lsp.openLogs",
+  goToTypeFromHover: "suprnova-lsp.gotoTypeFromHover",
+  goToImplementationFromHover: "suprnova-lsp.gotoImplementationFromHover",
+  testGetState: "suprnova-lsp.test.getState",
+  testGetOutput: "suprnova-lsp.test.getOutput",
 } as const;
 
 export const SERVER_COMMANDS = {
-  reindexWorkspace: "rust-glancer.internal.reindexWorkspace",
+  reindexWorkspace: "suprnova-lsp.internal.reindexWorkspace",
 } as const;
 
 export const SERVER_NOTIFICATIONS = {
-  rustdocStatus: "rust-glancer/rustdocStatus",
-  activeWorkspaceChanged: "rust-glancer/activeWorkspaceChanged",
-  deferredIndexingStarted: "rust-glancer/deferredIndexingStarted",
-  deferredIndexingFinished: "rust-glancer/deferredIndexingFinished",
+  rustdocStatus: "suprnova-lsp/rustdocStatus",
+  activeWorkspaceChanged: "suprnova-lsp/activeWorkspaceChanged",
+  deferredIndexingStarted: "suprnova-lsp/deferredIndexingStarted",
+  deferredIndexingFinished: "suprnova-lsp/deferredIndexingFinished",
 } as const;

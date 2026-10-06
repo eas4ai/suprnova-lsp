@@ -50,12 +50,12 @@ export interface RustdocAutomaticConfig {
 export namespace RustdocAutomaticConfig {
   export function read(value: unknown): RustdocAutomaticConfig {
     if (!isRecord(value)) {
-      throw new Error("rust-glancer.rustdoc.automatic must be an object");
+      throw new Error("suprnova-lsp.rustdoc.automatic must be an object");
     }
     const section = value;
     const enabled = section.enabled ?? true;
     if (typeof enabled !== "boolean" || section.enabled === null) {
-      throw new Error("rust-glancer.rustdoc.automatic.enabled must be a boolean");
+      throw new Error("suprnova-lsp.rustdoc.automatic.enabled must be a boolean");
     }
     const policy: RustdocAutomaticConfig = {
       enabled,
@@ -78,7 +78,7 @@ export namespace RustdocAutomaticConfig {
         selected > maximum
       ) {
         throw new Error(
-          `rust-glancer.rustdoc.automatic.${field} must be an integer between 1 and ${maximum}`,
+          `suprnova-lsp.rustdoc.automatic.${field} must be an integer between 1 and ${maximum}`,
         );
       }
       return selected;
@@ -87,7 +87,7 @@ export namespace RustdocAutomaticConfig {
     function nonemptyString(field: string, fallback?: string): string {
       const selected = section[field] === undefined ? fallback : section[field];
       if (typeof selected !== "string" || selected.trim().length === 0) {
-        throw new Error(`rust-glancer.rustdoc.automatic.${field} must be a nonempty string`);
+        throw new Error(`suprnova-lsp.rustdoc.automatic.${field} must be a nonempty string`);
       }
       return selected;
     }
@@ -106,26 +106,26 @@ export interface RustdocInputConfig {
 export namespace RustdocConfig {
   export function read(value: unknown, automatic: unknown = {}): RustdocConfig {
     if (!Array.isArray(value)) {
-      throw new Error("rust-glancer.rustdoc.inputs must be an array");
+      throw new Error("suprnova-lsp.rustdoc.inputs must be an array");
     }
     // These identities select a compiler model. Silently skipping a malformed entry would
     // start an engine without the model the developer explicitly selected.
     const inputs = value.map((input: unknown, index: number): RustdocInputConfig => {
       if (!isRecord(input)) {
-        throw new Error(`rust-glancer.rustdoc.inputs[${index}] must be an object`);
+        throw new Error(`suprnova-lsp.rustdoc.inputs[${index}] must be an object`);
       }
       const requiredString = (field: string): string => {
         const fieldValue = input[field];
         if (typeof fieldValue !== "string" || fieldValue.trim().length === 0) {
           throw new Error(
-            `rust-glancer.rustdoc.inputs[${index}].${field} must be a nonempty string`,
+            `suprnova-lsp.rustdoc.inputs[${index}].${field} must be a nonempty string`,
           );
         }
         return fieldValue;
       };
       const targetKind = requiredString("targetKind");
       if (targetKind !== "lib" && targetKind !== "bin") {
-        throw new Error(`rust-glancer.rustdoc.inputs[${index}].targetKind must be lib or bin`);
+        throw new Error(`suprnova-lsp.rustdoc.inputs[${index}].targetKind must be lib or bin`);
       }
       return {
         workspaceRoot: requiredString("workspaceRoot"),
@@ -188,7 +188,7 @@ export interface DiagnosticsConfig {
 
 export namespace ExtensionConfig {
   export function read(): ExtensionConfig {
-    const config = vscode.workspace.getConfiguration("rust-glancer");
+    const config = vscode.workspace.getConfiguration("suprnova-lsp");
 
     return {
       serverPath: normalizeOptionalString(readStringOrNull(config, "server.path", null)),

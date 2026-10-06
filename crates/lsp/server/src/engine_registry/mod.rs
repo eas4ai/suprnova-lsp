@@ -131,7 +131,7 @@ impl EngineRegistry {
             Some(EngineSlot::Ready(engine)) => Ok(Some(engine.process.engine_client().clone())),
             Some(EngineSlot::Starting { .. }) | None => Ok(None),
             Some(EngineSlot::Failed { root, error }) => Err(anyhow::anyhow!(
-                "rust-glancer engine for `{}` is unavailable: {error}",
+                "suprnova-lsp engine for `{}` is unavailable: {error}",
                 root.display()
             )),
         }
@@ -449,7 +449,7 @@ impl EngineRegistry {
                     }
                     Some(EngineSlot::Failed { root, error }) => {
                         return Err(anyhow::anyhow!(
-                            "rust-glancer engine for `{}` is unavailable: {error}",
+                            "suprnova-lsp engine for `{}` is unavailable: {error}",
                             root.display()
                         ));
                     }
@@ -586,10 +586,10 @@ impl EngineRegistry {
             engine_id = id.index(),
             root = %root.display(),
             error = %error,
-            "rust-glancer engine became unavailable"
+            "suprnova-lsp engine became unavailable"
         );
         lsp_client
-            .log_message(MessageType::Error, format!("Rust Glancer {error}"))
+            .log_message(MessageType::Error, format!("Suprnova LSP {error}"))
             .await;
         client_status
             .workspace_unavailable(&root, Arc::<str>::from(error))
@@ -628,7 +628,7 @@ impl EngineRegistry {
             )
             .await?;
 
-        tracing::info!(root = %root.display(), "started rust-glancer engine");
+        tracing::info!(root = %root.display(), "started suprnova-lsp engine");
         Ok((engine, exit_monitor, initialization))
     }
 
@@ -874,7 +874,7 @@ pub struct External;
         assert_eq!(
             error.to_string(),
             format!(
-                "rust-glancer engine for `{}` is unavailable: engine process exited unexpectedly: exit status: 101",
+                "suprnova-lsp engine for `{}` is unavailable: engine process exited unexpectedly: exit status: 101",
                 workspace_root.display()
             )
         );

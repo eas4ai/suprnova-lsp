@@ -1,5 +1,5 @@
 /**
- * Renders rust-glancer's global status-bar item.
+ * Renders suprnova-lsp's global status-bar item.
  *
  * This module knows how status states should look in VS Code: text, tooltip contents, background
  * color, command wiring, and plain snapshots for tests. It does not decide lifecycle state.
@@ -29,29 +29,29 @@ export class StatusView implements vscode.Disposable {
 
   public constructor() {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    this.item.name = "Rust Glancer";
+    this.item.name = "Suprnova LSP";
     this.item.command = EXTENSION_COMMANDS.showServerActions;
   }
 
   public starting(details: StatusDetails): void {
-    this.showState("starting", "$(sync~spin) Rust Glancer: starting", "Starting", details);
+    this.showState("starting", "$(sync~spin) Suprnova LSP: starting", "Starting", details);
   }
 
   public indexing(details: StatusDetails = this.details): void {
     this.showState(
       "indexing",
-      "$(sync~spin) Rust Glancer: indexing",
+      "$(sync~spin) Suprnova LSP: indexing",
       "Indexing workspace",
       details,
     );
   }
 
   public ready(details: StatusDetails = this.details): void {
-    this.showState("ready", "$(check) Rust Glancer: ready", "Ready", details);
+    this.showState("ready", "$(check) Suprnova LSP: ready", "Ready", details);
   }
 
   public readyWithDeferredIndexing(details: StatusDetails = this.details): void {
-    this.showState("ready", "~ Rust Glancer: ready", "Ready, finishing deferred indexing", details);
+    this.showState("ready", "~ Suprnova LSP: ready", "Ready, finishing deferred indexing", details);
   }
 
   public readyWithDeferredIndexingFailure(
@@ -60,7 +60,7 @@ export class StatusView implements vscode.Disposable {
   ): void {
     this.showState(
       "ready",
-      "$(warning) Rust Glancer: ready; background index failed",
+      "$(warning) Suprnova LSP: ready; background index failed",
       `Ready; background indexing failed: ${reason}`,
       details,
       new vscode.ThemeColor("statusBarItem.warningBackground"),
@@ -70,7 +70,7 @@ export class StatusView implements vscode.Disposable {
   public stale(details: StatusDetails = this.details): void {
     this.showState(
       "stale",
-      "$(warning) Rust Glancer: stale until save",
+      "$(warning) Suprnova LSP: stale until save",
       "Stale until save",
       details,
     );
@@ -82,7 +82,7 @@ export class StatusView implements vscode.Disposable {
   ): void {
     this.showState(
       "diagnostics-running",
-      "$(sync~spin) Rust Glancer: cargo check running",
+      "$(sync~spin) Suprnova LSP: cargo check running",
       command === undefined ? "Cargo check running" : `Cargo check running: ${command}`,
       details,
     );
@@ -91,7 +91,7 @@ export class StatusView implements vscode.Disposable {
   public diagnosticsFailed(details: StatusDetails = this.details): void {
     this.showState(
       "diagnostics-failed",
-      "$(error) Rust Glancer: cargo check failed",
+      "$(error) Suprnova LSP: cargo check failed",
       "Cargo check failed",
       details,
       new vscode.ThemeColor("statusBarItem.errorBackground"),
@@ -101,7 +101,7 @@ export class StatusView implements vscode.Disposable {
   public stopped(reason: string, details: StatusDetails = this.details): void {
     this.showState(
       "stopped",
-      "$(circle-slash) Rust Glancer: stopped",
+      "$(circle-slash) Suprnova LSP: stopped",
       `Stopped: ${reason}`,
       details,
     );
@@ -110,7 +110,7 @@ export class StatusView implements vscode.Disposable {
   public failed(reason: string, details: StatusDetails = this.details): void {
     this.showState(
       "failed",
-      "$(error) Rust Glancer: failed",
+      "$(error) Suprnova LSP: failed",
       `Failed: ${reason}`,
       details,
       new vscode.ThemeColor("statusBarItem.errorBackground"),
@@ -160,7 +160,7 @@ export class StatusView implements vscode.Disposable {
 
   private tooltip(state: string): vscode.MarkdownString {
     const tooltip = new vscode.MarkdownString();
-    tooltip.appendMarkdown(`**Rust Glancer**\n\n`);
+    tooltip.appendMarkdown(`**Suprnova LSP**\n\n`);
     appendTextField(tooltip, "State", state);
     if (this.details.generatedApiState !== undefined) {
       appendTextField(tooltip, "Generated APIs", this.details.generatedApiState);

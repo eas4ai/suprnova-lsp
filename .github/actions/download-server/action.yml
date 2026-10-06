@@ -23,4 +23,4 @@ runs:
         SERVER_DIRECTORY: ${{ inputs.path }}
       run: |
         mkdir -p "$SERVER_DIRECTORY"
-        tar -xf .ci/server-artifact/rust-glancer.tar -C "$SERVER_DIRECTORY"
+        tar -xf .ci/server-artifact/suprnova-lsp.tar -C "$SERVER_DIRECTORY"

@@ -14,7 +14,7 @@ use std::{
 use anyhow::Context as _;
 use rg_workspace::WorkspaceMetadata;
 
-const CACHE_DIR_NAME: &str = "rust_glancer";
+const CACHE_DIR_NAME: &str = "suprnova_lsp";
 const CACHE_INSTANCES_DIR_NAME: &str = "instances";
 const CACHE_INSTANCE_LOCK_FILE_NAME: &str = "instance.lock";
 const MAX_CACHE_INSTANCE_SLOTS: u64 = 1024;

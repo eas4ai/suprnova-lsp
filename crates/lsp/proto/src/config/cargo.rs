@@ -80,20 +80,20 @@ impl CargoMetadataConfig {
         if let Some(target) = cargo.get("target") {
             let target = target
                 .as_str()
-                .ok_or_else(|| anyhow::anyhow!("rust-glancer cargo.target must be a string"))?;
+                .ok_or_else(|| anyhow::anyhow!("suprnova-lsp cargo.target must be a string"))?;
             config = config.target_triple(target);
         }
 
         if let Some(all_features) = cargo.get("allFeatures") {
             let all_features = all_features.as_bool().ok_or_else(|| {
-                anyhow::anyhow!("rust-glancer cargo.allFeatures must be a boolean")
+                anyhow::anyhow!("suprnova-lsp cargo.allFeatures must be a boolean")
             })?;
             config = config.all_features(all_features);
         }
 
         if let Some(no_default_features) = cargo.get("noDefaultFeatures") {
             let no_default_features = no_default_features.as_bool().ok_or_else(|| {
-                anyhow::anyhow!("rust-glancer cargo.noDefaultFeatures must be a boolean")
+                anyhow::anyhow!("suprnova-lsp cargo.noDefaultFeatures must be a boolean")
             })?;
             config = config.no_default_features(no_default_features);
         }
@@ -101,12 +101,12 @@ impl CargoMetadataConfig {
         if let Some(features) = cargo.get("features") {
             let features = features
                 .as_array()
-                .ok_or_else(|| anyhow::anyhow!("rust-glancer cargo.features must be an array"))?
+                .ok_or_else(|| anyhow::anyhow!("suprnova-lsp cargo.features must be an array"))?
                 .iter()
                 .enumerate()
                 .map(|(idx, feature)| {
                     let feature = feature.as_str().ok_or_else(|| {
-                        anyhow::anyhow!("rust-glancer cargo.features[{idx}] must be a string")
+                        anyhow::anyhow!("suprnova-lsp cargo.features[{idx}] must be a string")
                     })?;
                     Ok(feature.to_string())
                 })
@@ -192,7 +192,7 @@ mod tests {
             .expect_err("malformed cargo.allFeatures should be rejected");
 
         assert!(
-            error.to_string().contains("rust-glancer cargo.allFeatures"),
+            error.to_string().contains("suprnova-lsp cargo.allFeatures"),
             "{error:?}",
         );
     }
@@ -209,7 +209,7 @@ mod tests {
             .expect_err("malformed cargo.features should be rejected");
 
         assert!(
-            error.to_string().contains("rust-glancer cargo.features[0]"),
+            error.to_string().contains("suprnova-lsp cargo.features[0]"),
             "{error:?}",
         );
     }

@@ -36,7 +36,7 @@ use crate::{
 };
 
 const ENGINE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
-const ENGINE_ID_ENV: &str = "RUST_GLANCER_ENGINE_ID";
+const ENGINE_ID_ENV: &str = "SUPRNOVA_LSP_ENGINE_ID";
 
 /// Process-backed handle to one engine owned by the LSP server.
 ///
@@ -164,7 +164,7 @@ impl EngineProcess {
         engine_id: &str,
     ) -> anyhow::Result<Child> {
         let executable = std::env::current_exe()
-            .context("while attempting to locate rust-glancer executable")?;
+            .context("while attempting to locate suprnova-lsp executable")?;
         let args = [
             "lsp-engine".to_string(),
             "--engine-addr".to_string(),
@@ -187,7 +187,7 @@ impl EngineProcess {
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
-            .context("while attempting to spawn rust-glancer engine process")
+            .context("while attempting to spawn suprnova-lsp engine process")
     }
 
     fn spawn_stderr_forwarder(child: &mut Child, engine_id: &str) {

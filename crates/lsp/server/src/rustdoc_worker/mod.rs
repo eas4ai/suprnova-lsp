@@ -163,7 +163,7 @@ pub(super) struct RustdocStatus;
 impl Notification for RustdocStatus {
     type Params = LspAny;
     const METHOD: LspNotificationMethod<'static> =
-        LspNotificationMethod::Custom("rust-glancer/rustdocStatus");
+        LspNotificationMethod::Custom("suprnova-lsp/rustdocStatus");
     const MESSAGE_DIRECTION: MessageDirection = MessageDirection::ServerToClient;
 }
 

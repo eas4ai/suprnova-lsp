@@ -1,6 +1,6 @@
 //! Public-LSP comparison harness.
 //!
-//! The command starts `rust-glancer lsp` and a reference server, opens the same fixture files in
+//! The command starts `suprnova-lsp lsp` and a reference server, opens the same fixture files in
 //! both, then sends a static query vector through the public LSP boundary. Raw responses stay
 //! attached to the server that produced them so downstream normalization can compare behavior
 //! without mixing protocol setup with report logic.

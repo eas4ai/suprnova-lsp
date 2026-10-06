@@ -152,7 +152,7 @@ pub(crate) async fn run(
             total_queries,
             label = query_case.label(),
             method = request.method,
-            server = "rust-glancer",
+            server = "suprnova-lsp",
             elapsed_ms = rust_glancer.latency().as_millis(),
             status = rust_glancer.value().status_label(),
             "compare-lsp query server completed"

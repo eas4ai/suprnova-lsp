@@ -757,7 +757,7 @@ pub(crate) struct NormalizedPrepareRenameTarget {
 impl NormalizedPrepareRenameTarget {
     /// An optional, source-accurate placeholder makes a response more useful, not incompatible.
     ///
-    /// For example, rust-analyzer may return only the range for `user_name`, while rust-glancer
+    /// For example, rust-analyzer may return only the range for `user_name`, while suprnova-lsp
     /// returns the same range plus `"user_name"` as the editor's initial rename text. The reverse
     /// direction is not accepted because dropping a reference placeholder loses information.
     pub(crate) fn is_no_worse_match_for(&self, reference: &Self) -> bool {
@@ -892,7 +892,7 @@ impl NormalizedSymbol {
     /// Match a more specific Rust member classification without treating kinds as interchangeable.
     ///
     /// LSP has separate `Method` and `Function` kinds. rust-analyzer sometimes reports an
-    /// `impl User { fn save(&self) {} }` member as `Function`, while rust-glancer retains `Method`.
+    /// `impl User { fn save(&self) {} }` member as `Function`, while suprnova-lsp retains `Method`.
     /// Accept that direction only; reporting the same member as a plain function when the reference
     /// knows it is a method still remains a quality loss.
     pub(crate) fn is_no_worse_match_for(&self, reference: &Self) -> bool {
@@ -1369,7 +1369,7 @@ mod tests {
 
     fn fixture_root(name: &str) -> NormalizedPathBuf {
         let root = std::env::temp_dir()
-            .join("rust-glancer-compare-lsp-normalization")
+            .join("suprnova-lsp-compare-lsp-normalization")
             .join(format!("{}-{}", name, std::process::id()));
         fs::create_dir_all(&root).expect("test fixture root should be created");
         NormalizedPathBuf::from_absolute(root).expect("test fixture root should normalize")

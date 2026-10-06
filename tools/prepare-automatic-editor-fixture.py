@@ -43,8 +43,8 @@ async def main():
     artifacts.mkdir()
     control = directory / "control.json"
     control.write_text(json.dumps({"mode": "real", "artifactRoot": str(artifacts)}))
-    print(json.dumps({"RUST_GLANCER_AUTOMATIC_RUSTDOC_FIXTURE": str(fixture),
-        "RUST_GLANCER_AUTOMATIC_RUSTDOC_ARTIFACTS": str(artifacts),
+    print(json.dumps({"SUPRNOVA_LSP_AUTOMATIC_RUSTDOC_FIXTURE": str(fixture),
+        "SUPRNOVA_LSP_AUTOMATIC_RUSTDOC_ARTIFACTS": str(artifacts),
         "AUTOMATIC_RUSTDOC_CONTROL": str(control), "AUTOMATIC_RUSTDOC_EVENTS": str(directory / "events.jsonl"),
         "AUTOMATIC_RUSTDOC_REAL_CARGO": real_cargo, "PATH": str(tools) + os.pathsep + os.environ["PATH"],
         "CARGO_TARGET_DIR": str(directory / "consumer-target"), "CARGO_NET_OFFLINE": "true",

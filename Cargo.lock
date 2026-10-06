@@ -2254,39 +2254,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-glancer"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "cargo_metadata",
- "clap",
- "futures",
- "gen-lsp-types",
- "libmimalloc-sys",
- "mimalloc",
- "rg_cfg_eval",
- "rg_ir_view",
- "rg_item_tree",
- "rg_lsp_engine",
- "rg_lsp_proto",
- "rg_lsp_server",
- "rg_profile",
- "rg_project",
- "rg_rustdoc",
- "rg_std",
- "rg_workspace",
- "serde",
- "serde_json",
- "tikv-jemalloc-sys",
- "tikv-jemallocator",
- "tokio",
- "tower",
- "tower-lsp-server",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "rust-glancer-zed"
 version = "0.0.0"
 dependencies = [
@@ -2541,6 +2508,39 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
+name = "suprnova-lsp"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "cargo_metadata",
+ "clap",
+ "futures",
+ "gen-lsp-types",
+ "libmimalloc-sys",
+ "mimalloc",
+ "rg_cfg_eval",
+ "rg_ir_view",
+ "rg_item_tree",
+ "rg_lsp_engine",
+ "rg_lsp_proto",
+ "rg_lsp_server",
+ "rg_profile",
+ "rg_project",
+ "rg_rustdoc",
+ "rg_std",
+ "rg_workspace",
+ "serde",
+ "serde_json",
+ "tikv-jemalloc-sys",
+ "tikv-jemallocator",
+ "tokio",
+ "tower",
+ "tower-lsp-server",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "syn"

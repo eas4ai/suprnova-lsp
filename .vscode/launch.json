@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run Rust Glancer Extension",
+      "name": "Run Suprnova LSP Extension",
       "type": "extensionHost",
       "request": "launch",
       "args": [
@@ -12,7 +12,7 @@
       "outFiles": [
         "${workspaceFolder}/editors/code/dist/**/*.js"
       ],
-      "preLaunchTask": "rust-glancer: compile VS Code extension"
+      "preLaunchTask": "suprnova-lsp: compile VS Code extension"
     }
   ]
 }

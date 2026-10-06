@@ -35,7 +35,7 @@ impl ServerConfig {
             } else {
                 let [folder] = workspace_folders else {
                     anyhow::bail!(
-                        "rust-glancer rustdoc.inputs[{index}].workspaceRoot is relative and requires exactly one editor workspace folder",
+                        "suprnova-lsp rustdoc.inputs[{index}].workspaceRoot is relative and requires exactly one editor workspace folder",
                     );
                 };
                 NormalizedPathBuf::resolve_from(folder, &input.workspace_root)

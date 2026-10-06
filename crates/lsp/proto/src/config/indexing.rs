@@ -20,15 +20,15 @@ impl PackageBatchSize {
             return Ok(Self::default());
         };
         let Some(value) = value.as_u64() else {
-            anyhow::bail!("rust-glancer indexing.packageBatchSize must be a positive integer");
+            anyhow::bail!("suprnova-lsp indexing.packageBatchSize must be a positive integer");
         };
         let Ok(value) = usize::try_from(value) else {
             anyhow::bail!(
-                "rust-glancer indexing.packageBatchSize must fit in this platform's package count"
+                "suprnova-lsp indexing.packageBatchSize must fit in this platform's package count"
             );
         };
         let Some(value) = NonZeroUsize::new(value) else {
-            anyhow::bail!("rust-glancer indexing.packageBatchSize must be a positive integer");
+            anyhow::bail!("suprnova-lsp indexing.packageBatchSize must be a positive integer");
         };
 
         Ok(Self(value))
@@ -65,11 +65,11 @@ impl IndexingPerformancePreference {
         };
 
         let value = value.as_str().ok_or_else(|| {
-            anyhow::anyhow!("rust-glancer indexing.performancePreference must be a string")
+            anyhow::anyhow!("suprnova-lsp indexing.performancePreference must be a string")
         })?;
         Self::from_config_name(value).ok_or_else(|| {
             anyhow::anyhow!(
-                "rust-glancer indexing.performancePreference must be one of: lower-peak-memory, faster-builds"
+                "suprnova-lsp indexing.performancePreference must be one of: lower-peak-memory, faster-builds"
             )
         })
     }
@@ -127,7 +127,7 @@ mod tests {
             assert!(
                 error
                     .to_string()
-                    .contains("rust-glancer indexing.packageBatchSize"),
+                    .contains("suprnova-lsp indexing.packageBatchSize"),
                 "{error:?}",
             );
         }
@@ -161,7 +161,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("rust-glancer indexing.performancePreference"),
+                .contains("suprnova-lsp indexing.performancePreference"),
             "{error:?}",
         );
     }

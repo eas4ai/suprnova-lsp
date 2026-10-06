@@ -63,7 +63,7 @@ jobs:
 
       - uses: ./.github/actions/download-server
         with:
-          name: rust-glancer-ubuntu-latest
+          name: suprnova-lsp-ubuntu-latest
 
       - name: Install rust-src
         run: rustup component add rust-src
@@ -83,7 +83,7 @@ jobs:
       - name: Run memory profile
         run: |
           mkdir -p .ci/memory/current
-          target/release/rust-glancer analyze test_targets/bench_fixtures/rust-analyzer \
+          target/release/suprnova-lsp analyze test_targets/bench_fixtures/rust-analyzer \
             --memory \
             --package-residency all-offloadable \
             --format json > .ci/memory/current/result.json
@@ -122,7 +122,7 @@ jobs:
 
       - uses: ./.github/actions/download-server
         with:
-          name: rust-glancer-ubuntu-latest
+          name: suprnova-lsp-ubuntu-latest
 
       - name: Download base LSP compatibility
         if: github.event_name == 'pull_request'
@@ -137,19 +137,19 @@ jobs:
         run: ./test_targets/bench_fixtures/fetch-rust-analyzer.sh
 
       # Both servers need the standard-library sources before either indexes the fixture.
-      # Otherwise rust-analyzer can install rust-src after Rust Glancer has already started.
+      # Otherwise rust-analyzer can install rust-src after Suprnova LSP has already started.
       - name: Install rust-analyzer and standard-library sources
         run: rustup component add rust-analyzer rust-src
 
       - name: Run LSP compatibility
         run: |
           mkdir -p .ci/lsp/current
-          RUST_GLANCER_COMPARE_LSP_RUST_ANALYZER="$(rustup which rust-analyzer)" \
-            target/release/rust-glancer compare-lsp rust_analyzer \
+          SUPRNOVA_LSP_COMPARE_LSP_RUST_ANALYZER="$(rustup which rust-analyzer)" \
+            target/release/suprnova-lsp compare-lsp rust_analyzer \
               --path test_targets/bench_fixtures/rust-analyzer \
               --format json > .ci/lsp/current/result.json
-          RUST_GLANCER_COMPARE_LSP_RUST_ANALYZER="$(rustup which rust-analyzer)" \
-            target/release/rust-glancer compare-lsp rust_analyzer_dirty \
+          SUPRNOVA_LSP_COMPARE_LSP_RUST_ANALYZER="$(rustup which rust-analyzer)" \
+            target/release/suprnova-lsp compare-lsp rust_analyzer_dirty \
               --path test_targets/bench_fixtures/rust-analyzer \
               --format json > .ci/lsp/current/dirty.json
 
@@ -230,5 +230,5 @@ jobs:
         if: github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
         with:
-          header: rust-glancer-performance
+          header: suprnova-lsp-performance
           path: .ci/performance/comment.md

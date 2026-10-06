@@ -283,11 +283,11 @@ impl WorkspaceWorker {
                         self.root.join(path)
                     }
                 })
-                .unwrap_or_else(|| self.root.join("target/rust-glancer/rustdoc"));
+                .unwrap_or_else(|| self.root.join("target/suprnova-lsp/rustdoc"));
             std::fs::create_dir_all(&parent)
                 .with_context(|| format!("create rustdoc artifact parent {}", parent.display()))?;
             let artifacts = tempfile::Builder::new()
-                .prefix(".rust-glancer-rustdoc-")
+                .prefix(".suprnova-lsp-rustdoc-")
                 .tempdir_in(parent)
                 .context("claim isolated rustdoc artifacts")?;
             let resolved_artifacts = artifacts

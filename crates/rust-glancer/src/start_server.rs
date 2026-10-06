@@ -6,7 +6,7 @@ use anyhow::Context as _;
 /// mode. The server crate owns the LSP backend and engine orchestration once the runtime exists.
 pub(crate) fn start_server() -> anyhow::Result<()> {
     crate::logging::init_lsp_tracing(crate::logging::LogComponent::Server);
-    tracing::info!("starting rust-glancer LSP server over stdio");
+    tracing::info!("starting suprnova-lsp LSP server over stdio");
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

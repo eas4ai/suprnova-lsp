@@ -16,7 +16,7 @@ pub(crate) fn start_engine(
         Arc::new(crate::memory::memory_control());
     tracing::info!(
         allocator = memory_control.allocator_name(),
-        "starting rust-glancer LSP engine process"
+        "starting suprnova-lsp LSP engine process"
     );
 
     let runtime = tokio::runtime::Builder::new_multi_thread()

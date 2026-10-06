@@ -1,4 +1,4 @@
-//! Analysis-engine implementation for Rust Glancer LSP sessions.
+//! Analysis-engine implementation for Suprnova LSP LSP sessions.
 //!
 //! This crate owns workspace analysis, immutable-input query execution, Cargo diagnostics, and
 //! memory reporting for an engine instance. Editor lifecycle and publication currency remain in

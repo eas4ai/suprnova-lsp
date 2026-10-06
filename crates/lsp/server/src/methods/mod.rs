@@ -35,7 +35,7 @@ pub(crate) fn initialize() -> InitializeResult {
     InitializeResult {
         capabilities: capabilities::server_capabilities(),
         server_info: Some(ServerInfo {
-            name: "rust-glancer".to_string(),
+            name: "Suprnova LSP".to_string(),
             version: Some(SERVER_VERSION.to_string()),
         }),
     }

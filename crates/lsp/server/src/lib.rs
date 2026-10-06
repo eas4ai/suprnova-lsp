@@ -1,6 +1,6 @@
-//! LSP server orchestration for Rust Glancer.
+//! LSP server orchestration for Suprnova LSP.
 //!
-//! This crate adapts the editor-facing LSP transport to Rust Glancer's engine protocol. It owns
+//! This crate adapts the editor-facing LSP transport to Suprnova LSP's engine protocol. It owns
 //! server capabilities, request routing, client notification forwarding, and engine process
 //! orchestration, while keeping analysis implementation details behind engine interfaces.
 
@@ -26,6 +26,6 @@ mod stdio;
 #[cfg(test)]
 mod tests;
 
-/// Version of the published rust-glancer artifacts.
+/// Version of the published suprnova-lsp artifacts.
 pub use self::methods::SERVER_VERSION as VERSION;
 pub use self::stdio::serve_stdio;

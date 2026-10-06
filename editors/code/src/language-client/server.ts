@@ -1,5 +1,5 @@
 /**
- * Resolves and launches the rust-glancer language-server process for the window client.
+ * Resolves and launches the suprnova-lsp language-server process for the window client.
  *
  * This module chooses between explicit settings, test overrides, and PATH, then converts that
  * decision into `vscode-languageclient` server options.
@@ -11,7 +11,7 @@ import type { ServerOptions } from "vscode-languageclient/node";
 
 import type { ExtensionConfig } from "../config";
 
-const SERVER_ENV_OVERRIDE = "__RUST_GLANCER_SERVER";
+const SERVER_ENV_OVERRIDE = "__SUPRNOVA_LSP_SERVER";
 
 export interface ResolvedServer {
   readonly command: string;
@@ -30,7 +30,7 @@ export namespace ResolvedServer {
     if (config.serverPath !== undefined) {
       return executableServer(
         config.serverPath,
-        "rust-glancer.server.path",
+        "suprnova-lsp.server.path",
         config,
         workspaceFolder,
       );
@@ -46,7 +46,7 @@ export namespace ResolvedServer {
       return executableServer(bundled, "bundled server", config, workspaceFolder);
     }
 
-    return executableServer("rust-glancer", "PATH", config, workspaceFolder);
+    return executableServer("suprnova-lsp", "PATH", config, workspaceFolder);
   }
 
   export function options(server: ResolvedServer, output: vscode.LogOutputChannel): ServerOptions {
@@ -68,7 +68,7 @@ export namespace ResolvedServer {
       child.on("error", (error) => {
         output.error(`server failed to start: ${error.message}`);
         void vscode.window.showErrorMessage(
-          `Failed to start rust-glancer language server: ${error.message}`,
+          `Failed to start suprnova-lsp language server: ${error.message}`,
         );
       });
 
@@ -86,7 +86,7 @@ export namespace ResolvedServer {
 }
 
 function bundledServerPath(extensionUri: vscode.Uri): string | undefined {
-  const executableName = process.platform === "win32" ? "rust-glancer.exe" : "rust-glancer";
+  const executableName = process.platform === "win32" ? "suprnova-lsp.exe" : "suprnova-lsp";
   const bundled = vscode.Uri.joinPath(extensionUri, "server", executableName).fsPath;
   return existsSync(bundled) ? bundled : undefined;
 }

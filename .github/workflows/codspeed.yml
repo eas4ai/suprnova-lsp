@@ -18,7 +18,7 @@ jobs:
     name: Run benchmarks
     runs-on: ubuntu-latest
     env:
-      RUST_GLANCER_BENCH_TARGETS: small_app
+      SUPRNOVA_LSP_BENCH_TARGETS: small_app
 
     permissions:
       contents: read

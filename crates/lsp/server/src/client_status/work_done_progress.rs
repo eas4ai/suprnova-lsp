@@ -2,7 +2,7 @@
 //!
 //! This is the portable, operation-shaped status flow. Zed renders workspace indexing from this
 //! protocol, while VS Code and other LSP clients can consume the same messages without knowing any
-//! Rust Glancer extensions.
+//! Suprnova LSP extensions.
 //!
 //! Foreground indexing and deferred completion use separate server-owned handles. Their titles make
 //! the queryable boundary explicit, while later phase/count signals update the deferred operation.
@@ -23,7 +23,7 @@ use tower_lsp_server::{
     },
 };
 
-const INDEXING_PROGRESS_TOKEN_PREFIX: &str = "rust-glancer/indexing";
+const INDEXING_PROGRESS_TOKEN_PREFIX: &str = "suprnova-lsp/indexing";
 
 pub(super) fn is_supported(capabilities: &ClientCapabilities) -> bool {
     capabilities
