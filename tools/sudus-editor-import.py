@@ -208,13 +208,12 @@ async def main():
         output = directory / label
         output.mkdir(parents=True, exist_ok=True)
         print(f"observing {label}", flush=True)
-        with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
-            result = await runner.run_supervised(runner.CommandSpec(command, args), cwd, env or environment, output, timeout)
+        result, text = await runner.observe_command(runner.CommandSpec(command, args), cwd, env or environment, output, timeout)
         result["phase"] = label
         commands.append(result)
         if result.get("timedOut") or result.get("spawnError") or result.get("signal") or not result["cleanup"].get("verifiedEmpty"):
             raise ValueError(f"{label}: command or owned process cleanup incomplete")
-        return result["code"], (output / "stdout.log").read_text()
+        return result["code"], text
 
     try:
         code, _ = await run("integrity", sys.executable, [str(ROOT / "tools/test_sudus_editor_import.py")], timeout=60_000)

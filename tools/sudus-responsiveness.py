@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Collect bounded Devlist diagnostic evidence before choosing a responsiveness fix."""
+
+import argparse
+import asyncio
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+
+from importlib.util import module_from_spec, spec_from_file_location
+
+
+ROOT = Path(__file__).resolve().parent.parent
+APP = Path("/home/shawn/workspace2/devlist.app")
+PROTECTED = Path("/home/shawn/workspace2/suprnova")
+REVISION = "3229aa9af542c991196274fa3c235cdce88a68e2"
+MODES = ("faster-builds", "lower-peak-memory")
+spec = spec_from_file_location("responsiveness_helpers", ROOT / "tools/sudus-editor-import.py")
+helpers = module_from_spec(spec)
+sys.modules[spec.name] = helpers
+spec.loader.exec_module(helpers)
+
+
+class Diagnostic:
+    @staticmethod
+    def percentile(values, percentile):
+        if not values or any(type(value) is not int or value < 0 for value in values):
+            raise ValueError("timings require a nonempty list of integer nanoseconds")
+        if type(percentile) is not int or not 1 <= percentile <= 100:
+            raise ValueError("percentile must be an integer from 1 to 100")
+        return sorted(values)[(len(values) * percentile + 99) // 100 - 1]
+
+    @staticmethod
+    def inventory():
+        """Hash application Rust/Cargo inputs without reading secrets or changing Git state."""
+        if APP.resolve() == PROTECTED or PROTECTED in APP.resolve().parents:
+            raise ValueError("application points at the protected framework checkout")
+        files = {}
+        for directory, children, names in os.walk(APP, followlinks=False):
+            children[:] = sorted(name for name in children if name not in {".git", "target", "node_modules"})
+            for name in sorted(names):
+                path = Path(directory) / name
+                if path.suffix == ".rs" or name in {"Cargo.toml", "Cargo.lock"}:
+                    resolved = path.resolve()
+                    if resolved == PROTECTED or PROTECTED in resolved.parents:
+                        raise ValueError("application source points at the protected checkout")
+                    files[str(path.relative_to(APP))] = hashlib.sha256(path.read_bytes()).hexdigest()
+        for name in (".cargo/config.toml", ".cargo/config"):
+            path = APP / name
+            if path.exists():
+                if not path.resolve().is_relative_to(APP.resolve()):
+                    raise ValueError("application Cargo configuration escapes its checkout")
+                files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        return files
+
+    @classmethod
+    def source_observation(cls, report):
+        # Match replies to the entire sent hover ledger, so removing a slow/error
+        # result cannot improve a distribution by changing only the results array.
+        results = report.get("results", [])
+        ledger = report.get("transport", [])
+        sent = [row for row in ledger if row.get("method") == "textDocument/hover"]
+        if len(results) != 3 or len(sent) != 3:
+            raise ValueError("diagnostic requires all three sent source hovers and replies")
+        if [row.get("label") for row in results] != [f"source-{n}" for n in range(3)]:
+            raise ValueError("source workload is missing, reordered or duplicated")
+        ids = [row.get("id") for row in sent]
+        if any(type(value) is not int for value in ids) or len(set(ids)) != len(ids):
+            raise ValueError("hover request identities are invalid or duplicated")
+        previous = None
+        durations = []
+        for result, row in zip(results, sent):
+            if result.get("kind") != "hover" or result.get("transport") != row or row.get("status") != "success":
+                raise ValueError("hover result and transport observation disagree")
+            written, received = row.get("writtenNs"), row.get("receivedNs")
+            if type(written) is not int or type(received) is not int or written < 0 or received < written:
+                raise ValueError("hover timestamps are absent or non-monotonic")
+            if row.get("durationNs") != received - written or type(row.get("durationNs")) is not int:
+                raise ValueError("hover duration contradicts its integer timestamps")
+            if previous is not None and written < previous:
+                raise ValueError("sequential hover requests overlap or changed order")
+            previous = received
+            text = result.get("text")
+            if not isinstance(text, str) or "verify_password" not in text or "FrameworkError" not in text:
+                raise ValueError("source hover is empty or has the wrong signature")
+            ready = [event for event in report.get("lifecycle", [])
+                     if event.get("method") == "suprnova-lsp/activeWorkspaceChanged"
+                     and event.get("params", {}).get("state") == "ready"
+                     and event.get("params", {}).get("root") == str(APP)
+                     and type(event.get("receivedNs")) is int and event["receivedNs"] <= written]
+            if not ready:
+                raise ValueError("source declaration readiness was not observed before hover")
+            routes = [event for event in report.get("stages", [])
+                      if event.get("message") == "editor document analysis route published"
+                      and event.get("fields", {}).get("path") == str(APP / "src/models/user.rs")
+                      and event.get("fields", {}).get("ready") is True
+                      and type(event.get("observedNs")) is int and event["observedNs"] <= written]
+            if not routes:
+                raise ValueError("document route readiness was not observed before hover")
+            durations.append(row["durationNs"])
+        return {"firstNs": durations[0], "repeatedNs": durations[1:],
+                "diagnosticP95Ns": cls.percentile(durations, 95), "maxNs": max(durations),
+                "acceptance": "unverified: diagnostic counts are below the RSP minimum"}
+
+    async def run(self, modes, no_build):
+        runner = helpers.module("responsiveness_runner", ROOT / "tools/agent-debug.py")
+        runner.install_signal_handlers()
+        directory = runner.create_run_directory("rsp-diagnostic")
+        commands, reports = [], {}
+        original = self.inventory()
+        build_environment = dict(os.environ, RUSTUP_TOOLCHAIN="1.98.1", CARGO_BUILD_JOBS="2",
+                                 CARGO_NET_OFFLINE="true", CARGO_TARGET_DIR=str(runner.BUILD_ROOT),
+                                 CARGO_BUILD_BUILD_DIR=str(ROOT / "target/agent-debug/build-intermediates"))
+        environment = dict(build_environment, RUSTUP_TOOLCHAIN="nightly-2026-08-19",
+            CARGO_TARGET_DIR=str(ROOT / "target/agent-debug/devlist-target"),
+            CARGO_BUILD_BUILD_DIR=str(ROOT / "target/agent-debug/devlist-build"))
+
+        async def command(label, program, args, env=environment, timeout=60_000):
+            output = directory / label
+            print(f"observing {label}: {output}", flush=True)
+            result, text = await runner.observe_command(runner.CommandSpec(program, args), ROOT, env, output, timeout)
+            result["phase"] = label
+            commands.append(result)
+            if result["code"] != 0:
+                raise ValueError(f"{label}: observation failed; inspect {output}")
+            return text
+
+        identity = {"purpose": "diagnostic, not RSP acceptance", "application": str(APP),
+                    "sources": original, "frameworkRevision": REVISION, "buildProfile": "release",
+                    "producerToolchain": "nightly-2026-08-19",
+                    "cacheState": "existing LSP/compiler caches; fresh owned export artifact root",
+                    "observers": {name: hashlib.sha256((ROOT / "tools" / name).read_bytes()).hexdigest()
+                                  for name in ("lsp-query.py", "sudus-responsiveness.py", "agent-debug.py")}}
+        complete = False
+        try:
+            metadata = json.loads(await command("metadata", "cargo", ["metadata", "--manifest-path", str(APP / "Cargo.toml"),
+                "--locked", "--offline", "--format-version", "1", "--filter-platform", runner.host_target()]))
+            framework = [package for package in metadata["packages"] if package["name"] == "suprnova"]
+            if len(framework) != 1 or not (framework[0].get("source") or "").endswith("#" + REVISION):
+                raise ValueError("application framework is not the approved pinned dependency")
+            for package in metadata["packages"]:
+                path = Path(package["manifest_path"]).resolve()
+                if path == PROTECTED or PROTECTED in path.parents:
+                    raise ValueError("application metadata reached the protected framework checkout")
+            identity["metadataSha256"] = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode()).hexdigest()
+            identity["buildCompiler"] = await command("build-compiler", "rustc", ["-vV"], env=build_environment)
+            identity["producerCompiler"] = await command("producer-compiler", "rustc", ["-vV"])
+            identity["commit"] = (await command("commit", "git", ["rev-parse", "HEAD"])).strip()
+            await command("runtime-inputs", "git", ["diff", "--exit-code", "HEAD", "--",
+                "crates", "Cargo.lock", "Cargo.toml", "rust-toolchain.toml"])
+            if not no_build:
+                build = runner.build_spec(runner.RunnerOptions(build_profile="release"))
+                await command("build", build.command, [*build.args, "--locked", "--offline"], env=build_environment, timeout=20 * 60_000)
+            binary = runner.rust_glancer_binary("release")
+            identity["binary"] = str(binary)
+            identity["binarySha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
+            for mode in modes:
+                plan = {"file": "src/models/user.rs", "format": "json", "readinessBarrier": "ready", "documentReadinessBarrier": True,
+                    "deferredBarrier": "after-queries", "idleMemory": True,
+                    "queries": [{"kind": "hover", "label": f"source-{n}", "marker": "pub fn verify_password", "delta": 7} for n in range(3)],
+                    "initializationOptions": {"cfg": {"test": False}, "cache": {"packageResidency": "workspace"},
+                        "indexing": {"performancePreference": mode}, "rustdoc": {"automatic": {
+                            "artifactRoot": str(directory / mode / "compiler"), "toolchain": "nightly-2026-08-19", "jobs": 2}}}}
+                plan_path = directory / f"{mode}-plan.json"
+                plan_path.write_text(json.dumps(plan, indent=2) + "\n")
+                text = await command(mode, "just", ["agent-debug", "--no-build", "--timeout", "5m", "--measure",
+                    "--log", "rg_lsp_engine=trace,rg_lsp_server=debug", "lsp-query", "--workspace-root", str(APP),
+                    "--query-file", str(plan_path), "--timeout-ms", "300000", "--json"], timeout=6 * 60_000)
+                # The supervisor appends its own summary. The first JSON document is
+                # the query result; preserve the entire stdout separately as evidence.
+                start = text.index('{\n  "file"')
+                report, _ = json.JSONDecoder().raw_decode(text[start:])
+                reports[mode] = {"raw": report, "summary": self.source_observation(report), "plan": plan}
+            complete = True
+        finally:
+            after = self.inventory()
+            result = {"identity": identity, "reports": reports, "commands": commands,
+                      "observationComplete": complete,
+                      "applicationInputsUnchanged": original == after,
+                      "processCleanup": runner.summarize_cleanup(commands),
+                      "requirements": {f"RSP-{n:03}": "unverified" for n in range(1, 7)}}
+            if not complete:
+                result["processCleanup"]["status"] = "unverified"
+                result["processCleanup"]["reason"] = "incomplete observation; inspect the individual supervisor artifacts"
+            (directory / "report.json").write_text(json.dumps(result, indent=2) + "\n")
+            print(f"Diagnostic report: {directory / 'report.json'}", flush=True)
+            if original != after:
+                raise ValueError("application Rust/Cargo inputs changed during observation")
+        for mode, report in reports.items():
+            print(mode, json.dumps(report["summary"]))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--diagnostic", action="store_true", required=True,
+                        help="small source workload; emits no passing Sudus requirement verdicts")
+    parser.add_argument("--mode", choices=MODES, action="append")
+    parser.add_argument("--no-build", action="store_true", help="intentionally use an existing managed optimized binary")
+    options = parser.parse_args()
+    try:
+        asyncio.run(Diagnostic().run(options.mode or MODES, options.no_build))
+    except (ValueError, RuntimeError, OSError, KeyError) as error:
+        print(f"responsiveness observation incomplete: {error}", file=sys.stderr)
+        sys.exit(2)

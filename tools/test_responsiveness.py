@@ -1,0 +1,297 @@
+#!/usr/bin/env python3
+"""Check transport timing at pipe boundaries and preserve failed observations."""
+
+import asyncio
+import copy
+import importlib.util
+import json
+from pathlib import Path
+from types import SimpleNamespace
+import tempfile
+import unittest
+from unittest.mock import AsyncMock, patch
+import sys
+
+
+ROOT = Path(__file__).resolve().parent.parent
+spec = importlib.util.spec_from_file_location("responsiveness_lsp", ROOT / "tools/lsp-query.py")
+lsp = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = lsp
+spec.loader.exec_module(lsp)
+spec = importlib.util.spec_from_file_location("responsiveness_observation", ROOT / "tools/sudus-responsiveness.py")
+observation = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(observation)
+
+
+class LedgerIntegrity(unittest.TestCase):
+    def setUp(self):
+        sent = [{"id": n + 1, "method": "textDocument/hover", "status": "success",
+                 "writtenNs": 100 + 20 * n, "receivedNs": 110 + 20 * n, "durationNs": 10} for n in range(3)]
+        self.report = {"transport": sent,
+            "results": [{"kind": "hover", "label": f"source-{n}", "transport": row,
+                         "text": "fn verify_password(&self, password: &str) -> Result<bool, FrameworkError>"}
+                        for n, row in enumerate(sent)],
+            "lifecycle": [{"method": lsp.ACTIVE_WORKSPACE_CHANGED, "receivedNs": 90,
+                           "params": {"root": str(observation.APP), "state": "ready"}}],
+            "stages": [{"message": "editor document analysis route published", "observedNs": 95,
+                        "fields": {"path": str(observation.APP / "src/models/user.rs"), "ready": True}}]}
+
+    def test_small_diagnostic_never_claims_acceptance(self):
+        result = observation.Diagnostic.source_observation(self.report)
+        self.assertTrue(result["acceptance"].startswith("unverified"))
+        self.assertEqual(result["firstNs"], 10)
+        self.assertEqual(result["repeatedNs"], [10, 10])
+
+    def test_nearest_rank_preserves_integer_threshold(self):
+        values = [1] * 18 + [200_000_000, 300_000_000]
+        self.assertEqual(observation.Diagnostic.percentile(values, 95), 200_000_000)
+        for invalid in [[], [1.0], [True], [-1]]:
+            with self.assertRaises(ValueError):
+                observation.Diagnostic.percentile(invalid, 95)
+
+    def test_rejects_dropped_failed_duplicated_or_changed_samples(self):
+        for alteration in ["drop", "error", "duplicate", "wrong-signature", "different-ledger", "timestamp", "duration"]:
+            report = copy.deepcopy(self.report)
+            if alteration == "drop":
+                report["results"].pop()
+            elif alteration == "error":
+                report["transport"][0]["status"] = "rpc-error"
+            elif alteration == "duplicate":
+                report["transport"][1]["id"] = 1
+            elif alteration == "wrong-signature":
+                report["results"][0]["text"] = "Builder<Wrong>"
+            elif alteration == "different-ledger":
+                report["results"][0]["transport"] = dict(report["transport"][0], id=200)
+            elif alteration == "timestamp":
+                report["transport"][0]["receivedNs"] = 99
+            elif alteration == "duration":
+                report["transport"][0]["durationNs"] = 0
+            with self.subTest(alteration=alteration), self.assertRaises(ValueError):
+                observation.Diagnostic.source_observation(report)
+
+    def test_success_cannot_establish_readiness_retroactively(self):
+        for events in [[], [dict(self.report["lifecycle"][0], receivedNs=1000)],
+                       [dict(self.report["lifecycle"][0], params={"root": "/other", "state": "ready"})]]:
+            with self.assertRaisesRegex(ValueError, "readiness"):
+                observation.Diagnostic.source_observation(dict(self.report, lifecycle=events))
+        with self.assertRaisesRegex(ValueError, "route"):
+            observation.Diagnostic.source_observation(dict(self.report, stages=[]))
+
+
+class PipeTiming(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.clock = 100
+        self.patch = patch.object(lsp.time, "monotonic_ns", side_effect=lambda: self.clock)
+        self.patch.start()
+        self.written = asyncio.Event()
+        self.drained = asyncio.Event()
+        self.exit = asyncio.Event()
+        self.messages = []
+
+        def write(data):
+            self.messages.append(json.loads(data.split(b"\r\n\r\n", 1)[1]))
+            self.written.set()
+
+        async def drain():
+            await self.drained.wait()
+
+        async def wait():
+            await self.exit.wait()
+            return 0
+
+        self.stdout = asyncio.StreamReader()
+        self.stderr = asyncio.StreamReader()
+        self.process = SimpleNamespace(
+            stdin=SimpleNamespace(is_closing=lambda: False, write=write, drain=drain),
+            stdout=self.stdout, stderr=self.stderr, wait=wait,
+        )
+        self.client = lsp.LspClient(self.process, 1000, False)
+        self.client.enable_observations()
+        self.requests = []
+
+    async def asyncTearDown(self):
+        for task in [*self.requests, self.client.stdout_task, self.client.stderr_task, self.client.exit_task]:
+            task.cancel()
+        await asyncio.gather(*self.requests, self.client.stdout_task, self.client.stderr_task,
+                             self.client.exit_task, return_exceptions=True)
+        self.patch.stop()
+
+    def frame(self, message):
+        body = json.dumps(message).encode()
+        return f"Content-Length: {len(body)}\r\n\r\n".encode() + body
+
+    async def begin(self, **options):
+        task = asyncio.create_task(self.client.request("textDocument/hover", {}, **options))
+        self.requests.append(task)
+        await asyncio.wait_for(self.written.wait(), 1)
+        return task
+
+    async def test_times_write_and_complete_read_before_drain_and_waiter_resume(self):
+        task = await self.begin()
+        frame = self.frame({"jsonrpc": "2.0", "id": 1, "result": {"contents": "User"}})
+        self.clock = 150
+        self.stdout.feed_data(frame[:-2])
+        await asyncio.sleep(0)
+        self.assertNotIn("receivedNs", self.client.request_observations[1])
+        self.clock = 200
+        self.stdout.feed_data(frame[-2:])
+        await asyncio.sleep(0)
+        self.assertFalse(task.done(), "drain is intentionally still blocked")
+        self.clock = 300
+        self.drained.set()
+        await asyncio.wait_for(task, 1)
+        row = self.client.request_observations[1]
+        self.assertEqual((row["writtenNs"], row["receivedNs"], row["durationNs"]), (100, 200, 100))
+        self.assertEqual(row["status"], "success")
+        self.assertNotIn("result", row, "the ledger must not retain semantic payloads")
+
+    async def test_server_request_with_same_id_cannot_finish_hover(self):
+        task = await self.begin()
+        self.drained.set()
+        self.stdout.feed_data(self.frame({"jsonrpc": "2.0", "id": 1, "method": "workspace/inlayHint/refresh"}))
+        await asyncio.sleep(0)
+        self.assertFalse(task.done())
+        self.assertNotIn("receivedNs", self.client.request_observations[1])
+        self.stdout.feed_data(self.frame({"jsonrpc": "2.0", "id": 1, "result": None}))
+        await asyncio.wait_for(task, 1)
+        self.assertEqual(self.client.request_observations[1]["status"], "success")
+
+    async def test_rpc_error_is_retained_and_still_raises(self):
+        task = await self.begin()
+        self.drained.set()
+        self.stdout.feed_data(self.frame({"jsonrpc": "2.0", "id": 1, "error": {"code": -32603, "message": "broken"}}))
+        with self.assertRaises(lsp.LspQueryError):
+            await task
+        self.assertEqual(self.client.request_observations[1]["status"], "rpc-error")
+        self.assertEqual(self.client.request_observations[1]["errorCode"], -32603)
+
+    async def test_timeout_is_retained_and_late_reply_cannot_overwrite_it(self):
+        self.drained.set()
+        task = await self.begin(timeout_ms=1)
+        with self.assertRaisesRegex(RuntimeError, "timeout"):
+            await task
+        self.stdout.feed_data(self.frame({"jsonrpc": "2.0", "id": 1, "result": None}))
+        await asyncio.sleep(0)
+        self.assertEqual(self.client.request_observations[1]["status"], "timeout")
+        self.assertNotIn("receivedNs", self.client.request_observations[1])
+        self.assertFalse(self.client.pending)
+
+    async def test_caller_cancellation_releases_pending_request(self):
+        task = await self.begin()
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertFalse(self.client.pending)
+        self.assertEqual(self.client.request_observations[1]["status"], "caller-cancelled")
+
+    async def test_lifecycle_is_retained_before_waiter_consumes_it(self):
+        self.drained.set()
+        waiter = asyncio.create_task(self.client.wait_for_notification(
+            lambda message: message.get("method") == lsp.ACTIVE_WORKSPACE_CHANGED, "ready"))
+        self.requests.append(waiter)
+        await asyncio.sleep(0)
+        self.stdout.feed_data(self.frame({"jsonrpc": "2.0", "method": lsp.ACTIVE_WORKSPACE_CHANGED,
+            "params": {"state": "ready", "workspaceRoot": "/app", "generation": 7}}))
+        await asyncio.wait_for(waiter, 1)
+        self.assertFalse(self.client.notifications)
+        self.assertEqual(self.client.lifecycle_observations[0]["params"]["generation"], 7)
+        self.assertEqual(self.client.lifecycle_observations[0]["receivedNs"], 100)
+
+    async def test_observation_limit_fails_instead_of_dropping_requests(self):
+        self.drained.set()
+        with patch.object(lsp, "MAX_OBSERVED_REQUESTS", 0):
+            with self.assertRaisesRegex(lsp.LspQueryError, "observation"):
+                await self.client.request("textDocument/hover", {})
+        self.assertFalse(self.messages)
+        self.assertFalse(self.client.pending)
+
+    async def test_deliberate_cancellation_records_its_actual_wire_send(self):
+        self.drained.set()
+        task = await self.begin(cancel_after_ms=0)
+
+        async def wait_for_cancel():
+            while len(self.messages) < 2:
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(wait_for_cancel(), 1)
+        self.assertEqual(self.messages[1]["method"], "$/cancelRequest")
+        self.assertEqual(self.messages[1]["params"], {"id": 1})
+        self.stdout.feed_data(self.frame({"jsonrpc": "2.0", "id": 1, "error": {"code": -32800, "message": "cancelled"}}))
+        reply = await asyncio.wait_for(task, 1)
+        self.assertEqual(reply["error"]["code"], -32800)
+        self.assertEqual(self.client.request_observations[1]["cancelWrittenNs"], 100)
+
+    async def test_truncated_response_remains_transport_failure(self):
+        self.drained.set()
+        task = await self.begin()
+        self.stdout.feed_data(self.frame({"id": 1, "result": None})[:-2])
+        self.stdout.feed_eof()
+        with self.assertRaisesRegex(RuntimeError, "middle of a message"):
+            await task
+        self.assertEqual(self.client.request_observations[1]["status"], "transport-error")
+
+    async def test_document_barrier_uses_complete_log_event_without_warmup_query(self):
+        path = observation.APP / "src/models/user.rs"
+        waiter = asyncio.create_task(self.client.wait_for_document_ready(path))
+        self.requests.append(waiter)
+        await asyncio.sleep(0)
+        event = {"schema": "suprnova-lsp-log/v1", "message": "editor document analysis route published",
+                 "fields": {"path": str(path), "ready": True, "session": "1"}}
+        frame = json.dumps(event).encode() + b"\n"
+        self.stderr.feed_data(frame[:-2])
+        await asyncio.sleep(0)
+        self.assertFalse(waiter.done())
+        self.stderr.feed_data(frame[-2:])
+        await asyncio.wait_for(waiter, 1)
+        self.assertFalse(self.messages, "the barrier must not prepare analysis with a query")
+        self.assertEqual(self.client.observation.stages[0]["observedNs"], 100)
+
+    async def test_missing_route_event_cannot_pass_barrier(self):
+        self.client.timeout_ms = 1
+        with self.assertRaisesRegex(lsp.LspQueryError, "route publication"):
+            await self.client.wait_for_document_ready(observation.APP / "src/models/user.rs")
+
+
+class FailedCliEvidence(unittest.IsolatedAsyncioTestCase):
+    async def test_supervisor_retains_nonzero_control_exit_but_rejects_incomplete_cleanup(self):
+        runner = observation.helpers.module("responsiveness_test_runner", ROOT / "tools/agent-debug.py")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "stdout.log").write_text("real control failure\n")
+            result = {"code": 1, "cleanup": {"verifiedEmpty": True}}
+            call = runner.CommandSpec("fake", [])
+            with patch.object(runner, "run_supervised", new=AsyncMock(return_value=result)):
+                observed, text = await runner.observe_command(call, root, {}, root, 1000)
+                self.assertEqual(observed["code"], 1)
+                self.assertIn("control failure", text)
+            for change in [{"cleanup": {"verifiedEmpty": False}}, {"timedOut": True},
+                           {"spawnError": "missing executable"}, {"signal": "SIGTERM"}, {"code": None}]:
+                with self.subTest(change=change), patch.object(runner, "run_supervised", new=AsyncMock(return_value=dict(result, **change))):
+                    with self.assertRaises(ValueError):
+                        await runner.observe_command(call, root, {}, root, 1000)
+
+    async def test_failed_query_persists_ledger_even_without_success_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Cargo.toml").write_text('[package]\nname="probe"\nversion="0.1.0"\n')
+            (root / "lib.rs").write_text("fn source() {}")
+            binary = root / "server"
+            binary.write_text("fake binary; startup is mocked")
+            row = {"id": 1, "method": "initialize", "status": "rpc-error", "errorCode": -32603}
+            client = SimpleNamespace(
+                enable_observations=lambda: None, request_observations={1: row}, lifecycle_observations=[],
+                observation=SimpleNamespace(stages=[]),
+                request=AsyncMock(side_effect=lsp.LspQueryError("real error")), close=AsyncMock(), stderr="",
+                server_log_file=root / "lsp-server.stderr.log",
+            )
+            plan = {"file": "lib.rs", "queries": [{"kind": "hover", "marker": "source"}]}
+            with patch.object(lsp.LspClient, "start", new=AsyncMock(return_value=client)):
+                with self.assertRaisesRegex(lsp.LspQueryError, "real error"):
+                    await lsp.run(["--workspace-root", str(root), "--binary", str(binary), "--query-json", json.dumps(plan)])
+            persisted = json.loads((root / "lsp-transport.json").read_text())
+            self.assertEqual(persisted["transport"], [row])
+            client.close.assert_awaited_once()
+
+
+if __name__ == "__main__":
+    unittest.main()
