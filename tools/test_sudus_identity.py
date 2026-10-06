@@ -8,6 +8,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 
@@ -23,6 +24,21 @@ class IdentityIntegrity(unittest.TestCase):
         self.packages = {"extension": True, "binary": True, "licenses": True}
         self.protocol = {"passed": True}
         self.regressions = {"AUT": True, "EDT": True}
+
+    def test_workflow_cargo_selectors_must_name_workspace_packages(self):
+        read_text = Path.read_text
+        ci = ROOT / ".github/workflows/ci.yml"
+        for selector in ["suprnova-lsp-zed", "rust-glancer-zed"]:
+            def read(path, *args, **kwargs):
+                text = read_text(path, *args, **kwargs)
+                if path == ci:
+                    text = text.replace("-p suprnova-lsp-zed", f"-p {selector}")
+                    text = text.replace("-p rust-glancer-zed", f"-p {selector}")
+                return text
+
+            with mock.patch.object(Path, "read_text", read):
+                self.assertEqual(identity.source_observations()["results"]["IDN-004"],
+                                 selector == "rust-glancer-zed", selector)
 
     def test_each_requirement_rejects_its_observed_violation(self):
         self.assertTrue(all(identity.assess(self.sources, True, self.packages, self.protocol, self.regressions).values()))
