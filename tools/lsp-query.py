@@ -632,7 +632,7 @@ class TransportObservations:
             if not isinstance(event, dict) or event.get("schema") != "suprnova-lsp-log/v1":
                 continue
             message = event.get("message", "")
-            if message not in {"editor document analysis route published", "analysis query started", "analysis query completed"}:
+            if message not in {"editor document analysis route published", "analysis query started", "analysis query completed", "document analysis prepared"}:
                 continue
             if len(self.stages) >= MAX_OBSERVED_EVENTS:
                 raise LspQueryError("stage observation limit exceeded")
@@ -722,11 +722,11 @@ class LspClient:
                 for task in (directory / "task").iterdir():
                     try:
                         children.update(int(child) for child in (task / "children").read_text().split())
-                    except FileNotFoundError:
+                    except (FileNotFoundError, ProcessLookupError):
                         if settled:
                             raise
                 pending.extend(children)
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
                 # Startup children can exit between reads. Settled samples require a full tree.
                 if settled:
                     raise
