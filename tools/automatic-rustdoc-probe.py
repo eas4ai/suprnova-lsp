@@ -239,6 +239,8 @@ class AutomaticProbe:
             assert "--jobs" in args and args[args.index("--jobs") + 1] == "2"
             assert "--target-dir" in args
             assert Path(args[args.index("--target-dir") + 1]).resolve().is_relative_to(self.artifacts.resolve())
+            assert entry.get("buildDirectory"), "intermediate build directory was not isolated"
+            assert Path(entry["buildDirectory"]).resolve().is_relative_to(self.artifacts.resolve())
             assert "+nightly-2026-08-19" in args or entry["toolchain"] == "nightly-2026-08-19"
             if self.plan.get("cargo", {}).get("target"):
                 assert "--target" in args and args[args.index("--target") + 1] == self.plan["cargo"]["target"]
@@ -246,7 +248,12 @@ class AutomaticProbe:
                 assert "--features" in args and "extra" in args[args.index("--features") + 1].split(",")
         assert all(e["code"] == 0 and e["exports"] for e in finishes), finishes
         assert not (self.root / "target").exists(), "worker wrote ordinary Cargo output"
-        return {"starts": starts, "finished": finishes}
+        for directory in self.plan.get("unownedBuildDirectories", []):
+            paths = sorted(str(path.relative_to(directory)) for path in Path(directory).rglob("*"))
+            assert paths == ["unowned-sentinel"], f"worker wrote unowned intermediate output: {directory}"
+            assert (Path(directory) / "unowned-sentinel").read_text() == "preserve this file\n"
+        return {"starts": starts, "finished": finishes,
+                "unownedBuildDirectories": self.plan.get("unownedBuildDirectories", [])}
 
     async def debounce(self):
         await self.status("current", timeout=5)

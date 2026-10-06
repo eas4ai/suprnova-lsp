@@ -55,7 +55,9 @@ impl<'a> CompilerPass<'a> {
         command
             .current_dir(self.root)
             .env("RUSTUP_AUTO_INSTALL", "0")
-            .env("CARGO_TARGET_DIR", self.artifacts.join("cargo"));
+            .env("CARGO_TARGET_DIR", self.artifacts.join("cargo"))
+            // Cargo can place intermediate artifacts separately from --target-dir.
+            .env("CARGO_BUILD_BUILD_DIR", self.artifacts.join("cargo"));
         if let Some(producer) = producer {
             command
                 .env("RUSTUP_TOOLCHAIN", &self.config.rustdoc.automatic.toolchain)
@@ -497,6 +499,71 @@ struct SelectedTarget {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn compiler_commands_isolate_configured_intermediate_outputs() {
+        let fixture = test_fixture::fixture_crate(
+            r#"
+            //- /Cargo.toml
+            [package]
+            name = "worker-output-control"
+            version = "0.1.0"
+            edition = "2024"
+            [workspace]
+            //- /src/lib.rs
+            pub fn value() -> u8 { 7 }
+            //- /build.rs
+            fn main() { println!("cargo::rustc-env=OUTPUT_CONTROL=7"); }
+            //- /.cargo/config.toml
+            [build]
+            build-dir = "ordinary-build"
+            //- /ordinary-build/sentinel
+            preserve
+        "#,
+        );
+        let root = fixture.path("");
+        let artifacts = tempfile::tempdir().unwrap();
+        let config = AnalysisConfig::default();
+        let (_sender, mut changes) = tokio::sync::watch::channel(1);
+        let mut pass = CompilerPass::new(&root, &config, artifacts.path(), 1, &mut changes);
+        let mut command = pass.command("cargo", None);
+        command.args(["generate-lockfile", "--offline"]);
+        pass.run(&mut command, "prepare isolated compiler control", 32 * 1024)
+            .await
+            .unwrap();
+        let mut command = pass.command("cargo", None);
+        command.args(["check", "--locked", "--offline", "--lib"]);
+        pass.run(
+            &mut command,
+            "compile configured intermediate-output control",
+            32 * 1024,
+        )
+        .await
+        .unwrap();
+        assert!(artifacts.path().join("cargo/debug/build").is_dir());
+        assert_eq!(
+            std::fs::read_dir(root.join("ordinary-build"))
+                .unwrap()
+                .count(),
+            1,
+            "compiler wrote into the workspace's ordinary build directory"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("ordinary-build/sentinel"))
+                .unwrap()
+                .trim(),
+            "preserve"
+        );
+        // An explicit override also prevents an inherited setting from choosing the directory.
+        assert_eq!(
+            command
+                .as_std()
+                .get_envs()
+                .find(|(name, _)| *name == "CARGO_BUILD_BUILD_DIR")
+                .and_then(|(_, value)| value),
+            Some(artifacts.path().join("cargo").as_os_str())
+        );
+    }
 
     #[tokio::test]
     async fn timeout_preserves_the_export_target_context() {

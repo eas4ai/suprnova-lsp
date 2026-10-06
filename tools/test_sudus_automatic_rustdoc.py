@@ -289,6 +289,40 @@ class Integrity(unittest.TestCase):
 
 
 class QueryObservationIntegrity(unittest.IsolatedAsyncioTestCase):
+    async def test_producer_observation_rejects_unowned_intermediate_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "outputs"
+            artifacts.mkdir()
+            ordinary = root / "ordinary"
+            ordinary.mkdir()
+            (ordinary / "unowned-sentinel").write_text("preserve this file\n")
+            value = probe.AutomaticProbe({"root": str(root), "control": str(root / "control"),
+                "events": str(root / "events"), "artifactRoot": str(artifacts),
+                "unownedBuildDirectories": [str(ordinary)]})
+            start = {"event": "started", "toolchain": "nightly-2026-08-19",
+                "buildDirectory": str(artifacts / "cargo"),
+                "args": ["rustdoc", "--locked", "--document-private-items", "--document-hidden-items",
+                         "--output-format", "json", "--jobs", "2", "--target-dir", str(artifacts)]}
+            value.events = lambda: [start, {"event": "finished", "code": 0, "exports": ["observed"]}]
+            async def current(*_args, **_kwargs):
+                return None
+            value.status = current
+            await value.producer_identity()
+            for build_dir in [None, str(ordinary)]:
+                start["buildDirectory"] = build_dir
+                with self.assertRaises(AssertionError):
+                    await value.producer_identity()
+            start["buildDirectory"] = str(artifacts / "cargo")
+            before = mechanism.unowned_outputs([ordinary])
+            (ordinary / "unexpected-directory").mkdir()
+            self.assertNotEqual(before, mechanism.unowned_outputs([ordinary]))
+            (ordinary / "unexpected-directory").rmdir()
+            (ordinary / "unexpected-output").write_text("compiler output")
+            self.assertNotEqual(before, mechanism.unowned_outputs([ordinary]))
+            with self.assertRaisesRegex(AssertionError, "unowned intermediate output"):
+                await value.producer_identity()
+
     async def test_query_observation_captures_sent_coordinates_without_request_ids(self):
         client = probe.ObservedClient.__new__(probe.ObservedClient)
         client.query_workload = []
