@@ -7,7 +7,7 @@ const EXPORT: &str = concat!(
 
 #[test]
 fn inspects_real_macro_api_without_starting_a_language_server() {
-    let output = Command::new(env!("CARGO_BIN_EXE_rust-glancer"))
+    let output = Command::new(env!("CARGO_BIN_EXE_suprnova-lsp"))
         .arg("inspect-rustdoc")
         .arg(EXPORT)
         .args(["--item", "rustdoc_macro_support::Post"])
@@ -62,7 +62,7 @@ fn inspects_real_macro_api_without_starting_a_language_server() {
 
 #[test]
 fn reports_unknown_type_without_emitting_a_partial_report() {
-    let output = Command::new(env!("CARGO_BIN_EXE_rust-glancer"))
+    let output = Command::new(env!("CARGO_BIN_EXE_suprnova-lsp"))
         .arg("inspect-rustdoc")
         .arg(EXPORT)
         .args(["--item", "rustdoc_macro_support::Missing"])
@@ -76,7 +76,7 @@ fn reports_unknown_type_without_emitting_a_partial_report() {
 #[test]
 fn reports_missing_export_with_its_path() {
     let missing = Path::new(EXPORT).with_file_name("missing-export.json");
-    let output = Command::new(env!("CARGO_BIN_EXE_rust-glancer"))
+    let output = Command::new(env!("CARGO_BIN_EXE_suprnova-lsp"))
         .arg("inspect-rustdoc")
         .arg(&missing)
         .args(["--item", "rustdoc_macro_support::Post"])

@@ -79,7 +79,7 @@ def liveness_failures(report: Any) -> list[str]:
         if not isinstance(result_count, int) or isinstance(result_count, bool):
             failures.append(f"{method} has no integer rust_glancer_count")
         elif result_count <= 0:
-            failures.append(f"{method} returned no rust-glancer results")
+            failures.append(f"{method} returned no suprnova-lsp results")
 
     return failures
 

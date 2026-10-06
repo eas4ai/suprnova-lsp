@@ -1,4 +1,4 @@
-//! Shared protocol contracts between the Rust Glancer LSP server and analysis engines.
+//! Shared protocol contracts between the Suprnova LSP LSP server and analysis engines.
 //!
 //! This crate owns the request, configuration, and notification types that must be understood on
 //! both sides of the LSP/engine boundary. Keeping those contracts here lets the server orchestrate

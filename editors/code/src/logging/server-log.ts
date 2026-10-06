@@ -6,7 +6,7 @@
  * The extension keeps this parser narrow so unknown or non-JSON stderr remains visible as raw log
  * output instead of disappearing.
  */
-const SERVER_LOG_SCHEMA = "rust-glancer-log/v1";
+const SERVER_LOG_SCHEMA = "suprnova-lsp-log/v1";
 
 export type ServerLogLevel = "trace" | "debug" | "info" | "warn" | "error";
 

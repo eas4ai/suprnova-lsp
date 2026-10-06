@@ -69,9 +69,9 @@ export class LanguageClientSession implements vscode.Disposable {
       config = ExtensionConfig.read();
     } catch (error) {
       this.clientStatus.failed(String(error));
-      this.extensionLog.error(`rust-glancer configuration is invalid: ${String(error)}`);
+      this.extensionLog.error(`suprnova-lsp configuration is invalid: ${String(error)}`);
       void vscode.window.showErrorMessage(
-        `Rust Glancer configuration is invalid: ${String(error)}`,
+        `Suprnova LSP configuration is invalid: ${String(error)}`,
       );
       return false;
     }
@@ -89,7 +89,7 @@ export class LanguageClientSession implements vscode.Disposable {
 
     const clientOptions: LanguageClientOptions = {
       documentSelector: [{ scheme: "file", language: "rust" }],
-      diagnosticCollectionName: "rust-glancer",
+      diagnosticCollectionName: "suprnova-lsp",
       outputChannel: this.serverOutput,
       initializationOptions: {
         cfg: config.cfg,
@@ -103,8 +103,8 @@ export class LanguageClientSession implements vscode.Disposable {
     };
 
     const client = new LanguageClient(
-      "rust-glancer",
-      "Rust Glancer",
+      "suprnova-lsp",
+      "Suprnova LSP",
       ResolvedServer.options(server, this.extensionLog),
       clientOptions,
     );
@@ -161,15 +161,15 @@ export class LanguageClientSession implements vscode.Disposable {
       await client.start();
       this.clientStatus.ready(statusDetails);
       this.refreshStatus();
-      this.extensionLog.info("rust-glancer client started");
+      this.extensionLog.info("suprnova-lsp client started");
     } catch (error) {
       this.client = undefined;
       this.clientState?.dispose();
       this.clientState = undefined;
       this.clientStatus.failed(String(error), statusDetails);
-      this.extensionLog.error(`rust-glancer client failed to start: ${String(error)}`);
+      this.extensionLog.error(`suprnova-lsp client failed to start: ${String(error)}`);
       void vscode.window.showErrorMessage(
-        "Rust Glancer failed to start. Check the Rust Glancer output for details.",
+        "Suprnova LSP failed to start. Check the Suprnova LSP output for details.",
       );
       return false;
     }
@@ -180,11 +180,11 @@ export class LanguageClientSession implements vscode.Disposable {
   public async reindexWorkspace(): Promise<void> {
     const client = this.client;
     if (!this.clientStatus.isRunning() || client === undefined) {
-      void vscode.window.showWarningMessage("Rust Glancer is not running.");
+      void vscode.window.showWarningMessage("Suprnova LSP is not running.");
       return;
     }
 
-    this.extensionLog.info("reindexing rust-glancer active workspace");
+    this.extensionLog.info("reindexing suprnova-lsp active workspace");
     this.clientStatus.indexing();
 
     try {
@@ -192,13 +192,13 @@ export class LanguageClientSession implements vscode.Disposable {
         command: SERVER_COMMANDS.reindexWorkspace,
         arguments: [],
       });
-      this.extensionLog.info("rust-glancer active workspace reindex finished");
+      this.extensionLog.info("suprnova-lsp active workspace reindex finished");
       this.refreshStatus();
     } catch (error) {
-      this.extensionLog.error(`rust-glancer active workspace reindex failed: ${String(error)}`);
+      this.extensionLog.error(`suprnova-lsp active workspace reindex failed: ${String(error)}`);
       this.clientStatus.operationFailed(`reindex failed: ${String(error)}`);
       void vscode.window.showErrorMessage(
-        "Rust Glancer failed to reindex the workspace. Check the Rust Glancer output for details.",
+        "Suprnova LSP failed to reindex the workspace. Check the Suprnova LSP output for details.",
       );
     }
   }
@@ -212,7 +212,7 @@ export class LanguageClientSession implements vscode.Disposable {
     if (client !== undefined) {
       // Keep the transport open while owned compiler trees and queued source queries drain.
       await client.stop(30_000);
-      this.extensionLog.info("rust-glancer client stopped");
+      this.extensionLog.info("suprnova-lsp client stopped");
     }
 
     this.clientStatus.stopped("not running");

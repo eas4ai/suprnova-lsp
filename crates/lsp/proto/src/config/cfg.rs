@@ -22,7 +22,7 @@ impl AnalysisCfgConfig {
         let test = match cfg.get("test") {
             Some(value) => value
                 .as_bool()
-                .ok_or_else(|| anyhow::anyhow!("rust-glancer cfg.test must be a boolean"))?,
+                .ok_or_else(|| anyhow::anyhow!("suprnova-lsp cfg.test must be a boolean"))?,
             None => default.test,
         };
         let atoms = match cfg.get("atoms") {
@@ -36,21 +36,21 @@ impl AnalysisCfgConfig {
     fn parse_atoms(value: &LspAny) -> anyhow::Result<Vec<String>> {
         let atoms = value
             .as_array()
-            .ok_or_else(|| anyhow::anyhow!("rust-glancer cfg.atoms must be an array"))?;
+            .ok_or_else(|| anyhow::anyhow!("suprnova-lsp cfg.atoms must be an array"))?;
         let mut parsed = Vec::new();
 
         for (idx, atom) in atoms.iter().enumerate() {
             let atom = atom
                 .as_str()
-                .ok_or_else(|| anyhow::anyhow!("rust-glancer cfg.atoms[{idx}] must be a string"))?
+                .ok_or_else(|| anyhow::anyhow!("suprnova-lsp cfg.atoms[{idx}] must be a string"))?
                 .trim();
             anyhow::ensure!(
                 !atom.is_empty(),
-                "rust-glancer cfg.atoms[{idx}] must not be empty",
+                "suprnova-lsp cfg.atoms[{idx}] must not be empty",
             );
             anyhow::ensure!(
                 Self::is_cfg_atom_name(atom),
-                "rust-glancer cfg.atoms[{idx}] must be a cfg atom name such as `tokio_unstable`; key-value cfgs are not supported here",
+                "suprnova-lsp cfg.atoms[{idx}] must be a cfg atom name such as `tokio_unstable`; key-value cfgs are not supported here",
             );
             if !parsed.iter().any(|known| known == atom) {
                 parsed.push(atom.to_string());
@@ -127,7 +127,7 @@ mod tests {
             .expect_err("malformed cfg.test should be rejected");
 
         assert!(
-            error.to_string().contains("rust-glancer cfg.test"),
+            error.to_string().contains("suprnova-lsp cfg.test"),
             "{error:?}",
         );
     }
@@ -137,12 +137,12 @@ mod tests {
         let fixtures = [
             (
                 json!({ "cfg": { "atoms": true } }),
-                "rust-glancer cfg.atoms",
+                "suprnova-lsp cfg.atoms",
                 "non-array cfg atoms should be rejected",
             ),
             (
                 json!({ "cfg": { "atoms": [true] } }),
-                "rust-glancer cfg.atoms[0]",
+                "suprnova-lsp cfg.atoms[0]",
                 "non-string cfg atoms should be rejected",
             ),
             (

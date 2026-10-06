@@ -117,7 +117,7 @@ def render_comment(
         [
             render_context(current, base),
             "",
-            "Values compare rust-glancer public-LSP responses against rust-analyzer. Deltas are percentage points.",
+            "Values compare suprnova-lsp public-LSP responses against rust-analyzer. Deltas are percentage points.",
             "",
             render_score_table(current, base),
             "",

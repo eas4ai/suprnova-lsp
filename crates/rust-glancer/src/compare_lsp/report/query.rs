@@ -207,7 +207,7 @@ impl QueryReport {
         table
             .text_column("method")
             .text_column("query")
-            .duration_column_as("rust_glancer_ms", "rust-glancer")
+            .duration_column_as("rust_glancer_ms", "suprnova-lsp")
             .duration_column_as("rust_analyzer_ms", "rust-analyzer")
             .text_column("outcome")
             .column_as(
@@ -342,7 +342,7 @@ impl QueryReport {
     fn configure_query_table(table: &mut ReportTableBuilder) {
         table
             .text_column("query")
-            .duration_column_as("rust_glancer_ms", "rust-glancer")
+            .duration_column_as("rust_glancer_ms", "suprnova-lsp")
             .duration_column_as("rust_analyzer_ms", "rust-analyzer")
             .text_column("outcome")
             .count_column("rust_glancer_count")

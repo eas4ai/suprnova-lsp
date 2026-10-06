@@ -9,10 +9,10 @@ import {
 } from "../src/logging/server-log";
 
 describe("server log parsing", () => {
-  it("parses structured rust-glancer log lines", () => {
+  it("parses structured suprnova-lsp log lines", () => {
     const parsed = parseServerLogLine(
       JSON.stringify({
-        schema: "rust-glancer-log/v1",
+        schema: "suprnova-lsp-log/v1",
         level: "INFO",
         component: "engine",
         engine: "simple_crate",
@@ -40,7 +40,7 @@ describe("server log parsing", () => {
   it("parses the Rust log level used for channel routing", () => {
     const parsed = parseServerLogLine(
       JSON.stringify({
-        schema: "rust-glancer-log/v1",
+        schema: "suprnova-lsp-log/v1",
         level: "TRACE",
         component: "server",
         target: "rg_lsp_server::backend",

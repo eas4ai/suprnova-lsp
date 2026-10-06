@@ -26,7 +26,7 @@ pub(crate) async fn execute_command(
             Ok(None)
         }
         command => Err(tower_lsp_server::jsonrpc::Error::invalid_params(format!(
-            "unsupported rust-glancer command `{command}`",
+            "unsupported suprnova-lsp command `{command}`",
         ))),
     }
 }

@@ -11,7 +11,7 @@ use crate::compare_lsp::{
 /// Compares inlay hints by line-local label sequences.
 ///
 /// Inlay hints are visually attached to character positions, but small position differences are
-/// not very meaningful for this benchmark while rust-glancer is still not trying to be a perfect
+/// not very meaningful for this benchmark while suprnova-lsp is still not trying to be a perfect
 /// rust-analyzer replica. For each source line, we compare only hint labels and preserve their
 /// relative order, so inserted or omitted hints do not turn every later hint on the line into a
 /// mismatch.

@@ -1,4 +1,4 @@
-//! Rust Glancer's private status notifications.
+//! Suprnova LSP's private status notifications.
 //!
 //! The VS Code extension uses the active-workspace and deferred-indexing events to render its
 //! detailed status bar. These notifications predate the portable progress and rust-analyzer-compatible
@@ -12,9 +12,9 @@ use tower_lsp_server::{
     gen_lsp_types::{LspAny, LspNotificationMethod, LspObject, MessageDirection, Notification},
 };
 
-const ACTIVE_WORKSPACE_CHANGED_METHOD: &str = "rust-glancer/activeWorkspaceChanged";
-const DEFERRED_INDEXING_STARTED_METHOD: &str = "rust-glancer/deferredIndexingStarted";
-const DEFERRED_INDEXING_FINISHED_METHOD: &str = "rust-glancer/deferredIndexingFinished";
+const ACTIVE_WORKSPACE_CHANGED_METHOD: &str = "suprnova-lsp/activeWorkspaceChanged";
+const DEFERRED_INDEXING_STARTED_METHOD: &str = "suprnova-lsp/deferredIndexingStarted";
+const DEFERRED_INDEXING_FINISHED_METHOD: &str = "suprnova-lsp/deferredIndexingFinished";
 
 pub(super) async fn active_workspace_changed(
     lsp_client: &LspClient,

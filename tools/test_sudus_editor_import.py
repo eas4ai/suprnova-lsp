@@ -137,7 +137,7 @@ class OwnedMemoryObservation(unittest.IsolatedAsyncioTestCase):
                 process = root / str(pid)
                 task = process / "task" / str(pid)
                 task.mkdir(parents=True)
-                (process / "cmdline").write_bytes(b"/repo/rust-glancer\0lsp\0")
+                (process / "cmdline").write_bytes(b"/repo/suprnova-lsp\0lsp\0")
                 (process / "statm").write_text(f"10 {rss} 0")
                 (task / "children").write_text(children)
             client = query.LspClient.__new__(query.LspClient)

@@ -200,7 +200,7 @@ impl WorkspaceWatcher {
                     }
 
                     // Linux inotify reports opening and reading a file as watcher events. Those
-                    // accesses are especially common while rust-glancer indexes its own workspace,
+                    // accesses are especially common while suprnova-lsp indexes its own workspace,
                     // but they cannot make the saved project stale. Only an explicit
                     // close-after-write remains useful as a mutation signal; normal modify events
                     // cover backends that do not report the close mode.
@@ -572,14 +572,14 @@ mod tests {
         let root = NormalizedPathBuf::from_absolute(fixture.path("")).unwrap();
         let ownership = std::sync::Arc::new(std::sync::RwLock::new(Vec::new()));
         let mut snapshot = ProjectPathSnapshot::scan(&root, std::sync::Arc::clone(&ownership));
-        let owned = root.as_path().join("artifacts/.rust-glancer-rustdoc-owned");
+        let owned = root.as_path().join("artifacts/.suprnova-lsp-rustdoc-owned");
         std::fs::create_dir_all(&owned).unwrap();
         ownership.write().unwrap().push(owned.clone());
         std::fs::write(owned.join("generated.rs"), "compiler output").unwrap();
         assert!(snapshot.changed_paths_after_rescan(&root).is_empty());
         let unowned = root
             .as_path()
-            .join("artifacts/.rust-glancer-rustdoc-unowned/source.rs");
+            .join("artifacts/.suprnova-lsp-rustdoc-unowned/source.rs");
         std::fs::create_dir_all(unowned.parent().unwrap()).unwrap();
         std::fs::write(&unowned, "pub struct OrdinarySource;").unwrap();
         let configuration = root.as_path().join(".cargo/config.toml");

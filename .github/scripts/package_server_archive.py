@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package a Rust Glancer binary for editor-managed installation."""
+"""Package a Suprnova LSP binary for editor-managed installation."""
 
 import argparse
 import gzip
@@ -15,11 +15,11 @@ from typing import BinaryIO, Dict, Optional, Tuple
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 STABLE_SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 TARGET_EXECUTABLES = {
-    "aarch64-apple-darwin": "rust-glancer",
-    "aarch64-unknown-linux-gnu": "rust-glancer",
-    "x86_64-apple-darwin": "rust-glancer",
-    "x86_64-pc-windows-msvc": "rust-glancer.exe",
-    "x86_64-unknown-linux-gnu": "rust-glancer",
+    "aarch64-apple-darwin": "suprnova-lsp",
+    "aarch64-unknown-linux-gnu": "suprnova-lsp",
+    "x86_64-apple-darwin": "suprnova-lsp",
+    "x86_64-pc-windows-msvc": "suprnova-lsp.exe",
+    "x86_64-unknown-linux-gnu": "suprnova-lsp",
 }
 
 
@@ -30,7 +30,7 @@ def main() -> None:
     if arguments.target not in TARGET_EXECUTABLES:
         raise SystemExit(f"Unsupported release target: {arguments.target!r}")
 
-    archive_name = f"rust-glancer-{arguments.version}-{arguments.target}.tar.gz"
+    archive_name = f"suprnova-lsp-{arguments.version}-{arguments.target}.tar.gz"
     output = arguments.out or WORKSPACE_ROOT / "dist" / archive_name
     executable_name = TARGET_EXECUTABLES[arguments.target]
     sources = {
@@ -88,7 +88,7 @@ def main() -> None:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Package a standalone Rust Glancer release archive."
+        description="Package a standalone Suprnova LSP release archive."
     )
     parser.add_argument("--target", required=True, help="Rust target triple")
     parser.add_argument("--version", required=True, help="stable release version")

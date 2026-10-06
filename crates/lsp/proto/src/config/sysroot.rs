@@ -20,9 +20,9 @@ impl SysrootDiscovery {
 
         let value = value
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("rust-glancer sysroot.discovery must be a string"))?;
+            .ok_or_else(|| anyhow::anyhow!("suprnova-lsp sysroot.discovery must be a string"))?;
         Self::from_config_name(value).ok_or_else(|| {
-            anyhow::anyhow!("rust-glancer sysroot.discovery must be one of: auto, disabled")
+            anyhow::anyhow!("suprnova-lsp sysroot.discovery must be one of: auto, disabled")
         })
     }
 
@@ -77,7 +77,7 @@ mod tests {
             .expect_err("unknown sysroot discovery should be rejected");
 
         assert!(
-            error.to_string().contains("rust-glancer sysroot.discovery"),
+            error.to_string().contains("suprnova-lsp sysroot.discovery"),
             "{error:?}",
         );
     }

@@ -46,7 +46,7 @@ impl StartedServers {
             rust_glancer_server
                 .settle_after_readiness()
                 .await
-                .context("Waiting for rust-glancer post-ready settle failed")?,
+                .context("Waiting for suprnova-lsp post-ready settle failed")?,
         );
         let rust_analyzer_readiness = rust_analyzer_readiness.with_settle_latency(
             rust_analyzer_server
@@ -139,7 +139,7 @@ impl StartedServers {
             (Err(rust_glancer_error), Err(rust_analyzer_error)) => {
                 anyhow::bail!(
                     "both LSP servers failed during shutdown\n\
-                     rust-glancer: {rust_glancer_error}\n\
+                     suprnova-lsp: {rust_glancer_error}\n\
                      rust-analyzer: {rust_analyzer_error}",
                 );
             }

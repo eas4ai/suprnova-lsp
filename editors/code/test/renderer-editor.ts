@@ -198,7 +198,7 @@ export class RendererEditor {
   }
 
   private static async debuggerUrl(): Promise<string> {
-    const userDataDir = process.env.RUST_GLANCER_VSCODE_USER_DATA_DIR;
+    const userDataDir = process.env.SUPRNOVA_LSP_VSCODE_USER_DATA_DIR;
     if (userDataDir === undefined) {
       throw new Error("test launcher did not expose the VS Code user-data directory");
     }

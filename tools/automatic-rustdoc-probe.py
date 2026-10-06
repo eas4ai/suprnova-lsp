@@ -13,7 +13,7 @@ import traceback
 
 
 ROOT = Path(__file__).resolve().parent.parent
-STATUS = "rust-glancer/rustdocStatus"
+STATUS = "suprnova-lsp/rustdocStatus"
 
 
 spec = importlib.util.spec_from_file_location("automatic_probe_helpers", ROOT / "tools/sudus-editor-import.py")
@@ -160,7 +160,7 @@ class AutomaticProbe:
 
     async def reindex(self):
         response = await self.client.request("workspace/executeCommand", {
-            "command": "rust-glancer.internal.reindexWorkspace", "arguments": []})
+            "command": "suprnova-lsp.internal.reindexWorkspace", "arguments": []})
         assert "error" not in response, response
 
     async def case(self, name, operation):

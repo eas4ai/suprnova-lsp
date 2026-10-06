@@ -93,7 +93,7 @@ jobs:
         run: npm ci
         working-directory: editors/code
       - name: Build and check language server
-        run: cargo run --profile dist -p rust-glancer --target "${{ matrix.rust_target }}" -- --help
+        run: cargo run --profile dist -p suprnova-lsp --target "${{ matrix.rust_target }}" -- --help
       - name: Package standalone language server
         run: >-
           ${{ matrix.python }} .github/scripts/package_server_archive.py
@@ -107,15 +107,15 @@ jobs:
           --target "${{ matrix.rust_target }}"
           --profile dist
           --vscode-target "${{ matrix.vscode_target }}"
-          --out "../../dist/rust-glancer-${{ needs.release_please.outputs.version }}-${{ matrix.vscode_target }}.vsix"
+          --out "../../dist/suprnova-lsp-${{ needs.release_please.outputs.version }}-${{ matrix.vscode_target }}.vsix"
         working-directory: editors/code
       - name: Upload release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-assets-${{ matrix.vscode_target }}
           path: |
-            dist/rust-glancer-${{ needs.release_please.outputs.version }}-${{ matrix.vscode_target }}.vsix
-            dist/rust-glancer-${{ needs.release_please.outputs.version }}-${{ matrix.rust_target }}.tar.gz
+            dist/suprnova-lsp-${{ needs.release_please.outputs.version }}-${{ matrix.vscode_target }}.vsix
+            dist/suprnova-lsp-${{ needs.release_please.outputs.version }}-${{ matrix.rust_target }}.tar.gz
           if-no-files-found: error
           retention-days: 7
 
@@ -161,11 +161,11 @@ jobs:
           fi
 
           packages=(
-            "../../dist/rust-glancer-${RELEASE_VERSION}-linux-x64.vsix"
-            "../../dist/rust-glancer-${RELEASE_VERSION}-linux-arm64.vsix"
-            "../../dist/rust-glancer-${RELEASE_VERSION}-darwin-x64.vsix"
-            "../../dist/rust-glancer-${RELEASE_VERSION}-darwin-arm64.vsix"
-            "../../dist/rust-glancer-${RELEASE_VERSION}-win32-x64.vsix"
+            "../../dist/suprnova-lsp-${RELEASE_VERSION}-linux-x64.vsix"
+            "../../dist/suprnova-lsp-${RELEASE_VERSION}-linux-arm64.vsix"
+            "../../dist/suprnova-lsp-${RELEASE_VERSION}-darwin-x64.vsix"
+            "../../dist/suprnova-lsp-${RELEASE_VERSION}-darwin-arm64.vsix"
+            "../../dist/suprnova-lsp-${RELEASE_VERSION}-win32-x64.vsix"
           )
 
           for package in "${packages[@]}"; do
@@ -188,11 +188,11 @@ jobs:
           fi
 
           packages=(
-            "../../dist/rust-glancer-${RELEASE_VERSION}-linux-x64.vsix"
-            "../../dist/rust-glancer-${RELEASE_VERSION}-linux-arm64.vsix"
-            "../../dist/rust-glancer-${RELEASE_VERSION}-darwin-x64.vsix"
-            "../../dist/rust-glancer-${RELEASE_VERSION}-darwin-arm64.vsix"
-            "../../dist/rust-glancer-${RELEASE_VERSION}-win32-x64.vsix"
+            "../../dist/suprnova-lsp-${RELEASE_VERSION}-linux-x64.vsix"
+            "../../dist/suprnova-lsp-${RELEASE_VERSION}-linux-arm64.vsix"
+            "../../dist/suprnova-lsp-${RELEASE_VERSION}-darwin-x64.vsix"
+            "../../dist/suprnova-lsp-${RELEASE_VERSION}-darwin-arm64.vsix"
+            "../../dist/suprnova-lsp-${RELEASE_VERSION}-win32-x64.vsix"
           )
 
           ./node_modules/.bin/ovsx publish --skip-duplicate --packagePath "${packages[@]}"

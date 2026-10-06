@@ -18,9 +18,9 @@ use self::{
     compare_lsp::CliFixture,
 };
 
-/// Command-line interface for the `rust-glancer` binary.
+/// Command-line interface for the `suprnova-lsp` binary.
 #[derive(Debug, Parser)]
-#[command(name = "rust-glancer")]
+#[command(name = "suprnova-lsp")]
 #[command(about = "An incomplete-by-design Rust LSP implementation")]
 #[command(version = rg_lsp_server::VERSION)]
 struct Cli {
@@ -57,7 +57,7 @@ enum Command {
         /// Which packages should remain resident after analysis is built.
         #[clap(long = "package-residency", value_enum, default_value = "all-resident")]
         package_residency: CliPackageResidencyPolicy,
-        /// Which indexing performance trade-off rust-glancer should prioritize.
+        /// Which indexing performance trade-off suprnova-lsp should prioritize.
         #[clap(
             long = "indexing-preference",
             value_enum,
@@ -74,7 +74,7 @@ enum Command {
         #[clap(long, value_enum, default_value = "text")]
         format: self::analyze::OutputFormat,
     },
-    /// Compare rust-glancer LSP query behavior against another LSP server.
+    /// Compare suprnova-lsp LSP query behavior against another LSP server.
     CompareLsp {
         fixture: CliFixture,
         /// Override the fixture root. Defaults to the selected fixture's configured root.

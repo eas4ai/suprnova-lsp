@@ -53,7 +53,7 @@ impl PrepareRenameComparison {
             .cloned()
             .collect::<Vec<_>>();
 
-        // Optional response data is directional. A valid rust-glancer placeholder is compatible
+        // Optional response data is directional. A valid suprnova-lsp placeholder is compatible
         // with rust-analyzer returning only the same range; omitting rust-analyzer's placeholder is
         // still reported as a loss.
         let mut compatible = Vec::new();

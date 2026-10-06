@@ -280,7 +280,7 @@ async def main():
         code, _ = await run("integrity", sys.executable, [str(ROOT / "tools/test_sudus_suprnova_user.py")], timeout=60_000)
         if code != 0:
             raise ValueError("mechanism integrity tests failed")
-        code, _ = await run("build", "cargo", ["build", "--locked", "--offline", "-p", "rust-glancer", "--example", "suprnova_user"], env=build_env)
+        code, _ = await run("build", "cargo", ["build", "--locked", "--offline", "-p", "suprnova-lsp", "--example", "suprnova_user"], env=build_env)
         if code != 0:
             raise ValueError("acceptance executable failed to compile")
         test_env = dict(build_env, RG_SUPRNOVA_PLAN=str(plan_path), NEXTEST_EXPERIMENTAL_LIBTEST_JSON="1")

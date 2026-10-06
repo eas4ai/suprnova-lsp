@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "rust-glancer: compile VS Code extension",
+      "label": "suprnova-lsp: compile VS Code extension",
       "type": "shell",
       "command": "npm",
       "args": [

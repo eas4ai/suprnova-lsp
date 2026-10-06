@@ -24,7 +24,7 @@ def main() -> None:
     base = normalize_optional_report(read_optional_json(args.base))
     title = args.section_title
     if title is None and not args.body_only:
-        title = "Rust Glancer Memory Profile"
+        title = "Suprnova LSP Memory Profile"
     markdown = render_comment(current, base, title)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(markdown, encoding="utf-8")
@@ -177,7 +177,7 @@ def flatten_current_checkpoint(checkpoint: dict[str, Any]) -> dict[str, Any]:
 def render_comment(
     current: MemoryProfileReport,
     base: Optional[MemoryProfileReport],
-    title: Optional[str] = "Rust Glancer Memory Profile",
+    title: Optional[str] = "Suprnova LSP Memory Profile",
 ) -> str:
     lines = []
     if title is not None:

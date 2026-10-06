@@ -65,7 +65,7 @@ impl Backend {
     async fn registry(&self) -> Result<&EngineRegistry> {
         self.engines.get().ok_or(Error {
             code: ErrorCode::ServerError(-32002),
-            message: Cow::Borrowed("rust-glancer engine registry is not initialized"),
+            message: Cow::Borrowed("suprnova-lsp engine registry is not initialized"),
             data: None,
         })
     }
@@ -205,7 +205,7 @@ impl LanguageServer for Backend {
         })?;
         if workspace_folders.is_empty() {
             return Err(Error::invalid_params(
-                "rust-glancer requires at least one filesystem workspace folder",
+                "suprnova-lsp requires at least one filesystem workspace folder",
             ));
         }
 
@@ -222,7 +222,7 @@ impl LanguageServer for Backend {
             .set(client_capabilities)
             .map_err(|_| Error {
                 code: ErrorCode::InvalidRequest,
-                message: Cow::Borrowed("rust-glancer client capabilities are already initialized"),
+                message: Cow::Borrowed("suprnova-lsp client capabilities are already initialized"),
                 data: None,
             })?;
         let engines = EngineRegistry::new(
@@ -240,14 +240,14 @@ impl LanguageServer for Backend {
 
         self.engines.set(engines).map_err(|_| Error {
             code: ErrorCode::InvalidRequest,
-            message: Cow::Borrowed("rust-glancer engine registry is already initialized"),
+            message: Cow::Borrowed("suprnova-lsp engine registry is already initialized"),
             data: None,
         })?;
         self.project_watcher
             .set(project_watcher)
             .map_err(|_| Error {
                 code: ErrorCode::InvalidRequest,
-                message: Cow::Borrowed("rust-glancer project watcher is already initialized"),
+                message: Cow::Borrowed("suprnova-lsp project watcher is already initialized"),
                 data: None,
             })?;
 
@@ -256,7 +256,7 @@ impl LanguageServer for Backend {
 
     #[tracing::instrument(skip_all, fields(rg.method = "initialized"))]
     async fn initialized(&self, _params: InitializedParams) {
-        tracing::debug!("rust-glancer LSP server initialized");
+        tracing::debug!("suprnova-lsp LSP server initialized");
     }
 
     #[tracing::instrument(skip_all, fields(rg.method = "shutdown"))]
@@ -268,7 +268,7 @@ impl LanguageServer for Backend {
         registry.begin_shutdown().await;
         for engine_client in registry.engine_clients().await {
             if let Err(error) = methods::shutdown(engine_client).await {
-                tracing::debug!(error = %error, "failed to shut down rust-glancer engine");
+                tracing::debug!(error = %error, "failed to shut down suprnova-lsp engine");
             }
         }
 
@@ -574,7 +574,7 @@ impl LanguageServer for Backend {
         let Some(engine_client) = self.active_engine_client().await? else {
             return Err(Error {
                 code: ErrorCode::InvalidRequest,
-                message: Cow::Borrowed("Rust Glancer has no active Rust project for this command"),
+                message: Cow::Borrowed("Suprnova LSP has no active Rust project for this command"),
                 data: None,
             });
         };

@@ -6,7 +6,7 @@ import type { StatusDetails } from "../src/status/status-model";
 
 const DETAILS: StatusDetails = {
   workspaceRoot: "/workspace/window",
-  serverCommand: "rust-glancer lsp",
+  serverCommand: "suprnova-lsp lsp",
   serverSource: "test",
 };
 
@@ -25,7 +25,7 @@ describe("client status state precedence", () => {
       },
       false,
     );
-    assert.equal(render(status), "ready: $(check) Rust Glancer: ready [a]");
+    assert.equal(render(status), "ready: $(check) Suprnova LSP: ready [a]");
     status.activeWorkspace("/workspace/b", "ready", undefined, false);
     assert.match(render(status), /generated APIs failed/);
     assert.match(status.snapshot().details?.generatedApiMessage ?? "", /install and reindex/);
@@ -58,25 +58,25 @@ describe("client status state precedence", () => {
 
     assert.equal(
       render(status),
-      "diagnostics-running: $(sync~spin) Rust Glancer: cargo check running",
+      "diagnostics-running: $(sync~spin) Suprnova LSP: cargo check running",
     );
 
     status.activeWorkspace("/workspace/project_a", "indexing", undefined, true);
-    assert.equal(render(status), "indexing: $(sync~spin) Rust Glancer: indexing [project_a]");
+    assert.equal(render(status), "indexing: $(sync~spin) Suprnova LSP: indexing [project_a]");
 
     status.activeWorkspace("/workspace/project_a", "ready", undefined, true);
-    assert.equal(render(status), "stale: $(warning) Rust Glancer: stale until save [project_a]");
+    assert.equal(render(status), "stale: $(warning) Suprnova LSP: stale until save [project_a]");
 
     status.refresh(false);
     assert.equal(
       render(status),
-      "diagnostics-running: $(sync~spin) Rust Glancer: cargo check running [project_a]",
+      "diagnostics-running: $(sync~spin) Suprnova LSP: cargo check running [project_a]",
     );
 
     status.handleWorkDoneProgress("cargo", { kind: "end", message: "Failed" }, false);
     assert.equal(
       render(status),
-      "diagnostics-failed: $(error) Rust Glancer: cargo check failed [project_a]",
+      "diagnostics-failed: $(error) Suprnova LSP: cargo check failed [project_a]",
     );
   });
 
@@ -92,7 +92,7 @@ describe("client status state precedence", () => {
 
     status.activeWorkspace("/workspace/project_b", "failed", "index failed", true);
 
-    assert.equal(render(status), "failed: $(error) Rust Glancer: failed [project_b]");
+    assert.equal(render(status), "failed: $(error) Suprnova LSP: failed [project_b]");
     assert.equal(status.snapshot().diagnosticsRunning, true);
     assert.equal(status.snapshot().failureReason, undefined);
   });
@@ -104,10 +104,10 @@ describe("client status state precedence", () => {
 
     status.activeWorkspace("/workspace/project_c", "ready", undefined, false);
     status.deferredIndexingStarted("/workspace/project_c", false);
-    assert.equal(render(status), "ready: ~ Rust Glancer: ready [project_c]");
+    assert.equal(render(status), "ready: ~ Suprnova LSP: ready [project_c]");
 
     status.deferredIndexingFinished("/workspace/project_c", "succeeded", undefined, false);
-    assert.equal(render(status), "ready: $(check) Rust Glancer: ready [project_c]");
+    assert.equal(render(status), "ready: $(check) Suprnova LSP: ready [project_c]");
   });
 
   it("keeps the workspace ready but warns when deferred indexing fails", () => {
@@ -125,13 +125,13 @@ describe("client status state precedence", () => {
     );
     assert.equal(
       render(status),
-      "ready: $(warning) Rust Glancer: ready; background index failed [project_c]",
+      "ready: $(warning) Suprnova LSP: ready; background index failed [project_c]",
     );
 
     status.deferredIndexingStarted("/workspace/project_c", false);
-    assert.equal(render(status), "ready: ~ Rust Glancer: ready [project_c]");
+    assert.equal(render(status), "ready: ~ Suprnova LSP: ready [project_c]");
     status.deferredIndexingFinished("/workspace/project_c", "succeeded", undefined, false);
-    assert.equal(render(status), "ready: $(check) Rust Glancer: ready [project_c]");
+    assert.equal(render(status), "ready: $(check) Suprnova LSP: ready [project_c]");
   });
 
   it("returns through indexing and explicit deferred-ready after a saved project rebuild", () => {
@@ -140,16 +140,16 @@ describe("client status state precedence", () => {
     status.ready(DETAILS);
     status.activeWorkspace("/workspace/project_c", "ready", undefined, false);
     status.deferredIndexingFinished("/workspace/project_c", "succeeded", undefined, false);
-    assert.equal(render(status), "ready: $(check) Rust Glancer: ready [project_c]");
+    assert.equal(render(status), "ready: $(check) Suprnova LSP: ready [project_c]");
 
     status.activeWorkspace("/workspace/project_c", "indexing", undefined, false);
-    assert.equal(render(status), "indexing: $(sync~spin) Rust Glancer: indexing [project_c]");
+    assert.equal(render(status), "indexing: $(sync~spin) Suprnova LSP: indexing [project_c]");
 
     status.deferredIndexingStarted("/workspace/project_c", false);
     status.activeWorkspace("/workspace/project_c", "ready", undefined, false);
-    assert.equal(render(status), "ready: ~ Rust Glancer: ready [project_c]");
+    assert.equal(render(status), "ready: ~ Suprnova LSP: ready [project_c]");
     status.deferredIndexingFinished("/workspace/project_c", "succeeded", undefined, false);
-    assert.equal(render(status), "ready: $(check) Rust Glancer: ready [project_c]");
+    assert.equal(render(status), "ready: $(check) Suprnova LSP: ready [project_c]");
   });
 
   it("does not invent deferred work for an ordinary indexing cycle", () => {
@@ -164,7 +164,7 @@ describe("client status state precedence", () => {
     status.activeWorkspace("/workspace/project_c", "indexing", undefined, false);
     status.activeWorkspace("/workspace/project_c", "ready", undefined, false);
 
-    assert.equal(render(status), "ready: $(check) Rust Glancer: ready [project_c]");
+    assert.equal(render(status), "ready: $(check) Suprnova LSP: ready [project_c]");
   });
 
   it("keeps deferred indexing state scoped to workspace roots", () => {
@@ -174,10 +174,10 @@ describe("client status state precedence", () => {
 
     status.activeWorkspace("/workspace/project_a", "ready", undefined, false);
     status.deferredIndexingStarted("/workspace/project_b", false);
-    assert.equal(render(status), "ready: $(check) Rust Glancer: ready [project_a]");
+    assert.equal(render(status), "ready: $(check) Suprnova LSP: ready [project_a]");
 
     status.activeWorkspace("/workspace/project_b", "ready", undefined, false);
-    assert.equal(render(status), "ready: ~ Rust Glancer: ready [project_b]");
+    assert.equal(render(status), "ready: ~ Suprnova LSP: ready [project_b]");
   });
 
   it("does not show deferred indexing when finish arrives before ready", () => {
@@ -189,7 +189,7 @@ describe("client status state precedence", () => {
     status.deferredIndexingFinished("/workspace/project_e", "succeeded", undefined, false);
     status.activeWorkspace("/workspace/project_e", "ready", undefined, false);
 
-    assert.equal(render(status), "ready: $(check) Rust Glancer: ready [project_e]");
+    assert.equal(render(status), "ready: $(check) Suprnova LSP: ready [project_e]");
   });
 
   it("preserves active workspace label across language-client ready transitions", () => {
@@ -203,7 +203,7 @@ describe("client status state precedence", () => {
       workspaceRoot: "/workspace/restarted-window",
     });
 
-    assert.equal(render(status), "ready: $(check) Rust Glancer: ready [project_d]");
+    assert.equal(render(status), "ready: $(check) Suprnova LSP: ready [project_d]");
     assert.deepEqual(status.snapshot().details, {
       ...DETAILS,
       workspaceRoot: "/workspace/restarted-window",

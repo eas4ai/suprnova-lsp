@@ -230,7 +230,7 @@ class Integrity(unittest.TestCase):
                 mechanism.discover(json.dumps(broken))
 
     def test_trace_and_compiler_memory_need_actual_observations(self):
-        for text in ["", 'execve("rust-glancer", ["rust-glancer"], 0) = -1 ENOENT']:
+        for text in ["", 'execve("suprnova-lsp", ["suprnova-lsp"], 0) = -1 ENOENT']:
             with self.assertRaises(ValueError):
                 mechanism.traced(text)
         trace = '123 execve("/tools/rust-analyzer", ["rust-analyzer"], 0) = 0'

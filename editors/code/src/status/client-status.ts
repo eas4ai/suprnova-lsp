@@ -102,7 +102,7 @@ export class ClientStatus {
     this.deferredIndexingFailures.clear();
     this.generatedApis.clear();
     this.details = details;
-    this.show("starting", "$(sync~spin) Rust Glancer: starting", () => this.view.starting(details));
+    this.show("starting", "$(sync~spin) Suprnova LSP: starting", () => this.view.starting(details));
   }
 
   public ready(details: StatusDetails): void {
@@ -120,7 +120,7 @@ export class ClientStatus {
       return;
     }
 
-    this.show("indexing", "$(sync~spin) Rust Glancer: indexing", () =>
+    this.show("indexing", "$(sync~spin) Suprnova LSP: indexing", () =>
       this.view.indexing(this.details),
     );
   }
@@ -189,7 +189,7 @@ export class ClientStatus {
     this.rootsWithPendingDeferredIndexing.clear();
     this.deferredIndexingFailures.clear();
     this.details = details;
-    this.show("stopped", "$(circle-slash) Rust Glancer: stopped", () =>
+    this.show("stopped", "$(circle-slash) Suprnova LSP: stopped", () =>
       this.view.stopped(reason, details ?? {}),
     );
   }
@@ -201,7 +201,7 @@ export class ClientStatus {
     this.rootsWithPendingDeferredIndexing.clear();
     this.deferredIndexingFailures.clear();
     this.details = details;
-    this.show("failed", "$(error) Rust Glancer: failed", () =>
+    this.show("failed", "$(error) Suprnova LSP: failed", () =>
       this.view.failed(reason, details ?? {}),
     );
   }
@@ -213,7 +213,7 @@ export class ClientStatus {
 
     // A failed request is user-visible, but it does not necessarily mean the LSP client stopped.
     this.failureReason = reason;
-    this.show("failed", "$(error) Rust Glancer: failed", () =>
+    this.show("failed", "$(error) Suprnova LSP: failed", () =>
       this.view.failed(reason, this.details ?? {}),
     );
   }
@@ -237,39 +237,39 @@ export class ClientStatus {
     // Engine lifecycle wins because the workspace may not have any analysis to serve yet.
     // Once the active engine is ready, file freshness and diagnostics become the useful signals.
     if (this.activeWorkspaceState === "indexing") {
-      this.show("indexing", "$(sync~spin) Rust Glancer: indexing", () =>
+      this.show("indexing", "$(sync~spin) Suprnova LSP: indexing", () =>
         this.view.indexing(this.details),
       );
     } else if (this.activeWorkspaceState === "failed") {
       const reason = this.activeWorkspaceFailureReason ?? "active workspace failed";
-      this.show("failed", "$(error) Rust Glancer: failed", () =>
+      this.show("failed", "$(error) Suprnova LSP: failed", () =>
         this.view.failed(reason, this.details ?? {}),
       );
     } else if (isActiveRustDocumentDirty) {
-      this.show("stale", "$(warning) Rust Glancer: stale until save", () =>
+      this.show("stale", "$(warning) Suprnova LSP: stale until save", () =>
         this.view.stale(this.details),
       );
     } else if (this.diagnosticsRunning) {
-      this.show("diagnostics-running", "$(sync~spin) Rust Glancer: cargo check running", () =>
+      this.show("diagnostics-running", "$(sync~spin) Suprnova LSP: cargo check running", () =>
         this.view.diagnosticsRunning(this.diagnosticsCommand, this.details),
       );
     } else if (this.diagnosticsFailed) {
-      this.show("diagnostics-failed", "$(error) Rust Glancer: cargo check failed", () =>
+      this.show("diagnostics-failed", "$(error) Suprnova LSP: cargo check failed", () =>
         this.view.diagnosticsFailed(this.details),
       );
     } else if (this.deferredIndexingIsRunningForActiveWorkspace()) {
       // The engine is already usable here. Only the explicit deferred-start event creates this
       // state: a foreground indexing cycle may publish no new generation and need no background
       // work at all.
-      this.show("ready", "~ Rust Glancer: ready", () =>
+      this.show("ready", "~ Suprnova LSP: ready", () =>
         this.view.readyWithDeferredIndexing(this.details),
       );
     } else if (deferredIndexingFailure !== undefined) {
-      this.show("ready", "$(warning) Rust Glancer: ready; background index failed", () =>
+      this.show("ready", "$(warning) Suprnova LSP: ready; background index failed", () =>
         this.view.readyWithDeferredIndexingFailure(deferredIndexingFailure, this.details),
       );
     } else {
-      this.show("ready", "$(check) Rust Glancer: ready", () => this.view.ready(this.details));
+      this.show("ready", "$(check) Suprnova LSP: ready", () => this.view.ready(this.details));
     }
   }
 

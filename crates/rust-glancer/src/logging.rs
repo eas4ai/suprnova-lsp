@@ -4,7 +4,7 @@
 //! useful from a terminal. The LSP server and its engine subprocesses instead emit newline-delimited
 //! JSON records on stderr. The VS Code extension reads those records from the language client output
 //! stream, verifies the schema, and maps the event level/message/fields into its
-//! `Rust Glancer Language Server` log channel.
+//! `Suprnova LSP Language Server` log channel.
 
 use std::{fmt, io::Write as _};
 
@@ -16,10 +16,10 @@ use tracing::{
 };
 use tracing_subscriber::{EnvFilter, Layer, layer::Context, prelude::*, registry::LookupSpan};
 
-const ENGINE_ID_ENV: &str = "RUST_GLANCER_ENGINE_ID";
-const LOG_FILTER_ENV: &str = "RUST_GLANCER_LOG";
-const LOG_SCHEMA: &str = "rust-glancer-log/v1";
-const RUST_GLANCER_SPAN_FIELD_PREFIX: &str = "rg.";
+const ENGINE_ID_ENV: &str = "SUPRNOVA_LSP_ENGINE_ID";
+const LOG_FILTER_ENV: &str = "SUPRNOVA_LSP_LOG";
+const LOG_SCHEMA: &str = "suprnova-lsp-log/v1";
+const SUPRNOVA_LSP_SPAN_FIELD_PREFIX: &str = "rg.";
 const DEFAULT_LOG_FILTER: &str = "info";
 const DEPENDENCY_LOG_GUARDS: &str =
     "tarpc=warn,ra_ap_rustc_next_trait_solver=warn,ra_ap_rustc_type_ir=warn,log=warn";
@@ -85,7 +85,7 @@ fn log_filter_directives(env_filter: Option<&str>) -> String {
         .filter(|filter| !filter.is_empty())
         .unwrap_or(DEFAULT_LOG_FILTER);
 
-    // A blanket `debug`/`trace` is useful when debugging rust-glancer itself, but it also turns on
+    // A blanket `debug`/`trace` is useful when debugging suprnova-lsp itself, but it also turns on
     // solver and `log`-crate records from dependencies. The compiler solver and Ena both log inside very hot
     // paths, often formatting large clauses/types, so keep those targets guarded unless the user
     // names them explicitly later in the filter string.
@@ -246,7 +246,7 @@ struct JsonSpanFields {
 
 impl JsonFieldSink for JsonSpanFields {
     fn record_value(&mut self, field: &Field, value: Value) {
-        if let Some(name) = field.name().strip_prefix(RUST_GLANCER_SPAN_FIELD_PREFIX) {
+        if let Some(name) = field.name().strip_prefix(SUPRNOVA_LSP_SPAN_FIELD_PREFIX) {
             self.values.insert(name.to_string(), value);
         }
     }
@@ -354,25 +354,25 @@ mod tests {
     #[test]
     fn default_log_filter_keeps_info_but_guards_noisy_dependencies() {
         let records = capture_lsp_logs(rust_glancer_log_filter_from(None), || {
-            tracing::info!(target: "rg_lsp_engine", "rust-glancer info should pass");
-            tracing::debug!(target: "rg_lsp_engine", "rust-glancer debug should not pass");
+            tracing::info!(target: "rg_lsp_engine", "suprnova-lsp info should pass");
+            tracing::debug!(target: "rg_lsp_engine", "suprnova-lsp debug should not pass");
             tracing::info!(target: "ra_ap_rustc_next_trait_solver", "solver info should not pass");
             tracing::debug!(target: "log", "ena debug should not pass");
         });
 
-        assert_eq!(log_messages(&records), ["rust-glancer info should pass"]);
+        assert_eq!(log_messages(&records), ["suprnova-lsp info should pass"]);
     }
 
     #[test]
     fn blanket_log_filter_keeps_noisy_dependencies_guarded() {
         let records = capture_lsp_logs(rust_glancer_log_filter_from(Some("debug")), || {
-            tracing::debug!(target: "rg_lsp_engine", "rust-glancer debug should pass");
+            tracing::debug!(target: "rg_lsp_engine", "suprnova-lsp debug should pass");
             tracing::info!(target: "ra_ap_rustc_next_trait_solver", "solver info should not pass");
             tracing::debug!(target: "ra_ap_rustc_type_ir", "solver debug should not pass");
             tracing::debug!(target: "log", "ena debug should not pass");
         });
 
-        assert_eq!(log_messages(&records), ["rust-glancer debug should pass"]);
+        assert_eq!(log_messages(&records), ["suprnova-lsp debug should pass"]);
     }
 
     #[test]
@@ -382,7 +382,7 @@ mod tests {
                 "debug,ra_ap_rustc_next_trait_solver=info,log=debug",
             )),
             || {
-                tracing::debug!(target: "rg_lsp_engine", "rust-glancer debug should pass");
+                tracing::debug!(target: "rg_lsp_engine", "suprnova-lsp debug should pass");
                 tracing::info!(target: "ra_ap_rustc_next_trait_solver", "explicit solver info should pass");
                 tracing::debug!(target: "ra_ap_rustc_next_trait_solver", "solver debug should not pass");
                 tracing::debug!(target: "log", "explicit bridged log debug should pass");
@@ -392,7 +392,7 @@ mod tests {
         assert_eq!(
             log_messages(&records),
             [
-                "rust-glancer debug should pass",
+                "suprnova-lsp debug should pass",
                 "explicit solver info should pass",
                 "explicit bridged log debug should pass"
             ]

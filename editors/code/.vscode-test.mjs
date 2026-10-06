@@ -5,8 +5,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const extensionRoot = dirname(fileURLToPath(import.meta.url));
-const userDataDir = mkdtempSync(resolve(tmpdir(), "rust-glancer-user-data-"));
-const extensionsDir = mkdtempSync(resolve(tmpdir(), "rust-glancer-extensions-"));
+const userDataDir = mkdtempSync(resolve(tmpdir(), "suprnova-lsp-user-data-"));
+const extensionsDir = mkdtempSync(resolve(tmpdir(), "suprnova-lsp-extensions-"));
 const workspaceFile = resolve(userDataDir, "acceptance.code-workspace");
 // Tests add genuine Cargo roots. Start in workspace mode so adding the first one cannot
 // leave a single-folder conversion pending and block every subsequent folder addition.
@@ -18,10 +18,13 @@ writeFileSync(
 export default defineConfig({
   files: "out/test/**/*.test.js",
   version: vscodeTestVersion(),
-  extensionDevelopmentPath: extensionRoot,
+  extensionDevelopmentPath:
+    process.env.SUPRNOVA_LSP_IDENTITY_FIXTURE === undefined
+      ? extensionRoot
+      : [extensionRoot, process.env.SUPRNOVA_LSP_IDENTITY_FIXTURE],
   workspaceFolder: workspaceFile,
   env: {
-    RUST_GLANCER_VSCODE_USER_DATA_DIR: userDataDir,
+    SUPRNOVA_LSP_VSCODE_USER_DATA_DIR: userDataDir,
   },
   // The completion smoke test needs renderer input: programmatic document edits do not exercise
   // automatic suggestions. Keep the debugger local and let Chromium choose the port.
@@ -36,12 +39,12 @@ export default defineConfig({
   ],
   mocha: {
     timeout: 60_000,
-    ...(process.env.RUST_GLANCER_EXTENSION_TEST_GREP === undefined
+    ...(process.env.SUPRNOVA_LSP_EXTENSION_TEST_GREP === undefined
       ? {}
       : {
-          grep: process.env.RUST_GLANCER_EXTENSION_TEST_GREP,
+          grep: process.env.SUPRNOVA_LSP_EXTENSION_TEST_GREP,
           reporter: "json",
-          reporterOptions: { output: process.env.RUST_GLANCER_EXTENSION_TEST_REPORT },
+          reporterOptions: { output: process.env.SUPRNOVA_LSP_EXTENSION_TEST_REPORT },
         }),
   },
 });

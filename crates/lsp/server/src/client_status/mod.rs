@@ -1,11 +1,11 @@
-//! Client-facing projections of Rust Glancer's workspace lifecycle.
+//! Client-facing projections of Suprnova LSP's workspace lifecycle.
 //!
 //! One engine lifecycle is reported through three overlapping protocols. They are intentionally
 //! additive because each client consumes a different part of the picture:
 //!
 //! - Standard LSP work-done progress presents a bounded indexing operation. Zed renders this as
-//!   `Indexing <workspace>`, and other LSP clients can render it without Rust Glancer knowledge.
-//! - Rust Glancer's private notifications preserve the richer VS Code status bar.
+//!   `Indexing <workspace>`, and other LSP clients can render it without Suprnova LSP knowledge.
+//! - Suprnova LSP's private notifications preserve the richer VS Code status bar.
 //! - Rust-analyzer's `experimental/serverStatus` extension presents persistent process-wide health.
 //!   Zed maps its `health` and `message` fields into the Language Servers menu; Zed does not use its
 //!   `quiescent` field as an indexing indicator. `compare-lsp` waits for healthy quiescence before
@@ -150,7 +150,7 @@ impl ClientStatusPublisher {
         .await;
     }
 
-    /// Publish the workspace selected by document routing through Rust Glancer's private protocol.
+    /// Publish the workspace selected by document routing through Suprnova LSP's private protocol.
     pub(crate) async fn active_workspace_changed(&self, status: Option<ActiveWorkspaceStatus>) {
         if let Some(status) = status {
             rust_glancer::active_workspace_changed(&self.lsp_client, &status).await;
@@ -783,7 +783,7 @@ mod tests {
                 .expect("private deferred lifecycle should remain additive");
             assert_eq!(
                 private_start.method(),
-                "rust-glancer/deferredIndexingStarted"
+                "suprnova-lsp/deferredIndexingStarted"
             );
 
             let foreground_end = socket
@@ -879,7 +879,7 @@ mod tests {
                 .expect("private deferred finish should remain additive");
             assert_eq!(
                 private_finish.method(),
-                "rust-glancer/deferredIndexingFinished"
+                "suprnova-lsp/deferredIndexingFinished"
             );
             assert_eq!(
                 private_finish.params(),
@@ -994,7 +994,7 @@ mod tests {
                 .expect("private deferred start should remain additive");
             assert_eq!(
                 private_start.method(),
-                "rust-glancer/deferredIndexingStarted"
+                "suprnova-lsp/deferredIndexingStarted"
             );
 
             let deferred_end = socket
@@ -1101,8 +1101,8 @@ mod tests {
         let active = socket
             .next()
             .await
-            .expect("active workspace should use the Rust Glancer protocol");
-        assert_eq!(active.method(), "rust-glancer/activeWorkspaceChanged");
+            .expect("active workspace should use the Suprnova LSP protocol");
+        assert_eq!(active.method(), "suprnova-lsp/activeWorkspaceChanged");
         assert_eq!(
             active.params(),
             Some(&serde_json::json!({
@@ -1118,7 +1118,7 @@ mod tests {
             .expect("deferred indexing should publish its private start event");
         assert_eq!(
             deferred_started.method(),
-            "rust-glancer/deferredIndexingStarted"
+            "suprnova-lsp/deferredIndexingStarted"
         );
         assert_eq!(
             deferred_started.params(),
@@ -1140,7 +1140,7 @@ mod tests {
             .expect("deferred indexing should publish its private finish event");
         assert_eq!(
             deferred_finished.method(),
-            "rust-glancer/deferredIndexingFinished"
+            "suprnova-lsp/deferredIndexingFinished"
         );
         assert_eq!(
             deferred_finished.params(),

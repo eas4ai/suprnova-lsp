@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Run bounded editor queries against rust-glancer's real LSP."""
+"""Run bounded editor queries against suprnova-lsp's real LSP."""
 
 import asyncio
 import contextlib
@@ -31,7 +31,7 @@ SHUTDOWN_TIMEOUT_MS = 5_000
 PROCESS_EXIT_GRACE_MS = 2_000
 MAX_QUEUED_NOTIFICATIONS = 64
 
-ACTIVE_WORKSPACE_CHANGED = "rust-glancer/activeWorkspaceChanged"
+ACTIVE_WORKSPACE_CHANGED = "suprnova-lsp/activeWorkspaceChanged"
 SERVER_STATUS = "experimental/serverStatus"
 TRACKED_NOTIFICATIONS = {ACTIVE_WORKSPACE_CHANGED, SERVER_STATUS}
 
@@ -109,7 +109,7 @@ Query file shape:
 Notes:
   - Paths queried by LSP must stay inside --workspace-root (the repository by default).
   - --query-json avoids a plan file entirely.
-  - agent-debug supplies its managed binary; direct invocation defaults to target/release/rust-glancer.
+  - agent-debug supplies its managed binary; direct invocation defaults to target/release/suprnova-lsp.
   - Use --workspace-root for an ad-hoc Cargo project under target/agent-debug/fixtures.
   - Set deferredBarrier to before-queries or after-queries when deferred indexing is relevant.
     - A plan may contain bounded inline "text" instead of an overlay file.
@@ -536,7 +536,7 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
 
 
 def release_binary(options: Options) -> Path:
-    candidate = (TOOL_ROOT / (options.binary or "target/{}/rust-glancer".format(options.profile))).resolve()
+    candidate = (TOOL_ROOT / (options.binary or "target/{}/suprnova-lsp".format(options.profile))).resolve()
     if not candidate.exists():
         fail("{} does not exist. Build it first or use just agent-debug lsp-query".format(candidate))
     binary = candidate.resolve(strict=True)
@@ -562,7 +562,7 @@ class LspClient:
         self.stderr_tail = bytearray()
         self.exited = False
         self.protocol_error: Optional[Exception] = None
-        output_directory = os.environ.get("RUST_GLANCER_AGENT_DEBUG_OUTPUT_DIR")
+        output_directory = os.environ.get("SUPRNOVA_LSP_AGENT_DEBUG_OUTPUT_DIR")
         self.server_log_file = (
             Path(output_directory) / "lsp-server.stderr.log" if output_directory else None
         )
@@ -603,7 +603,7 @@ class LspClient:
             try:
                 command = (directory / "cmdline").read_bytes().split(b"\0")
                 executable = Path(os.fsdecode(command[0])).name
-                if executable in {"rust-glancer", "rust-glancer.exe"}:
+                if executable in {"suprnova-lsp", "suprnova-lsp.exe"}:
                     values = (directory / "statm").read_text().split()
                     processes[str(pid)] = int(values[1]) * os.sysconf("SC_PAGE_SIZE")
                 elif settled:
@@ -893,7 +893,7 @@ async def wait_until_ready(client: LspClient, timeout_ms: int) -> None:
     notification = await client.wait_for_notification(
         lambda message: message.get("method") == ACTIVE_WORKSPACE_CHANGED
         and (message.get("params") or {}).get("state") in {"ready", "failed"},
-        "rust-glancer workspace readiness",
+        "suprnova-lsp workspace readiness",
         timeout_ms,
     )
     params = notification.get("params") or {}
@@ -914,7 +914,7 @@ async def wait_until_indexing_settled(client: LspClient, timeout_ms: int) -> Non
             message.get("method") == ACTIVE_WORKSPACE_CHANGED
             and (message.get("params") or {}).get("state") == "failed"
         ),
-        "rust-glancer quiescent indexing status",
+        "suprnova-lsp quiescent indexing status",
         timeout_ms,
     )
     params = notification.get("params") or {}

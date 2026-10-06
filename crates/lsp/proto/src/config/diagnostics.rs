@@ -34,7 +34,7 @@ impl DiagnosticsConfig {
                 let command = command
                     .as_str()
                     .ok_or_else(|| {
-                        anyhow::anyhow!("rust-glancer diagnostics.command must be a string")
+                        anyhow::anyhow!("suprnova-lsp diagnostics.command must be a string")
                     })?
                     .trim();
                 Self::validate_cargo_subcommand(command)?;
@@ -92,17 +92,17 @@ impl DiagnosticsConfig {
     fn validate_cargo_subcommand(command: &str) -> anyhow::Result<()> {
         anyhow::ensure!(
             !command.is_empty(),
-            "rust-glancer diagnostics.command must not be empty",
+            "suprnova-lsp diagnostics.command must not be empty",
         );
         anyhow::ensure!(
             !command.starts_with('-'),
-            "rust-glancer diagnostics.command must be a Cargo subcommand, not an argument",
+            "suprnova-lsp diagnostics.command must be a Cargo subcommand, not an argument",
         );
         anyhow::ensure!(
             command
                 .chars()
                 .all(|char| char.is_ascii_alphanumeric() || char == '-' || char == '_'),
-            "rust-glancer diagnostics.command must be a single Cargo subcommand such as `check` or `clippy`",
+            "suprnova-lsp diagnostics.command must be a single Cargo subcommand such as `check` or `clippy`",
         );
 
         Ok(())
@@ -122,12 +122,12 @@ impl DiagnosticsConfig {
 
         arguments
             .as_array()
-            .ok_or_else(|| anyhow::anyhow!("rust-glancer diagnostics.{key} must be an array"))?
+            .ok_or_else(|| anyhow::anyhow!("suprnova-lsp diagnostics.{key} must be an array"))?
             .iter()
             .enumerate()
             .map(|(idx, argument)| {
                 let argument = argument.as_str().ok_or_else(|| {
-                    anyhow::anyhow!("rust-glancer diagnostics.{key}[{idx}] must be a string")
+                    anyhow::anyhow!("suprnova-lsp diagnostics.{key}[{idx}] must be a string")
                 })?;
                 Self::validate_diagnostics_argument(key, idx, argument)?;
                 Ok(argument.to_string())
@@ -142,25 +142,25 @@ impl DiagnosticsConfig {
             return Ok(BTreeMap::new());
         };
         let extra_env = extra_env.as_object().ok_or_else(|| {
-            anyhow::anyhow!("rust-glancer diagnostics.extraEnv must be an object")
+            anyhow::anyhow!("suprnova-lsp diagnostics.extraEnv must be an object")
         })?;
 
         let mut parsed = BTreeMap::new();
         for (key, value) in extra_env {
             anyhow::ensure!(
                 !key.is_empty(),
-                "rust-glancer diagnostics.extraEnv keys must not be empty",
+                "suprnova-lsp diagnostics.extraEnv keys must not be empty",
             );
             anyhow::ensure!(
                 !key.contains('\0') && !key.contains('='),
-                "rust-glancer diagnostics.extraEnv.{key} must be a valid environment variable name",
+                "suprnova-lsp diagnostics.extraEnv.{key} must be a valid environment variable name",
             );
             let value = value.as_str().ok_or_else(|| {
-                anyhow::anyhow!("rust-glancer diagnostics.extraEnv.{key} must be a string")
+                anyhow::anyhow!("suprnova-lsp diagnostics.extraEnv.{key} must be a string")
             })?;
             anyhow::ensure!(
                 !value.contains('\0'),
-                "rust-glancer diagnostics.extraEnv.{key} must not contain NUL bytes",
+                "suprnova-lsp diagnostics.extraEnv.{key} must not contain NUL bytes",
             );
             parsed.insert(key.clone(), value.to_string());
         }
@@ -175,15 +175,15 @@ impl DiagnosticsConfig {
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             !argument.is_empty(),
-            "rust-glancer diagnostics.{key}[{idx}] must not be empty",
+            "suprnova-lsp diagnostics.{key}[{idx}] must not be empty",
         );
         anyhow::ensure!(
             !argument.contains('\0'),
-            "rust-glancer diagnostics.{key}[{idx}] must not contain NUL bytes",
+            "suprnova-lsp diagnostics.{key}[{idx}] must not contain NUL bytes",
         );
         anyhow::ensure!(
             argument != "--",
-            "rust-glancer diagnostics.{key}[{idx}] must not contain the `--` argument separator",
+            "suprnova-lsp diagnostics.{key}[{idx}] must not contain the `--` argument separator",
         );
 
         Ok(())

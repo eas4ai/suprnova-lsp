@@ -1,5 +1,5 @@
 /**
- * Adds rust-glancer-specific actions to VS Code hover results.
+ * Adds suprnova-lsp-specific actions to VS Code hover results.
  *
  * The language server provides navigation data through standard LSP requests; this feature turns
  * that data into safe command links so users can jump from hover text to related declarations.

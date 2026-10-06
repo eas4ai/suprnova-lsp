@@ -17,7 +17,7 @@ let controller: ExtensionController | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const testMode = isExtensionTestMode();
-  const rawExtensionLog = vscode.window.createOutputChannel("Rust Glancer Extension", {
+  const rawExtensionLog = vscode.window.createOutputChannel("Suprnova LSP Extension", {
     log: true,
   });
   const recordingExtensionLog = testMode

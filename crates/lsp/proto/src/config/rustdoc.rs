@@ -22,12 +22,12 @@ impl RustdocConfig {
         // publish source-only analysis for a model the developer asked us to import.
         let section = value
             .as_object()
-            .ok_or_else(|| anyhow::anyhow!("rust-glancer rustdoc must be an object"))?;
+            .ok_or_else(|| anyhow::anyhow!("suprnova-lsp rustdoc must be an object"))?;
         let inputs = match section.get("inputs") {
             None => Vec::new(),
             Some(inputs) => inputs
                 .as_array()
-                .ok_or_else(|| anyhow::anyhow!("rust-glancer rustdoc.inputs must be an array"))?
+                .ok_or_else(|| anyhow::anyhow!("suprnova-lsp rustdoc.inputs must be an array"))?
                 .iter()
                 .enumerate()
                 .map(|(index, value)| RustdocInputConfig::parse(value, index))
@@ -59,11 +59,11 @@ impl RustdocAutomaticConfig {
         };
         let section = value
             .as_object()
-            .ok_or_else(|| anyhow::anyhow!("rust-glancer rustdoc.automatic must be an object"))?;
+            .ok_or_else(|| anyhow::anyhow!("suprnova-lsp rustdoc.automatic must be an object"))?;
         let mut config = Self::default();
         if let Some(value) = section.get("enabled") {
             config.enabled = value.as_bool().ok_or_else(|| {
-                anyhow::anyhow!("rust-glancer rustdoc.automatic.enabled must be a boolean")
+                anyhow::anyhow!("suprnova-lsp rustdoc.automatic.enabled must be a boolean")
             })?;
         }
         // Keep policy bounded before it reaches timers or Cargo's parallel job count.
@@ -77,7 +77,7 @@ impl RustdocAutomaticConfig {
                     .as_u64()
                     .filter(|value| (1..=maximum).contains(value))
                     .ok_or_else(|| anyhow::anyhow!(
-                        "rust-glancer rustdoc.automatic.{field} must be an integer between 1 and {maximum}"
+                        "suprnova-lsp rustdoc.automatic.{field} must be an integer between 1 and {maximum}"
                     ))?;
             }
         }
@@ -88,7 +88,7 @@ impl RustdocAutomaticConfig {
                     .filter(|value| !value.trim().is_empty())
                     .ok_or_else(|| {
                         anyhow::anyhow!(
-                            "rust-glancer rustdoc.automatic.{field} must be a nonempty string"
+                            "suprnova-lsp rustdoc.automatic.{field} must be a nonempty string"
                         )
                     })?;
                 if field == "toolchain" {
@@ -129,13 +129,13 @@ pub struct RustdocInputConfig {
 impl RustdocInputConfig {
     fn parse(value: &LspAny, index: usize) -> anyhow::Result<Self> {
         let input = value.as_object().ok_or_else(|| {
-            anyhow::anyhow!("rust-glancer rustdoc.inputs[{index}] must be an object")
+            anyhow::anyhow!("suprnova-lsp rustdoc.inputs[{index}] must be an object")
         })?;
         let target_kind = match Self::required_string(input, index, "targetKind")? {
             "lib" => RustdocTargetKind::Lib,
             "bin" => RustdocTargetKind::Bin,
             _ => {
-                anyhow::bail!("rust-glancer rustdoc.inputs[{index}].targetKind must be lib or bin")
+                anyhow::bail!("suprnova-lsp rustdoc.inputs[{index}].targetKind must be lib or bin")
             }
         };
         Ok(Self {
@@ -154,11 +154,11 @@ impl RustdocInputConfig {
         field: &str,
     ) -> anyhow::Result<&'a str> {
         let value = input.get(field).and_then(LspAny::as_str).ok_or_else(|| {
-            anyhow::anyhow!("rust-glancer rustdoc.inputs[{index}].{field} must be a string")
+            anyhow::anyhow!("suprnova-lsp rustdoc.inputs[{index}].{field} must be a string")
         })?;
         anyhow::ensure!(
             !value.trim().is_empty(),
-            "rust-glancer rustdoc.inputs[{index}].{field} must not be empty",
+            "suprnova-lsp rustdoc.inputs[{index}].{field} must not be empty",
         );
         // Preserve the spelling of paths and compiler identities; only the server resolves paths.
         Ok(value)

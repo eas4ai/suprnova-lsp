@@ -40,8 +40,8 @@ if (vsCodeTarget === undefined) {
   );
 }
 
-const outPath = options.outPath ?? join(workspaceRoot, "dist", `rust-glancer-${vsCodeTarget}.vsix`);
-const executableName = rustTarget.includes("windows") ? "rust-glancer.exe" : "rust-glancer";
+const outPath = options.outPath ?? join(workspaceRoot, "dist", `suprnova-lsp-${vsCodeTarget}.vsix`);
+const executableName = rustTarget.includes("windows") ? "suprnova-lsp.exe" : "suprnova-lsp";
 const builtServer = join(workspaceRoot, "target", rustTarget, options.profile, executableName);
 const bundledServerDir = join(extensionRoot, "server");
 const bundledServer = join(bundledServerDir, executableName);
@@ -54,7 +54,7 @@ const extensionLicense = join(extensionRoot, "LICENSE");
 if (!options.skipBuild) {
   run(
     "cargo",
-    ["build", "--profile", options.profile, "-p", "rust-glancer", "--target", rustTarget],
+    ["build", "--profile", options.profile, "-p", "suprnova-lsp", "--target", rustTarget],
     {
       cwd: workspaceRoot,
     },
@@ -84,7 +84,7 @@ for (const workspaceLicense of workspaceLicenses) {
   }
 }
 const licenseNotice =
-  "Rust Glancer is released under either the MIT License or the Apache License, " +
+  "Suprnova LSP is released under either the MIT License or the Apache License, " +
   "Version 2.0, at your option.";
 const licenseTexts = workspaceLicenses.map((workspaceLicense) =>
   readFileSync(workspaceLicense, "utf8").trimEnd(),
@@ -200,10 +200,10 @@ function printHelp() {
 Options:
   --target <triple>         Rust target triple. Defaults to rustc host.
   --vscode-target <target>  VS Code extension target. Inferred for common Rust targets.
-  --out <path>              VSIX output path. Defaults to ../../dist/rust-glancer-<target>.vsix.
+  --out <path>              VSIX output path. Defaults to ../../dist/suprnova-lsp-<target>.vsix.
   --pre-release            Mark the packaged extension as a pre-release.
   --profile <name>         Cargo build profile: release (default) or dist.
-  --skip-build             Reuse an existing target/<triple>/<profile>/rust-glancer binary.
+  --skip-build             Reuse an existing target/<triple>/<profile>/suprnova-lsp binary.
 `);
 }
 

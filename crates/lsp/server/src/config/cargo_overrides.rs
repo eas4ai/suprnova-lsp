@@ -31,12 +31,12 @@ impl CargoConfigOverrides {
 
         let overrides = overrides
             .as_array()
-            .ok_or_else(|| anyhow::anyhow!("rust-glancer cargo.overrides must be an array"))?;
+            .ok_or_else(|| anyhow::anyhow!("suprnova-lsp cargo.overrides must be an array"))?;
         let mut by_root = BTreeMap::new();
 
         for (idx, item) in overrides.iter().enumerate() {
             let item = item.as_object().ok_or_else(|| {
-                anyhow::anyhow!("rust-glancer cargo.overrides[{idx}] must be an object")
+                anyhow::anyhow!("suprnova-lsp cargo.overrides[{idx}] must be an object")
             })?;
             let path = item
                 .get("path")
@@ -45,13 +45,13 @@ impl CargoConfigOverrides {
                 .filter(|path| !path.is_empty())
                 .ok_or_else(|| {
                     anyhow::anyhow!(
-                        "rust-glancer cargo.overrides[{idx}].path must be a non-empty string"
+                        "suprnova-lsp cargo.overrides[{idx}].path must be a non-empty string"
                     )
                 })?;
             let cargo_override = CargoConfigOverride::parse(item, idx)?;
 
             for root in Self::override_roots(path, workspace_folders).with_context(|| {
-                format!("while resolving rust-glancer cargo.overrides[{idx}].path `{path}`")
+                format!("while resolving suprnova-lsp cargo.overrides[{idx}].path `{path}`")
             })? {
                 by_root.insert(root, cargo_override.clone());
             }
@@ -120,7 +120,7 @@ impl CargoConfigOverride {
         }
 
         let target = value.as_str().ok_or_else(|| {
-            anyhow::anyhow!("rust-glancer cargo.overrides[{idx}].target must be a string or null")
+            anyhow::anyhow!("suprnova-lsp cargo.overrides[{idx}].target must be a string or null")
         })?;
         let target = target.trim();
         if target.is_empty() {
@@ -135,7 +135,7 @@ impl CargoConfigOverride {
             return Ok(None);
         };
         value.as_bool().map(Some).ok_or_else(|| {
-            anyhow::anyhow!("rust-glancer cargo.overrides[{idx}].{key} must be a boolean")
+            anyhow::anyhow!("suprnova-lsp cargo.overrides[{idx}].{key} must be a boolean")
         })
     }
 
@@ -145,7 +145,7 @@ impl CargoConfigOverride {
         };
 
         let features = value.as_array().ok_or_else(|| {
-            anyhow::anyhow!("rust-glancer cargo.overrides[{idx}].features must be an array")
+            anyhow::anyhow!("suprnova-lsp cargo.overrides[{idx}].features must be an array")
         })?;
         features
             .iter()
@@ -153,7 +153,7 @@ impl CargoConfigOverride {
             .map(|(feature_idx, feature)| {
                 let feature = feature.as_str().ok_or_else(|| {
                     anyhow::anyhow!(
-                        "rust-glancer cargo.overrides[{idx}].features[{feature_idx}] must be a string"
+                        "suprnova-lsp cargo.overrides[{idx}].features[{feature_idx}] must be a string"
                     )
                 })?;
                 Ok(feature.to_string())

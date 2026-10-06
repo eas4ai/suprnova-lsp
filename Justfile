@@ -24,10 +24,10 @@ agent-debug *args:
     exec python3 tools/agent-debug.py "$@"
 
 analyze *args:
-    cargo run --release -p rust-glancer -- analyze {{args}}
+    cargo run --release -p suprnova-lsp -- analyze {{args}}
 
 compare-lsp fixture="rust_analyzer" *args:
-    cargo run --release -p rust-glancer -- compare-lsp {{fixture}} {{args}}
+    cargo run --release -p suprnova-lsp -- compare-lsp {{fixture}} {{args}}
 
 lsp-query query_file *args:
     python3 tools/lsp-query.py --query-file '{{query_file}}' {{args}}

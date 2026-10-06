@@ -8,9 +8,9 @@ import {
 } from "./server-log";
 import { RecordingOutputChannel } from "../test-support/recording-output-channel";
 
-const EXTENSION_TEST_ENV = "RUST_GLANCER_EXTENSION_TEST";
-const SERVER_LOG_LANGUAGE_ID = "rust-glancer-log";
-const SERVER_LOG_CHANNEL_NAME = "Rust Glancer Language Server";
+const EXTENSION_TEST_ENV = "SUPRNOVA_LSP_EXTENSION_TEST";
+const SERVER_LOG_LANGUAGE_ID = "suprnova-lsp-log";
+const SERVER_LOG_CHANNEL_NAME = "Suprnova LSP Language Server";
 
 export interface CreatedServerOutputChannel {
   readonly output: ServerOutputChannel;
@@ -37,11 +37,11 @@ export function isExtensionTestMode(): boolean {
  * We use a custom output language instead of VS Code's generic `log` grammar because the default
  * grammar is not flexible enough for compact structured logs. A normal line looks like this:
  *
- * `09:39:29.210 [d/rust-glancer/rg_lsp_engine::memory] memory report active=23.2MiB(+96.0KiB)`
+ * `09:39:29.210 [d/suprnova-lsp/rg_lsp_engine::memory] memory report active=23.2MiB(+96.0KiB)`
  *
  * The prefix is `[level/source/target]`: `t/d/i/w/e` for trace/debug/info/warn/error, then the
  * server or engine name, then the Rust tracing target when one exists. Everything after the
- * message is `key=value` fields. The `rust-glancer-log` grammar colors those pieces and treats
+ * message is `key=value` fields. The `suprnova-lsp-log` grammar colors those pieces and treats
  * each field value as one token, so paths, URIs, and memory values stay visually consistent.
  *
  * The Rust side still writes structured JSON lines to stderr. `server-log.ts` is the entrypoint

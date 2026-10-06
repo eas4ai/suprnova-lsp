@@ -39,7 +39,7 @@ CASES = {
         "tests::utils::rustdoc_import::edt_006_keeps_captured_facts_after_the_external_file_changes",
         "tests::utils::rustdoc_import::edt_006_unconfigured_startup_does_not_reuse_an_imported_generation"]},
 }
-EDITOR_CASE = "Rust Glancer extension EDT-001 sends a configured compiler model through the editor client"
+EDITOR_CASE = "Suprnova LSP extension EDT-001 sends a configured compiler model through the editor client"
 LABELS = {"query", "without", "filter", "source", "methods", "sourceMethods", "otherMethods", "types"}
 METHODS = {"query", "without_global_scopes", "filter"}
 MODES = {"initial": "faster-builds", "batched": "lower-peak-memory",
@@ -175,7 +175,7 @@ def memory_ok(report):
 
 def setting_description_ok():
     package = json.loads((ROOT / "editors/code/package.json").read_text())
-    setting = package["contributes"]["configuration"]["properties"].get("rust-glancer.rustdoc.inputs", {})
+    setting = package["contributes"]["configuration"]["properties"].get("suprnova-lsp.rustdoc.inputs", {})
     description = setting.get("markdownDescription", setting.get("description", "")).lower()
     return setting.get("default") == [] and all(word in description for word in ["prepared", "restart", "not automatically"])
 
@@ -259,8 +259,8 @@ async def main():
             raise ValueError("current LSP executable failed to compile")
         binary = runner.rust_glancer_binary("debug")
         editor_report = directory / "editor-results.json"
-        editor_env = dict(build_env, RUST_GLANCER_TEST_SERVER=str(binary), RUST_GLANCER_EXTENSION_TEST_GREP="EDT-001 sends",
-                          RUST_GLANCER_EXTENSION_TEST_REPORT=str(editor_report))
+        editor_env = dict(build_env, SUPRNOVA_LSP_TEST_SERVER=str(binary), SUPRNOVA_LSP_EXTENSION_TEST_GREP="EDT-001 sends",
+                          SUPRNOVA_LSP_EXTENSION_TEST_REPORT=str(editor_report))
         code, text = await run("editor", "xvfb-run", ["-a", "npm", "run", "test:e2e:prebuilt"], env=editor_env, cwd=ROOT / "editors/code", timeout=5 * 60_000)
         editor = editor_outcome(editor_report.read_text(), code)
 

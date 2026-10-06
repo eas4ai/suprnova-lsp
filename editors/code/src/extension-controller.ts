@@ -57,7 +57,7 @@ export class ExtensionController implements vscode.Disposable {
     this.serverEnabled = true;
     const workspaceFolder = this.selectedWorkspaceFolder();
     if (workspaceFolder === undefined) {
-      this.extensionLog.info("no workspace folder found; rust-glancer server was not started");
+      this.extensionLog.info("no workspace folder found; suprnova-lsp server was not started");
       this.status.stopped("no workspace folder");
       return;
     }
@@ -79,7 +79,7 @@ export class ExtensionController implements vscode.Disposable {
     this.serverEnabled = true;
     const workspaceFolder = this.selectedWorkspaceFolder();
     if (workspaceFolder === undefined) {
-      void vscode.window.showWarningMessage("Rust Glancer needs an open workspace folder.");
+      void vscode.window.showWarningMessage("Suprnova LSP needs an open workspace folder.");
       return;
     }
 
@@ -98,7 +98,7 @@ export class ExtensionController implements vscode.Disposable {
     this.status.stopped("stopped by user");
 
     if (!serverWasActive) {
-      void vscode.window.showWarningMessage("Rust Glancer has no running server to stop.");
+      void vscode.window.showWarningMessage("Suprnova LSP has no running server to stop.");
     }
   }
 
@@ -150,7 +150,7 @@ export class ExtensionController implements vscode.Disposable {
         },
       ],
       {
-        title: "Rust Glancer Server Actions",
+        title: "Suprnova LSP Server Actions",
         placeHolder: running ? "Choose a server action" : "The server is not running",
         matchOnDescription: true,
       },
