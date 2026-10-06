@@ -88,6 +88,49 @@ class LedgerIntegrity(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "stage durations"):
             observation.Diagnostic.source_observation(self.report)
 
+    def test_generated_readiness_is_fenced_before_each_request(self):
+        report = copy.deepcopy(self.report)
+        for result, label in zip(report["results"], ("rsp_query", "rsp_without", "rsp_filter")):
+            result.update(label=label, text="let value: Builder<User>")
+        for event in report["stages"]:
+            if event["message"] == "document analysis prepared":
+                event["fields"]["source"] = "current"
+        current = {"method": "suprnova-lsp/rustdocStatus", "receivedNs": 99,
+                   "params": {"workspaceRoot": str(observation.APP), "generation": 1, "state": "current"}}
+        report["lifecycle"].append(current)
+        report["idleMemory"] = {"indexingComplete": True, "metric": "sum-of-process-RSS",
+            "indexingPeakRssBytes": 1000, "indexingSamples": 10, "samplingIntervalMs": 100,
+            "samples": [{"processRssBytes": {"1": 40, "2": 60}, "aggregateRssBytes": 100}] * 5}
+        self.assertEqual(observation.Diagnostic.generated_observation(report)["idleRssBytes"], [100] * 5)
+        for violation in ("late", "pending", "missing-memory", "wrong-type"):
+            broken = copy.deepcopy(report)
+            if violation == "late":
+                broken["lifecycle"][-1]["receivedNs"] = 1000
+            elif violation == "pending":
+                broken["lifecycle"].append({"method": current["method"], "receivedNs": 99,
+                    "params": dict(current["params"], generation=2, state="pending")})
+                broken["lifecycle"].append(current)
+            elif violation == "missing-memory":
+                broken["idleMemory"]["samples"].pop()
+            else:
+                broken["results"][0]["text"] = "Builder<Unrelated>"
+            with self.subTest(violation=violation), self.assertRaises(ValueError):
+                observation.Diagnostic.generated_observation(broken)
+
+    def test_disabled_control_rejects_worker_activity_and_missing_idle_samples(self):
+        report = copy.deepcopy(self.report)
+        report["idleMemory"] = {"indexingComplete": True, "metric": "sum-of-process-RSS",
+            "indexingPeakRssBytes": 1000, "indexingSamples": 10, "samplingIntervalMs": 100,
+            "samples": [{"processRssBytes": {"1": 40, "2": 60}, "aggregateRssBytes": 100}] * 5}
+        self.assertEqual(observation.Diagnostic.source_only_observation(report)["idleRssBytes"], [100] * 5)
+        report["lifecycle"].append({"method": "suprnova-lsp/rustdocStatus"})
+        with self.assertRaisesRegex(ValueError, "worker activity"):
+            observation.Diagnostic.source_only_observation(report)
+        report["lifecycle"].pop()
+        report["idleMemory"]["samples"].pop()
+        with self.assertRaisesRegex(ValueError, "memory"):
+            observation.Diagnostic.source_only_observation(report)
+
 
 class PipeTiming(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -261,6 +304,31 @@ class PipeTiming(unittest.IsolatedAsyncioTestCase):
         self.client.timeout_ms = 1
         with self.assertRaisesRegex(lsp.LspQueryError, "route publication"):
             await self.client.wait_for_document_ready(observation.APP / "src/models/user.rs")
+
+    async def test_rustdoc_barrier_rejects_old_success_and_other_workspace(self):
+        def status(generation, state, root=observation.APP):
+            return {"method": "suprnova-lsp/rustdocStatus", "params": {
+                "workspaceRoot": str(root), "generation": generation, "state": state}}
+
+        self.client.observation.notification(status(1, "current"), 100)
+        self.client.observation.notification(status(2, "pending"), 100)
+        waiter = asyncio.create_task(self.client.wait_for_rustdoc_current(observation.APP))
+        self.requests.append(waiter)
+        await asyncio.sleep(0)
+        self.client.observation.notification(status(1, "current"), 110)
+        self.client.observation.notification(status(2, "current", Path('/tmp/unrelated')), 110)
+        await asyncio.sleep(0)
+        self.assertFalse(waiter.done())
+        self.client.observation.notification(status(2, "current"), 120)
+        await asyncio.wait_for(waiter, 1)
+        self.assertFalse(self.messages, "worker readiness must not prepare bodies with a hover")
+
+    async def test_rustdoc_failure_is_not_readiness(self):
+        self.client.observation.notification({"method": "suprnova-lsp/rustdocStatus", "params": {
+            "workspaceRoot": str(observation.APP), "generation": 3, "state": "failed",
+            "message": "export rejected"}}, 100)
+        with self.assertRaisesRegex(lsp.LspQueryError, "export rejected"):
+            await self.client.wait_for_rustdoc_current(observation.APP)
 
 
 class FailedCliEvidence(unittest.IsolatedAsyncioTestCase):

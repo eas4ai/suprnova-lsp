@@ -501,6 +501,12 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
     document_barrier = plan.get("documentReadinessBarrier", False)
     if type(document_barrier) is not bool:
         fail("documentReadinessBarrier must be a boolean")
+    rustdoc_barrier = plan.get("rustdocBarrier", "none")
+    if rustdoc_barrier not in {"none", "before-queries", "after-queries"}:
+        fail("rustdocBarrier must be none, before-queries, or after-queries")
+    rustdoc_timeout = plan.get("rustdocTimeoutMs", options.timeout_ms)
+    if type(rustdoc_timeout) is not int or not 1 <= rustdoc_timeout <= 3_600_000:
+        fail("rustdocTimeoutMs must be an integer from 1 to 3600000")
     deferred_barrier = plan.get("deferredBarrier", "none")
     if deferred_barrier not in {"none", "before-queries", "after-queries"}:
         fail("deferredBarrier must be none, before-queries, or after-queries")
@@ -541,6 +547,8 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
         "initializationOptions": initialization_options,
         "readinessBarrier": readiness_barrier,
         "documentReadinessBarrier": document_barrier,
+        "rustdocBarrier": rustdoc_barrier,
+        "rustdocTimeoutMs": rustdoc_timeout,
         "deferredBarrier": deferred_barrier,
         "idleMemory": idle_memory,
     }
@@ -603,6 +611,31 @@ class TransportObservations:
             if value is None or isinstance(value, (str, bool, int)):
                 params[key] = value
         self.events.append({"method": message["method"], "receivedNs": received_ns, "params": params})
+        self.stage_changed.set()
+
+    def document_ready(self, path: Path) -> bool:
+        route = next((event for event in reversed(self.stages)
+                      if event["message"] == "editor document analysis route published"
+                      and event["fields"].get("path") == str(path)), None)
+        if route is None:
+            return False
+        if route["fields"].get("ready") is not True:
+            raise LspQueryError("document analysis route is unavailable")
+        return True
+
+    def rustdoc_current(self, root: Path) -> bool:
+        events = [event["params"] for event in self.events
+                  if event["method"] == "suprnova-lsp/rustdocStatus"
+                  and event["params"].get("workspaceRoot") in {str(root), root.as_uri()}]
+        if not events:
+            return False
+        if any(type(event.get("generation")) is not int for event in events):
+            raise LspQueryError("worker readiness lacks a generation identity")
+        generation = max(event["generation"] for event in events)
+        latest = next(event for event in reversed(events) if event["generation"] == generation)
+        if latest.get("state") == "failed":
+            raise LspQueryError("worker failed before current: " + str(latest.get("message")))
+        return latest.get("state") == "current"
 
     def failed(self, request_id: int, error: BaseException) -> None:
         row = self.requests[request_id]
@@ -963,31 +996,34 @@ class LspClient:
     async def notify(self, method: str, params: Any) -> None:
         await self.send({"jsonrpc": "2.0", "method": method, "params": params})
 
-    async def wait_for_document_ready(self, path: Path) -> None:
-        """Wait for route publication without issuing a query that could prepare analysis."""
+    async def wait_for_observation(self, predicate, description: str, timeout_ms: Optional[int] = None) -> None:
+        """Wait on captured events; never warm analysis by querying for readiness."""
         if self.observation is None:
-            raise LspQueryError("document readiness requires transport observations")
+            raise LspQueryError(description + " requires transport observations")
 
-        async def wait() -> None:
+        async def wait_for_event() -> None:
             while True:
                 self.observation.stage_changed.clear()
-                route = next((event for event in reversed(self.observation.stages)
-                              if event["message"] == "editor document analysis route published"
-                              and event["fields"].get("path") == str(path)), None)
-                if route is not None:
-                    if route["fields"].get("ready") is not True:
-                        raise LspQueryError("document analysis route is unavailable")
+                if predicate():
                     return
                 if self.protocol_error is not None:
                     raise self.protocol_error
                 if self.exited:
-                    raise LspQueryError("LSP exited before document route publication")
+                    raise LspQueryError("LSP exited before " + description)
                 await self.observation.stage_changed.wait()
 
         try:
-            await asyncio.wait_for(wait(), self.timeout_ms / 1000)
+            await asyncio.wait_for(wait_for_event(), (timeout_ms or self.timeout_ms) / 1000)
         except asyncio.TimeoutError as error:
-            raise LspQueryError("timeout waiting for document route publication; enable rg_lsp_server=debug logging") from error
+            raise LspQueryError("timeout waiting for " + description) from error
+
+    async def wait_for_document_ready(self, path: Path) -> None:
+        await self.wait_for_observation(lambda: self.observation.document_ready(path),
+            "document route publication; enable rg_lsp_server=debug logging")
+
+    async def wait_for_rustdoc_current(self, root: Path, timeout_ms: Optional[int] = None) -> None:
+        await self.wait_for_observation(lambda: self.observation.rustdoc_current(root),
+            "current rustdoc publication", timeout_ms)
 
     async def wait_for_notification(
         self,
@@ -1316,6 +1352,8 @@ async def run(argv: Sequence[str]) -> None:
             await wait_until_ready(client, options.timeout_ms)
         if plan["documentReadinessBarrier"]:
             await client.wait_for_document_ready(file_path)
+        if plan["rustdocBarrier"] == "before-queries":
+            await client.wait_for_rustdoc_current(root, plan["rustdocTimeoutMs"])
         if plan["deferredBarrier"] == "before-queries":
             await wait_until_indexing_settled(client, options.timeout_ms)
             if memory_task is not None:
@@ -1462,6 +1500,8 @@ async def run(argv: Sequence[str]) -> None:
                         "raw": raw_hints,
                     }
                 )
+        if plan["rustdocBarrier"] == "after-queries":
+            await client.wait_for_rustdoc_current(root, plan["rustdocTimeoutMs"])
         if plan["deferredBarrier"] == "after-queries":
             await wait_until_indexing_settled(client, options.timeout_ms)
             if memory_task is not None:
@@ -1499,6 +1539,7 @@ async def run(argv: Sequence[str]) -> None:
         "barriers": {
             "readiness": plan["readinessBarrier"],
             "deferred": plan["deferredBarrier"],
+            "rustdoc": plan["rustdocBarrier"],
         },
         "results": results,
         "idleMemory": idle_memory,

@@ -57,21 +57,36 @@ class Diagnostic:
 
     @classmethod
     def source_observation(cls, report):
+        return cls.hover_observation(report, [f"source-{n}" for n in range(3)],
+            [("verify_password", "Result<bool, FrameworkError>")] * 3, "saved_exact")
+
+    @classmethod
+    def source_only_observation(cls, report):
+        if any(event.get("method") == "suprnova-lsp/rustdocStatus" for event in report.get("lifecycle", [])):
+            raise ValueError("automatic-disabled control observed worker activity")
+        if not helpers.memory_ok(report):
+            raise ValueError("automatic-disabled control lacks settled memory evidence")
+        summary = cls.source_observation(report)
+        summary["idleRssBytes"] = [sample["aggregateRssBytes"] for sample in report["idleMemory"]["samples"]]
+        return summary
+
+    @classmethod
+    def hover_observation(cls, report, labels, signatures, source):
         # Match replies to the entire sent hover ledger, so removing a slow/error
         # result cannot improve a distribution by changing only the results array.
         results = report.get("results", [])
         ledger = report.get("transport", [])
         sent = [row for row in ledger if row.get("method") == "textDocument/hover"]
-        if len(results) != 3 or len(sent) != 3:
-            raise ValueError("diagnostic requires all three sent source hovers and replies")
-        if [row.get("label") for row in results] != [f"source-{n}" for n in range(3)]:
-            raise ValueError("source workload is missing, reordered or duplicated")
+        if len(results) != len(labels) or len(sent) != len(labels) or len(signatures) != len(labels):
+            raise ValueError("diagnostic requires every planned hover and reply")
+        if [row.get("label") for row in results] != labels:
+            raise ValueError("hover workload is missing, reordered or duplicated")
         ids = [row.get("id") for row in sent]
         if any(type(value) is not int for value in ids) or len(set(ids)) != len(ids):
             raise ValueError("hover request identities are invalid or duplicated")
         previous = None
         durations = []
-        for result, row in zip(results, sent):
+        for result, row, expected in zip(results, sent, signatures):
             if result.get("kind") != "hover" or result.get("transport") != row or row.get("status") != "success":
                 raise ValueError("hover result and transport observation disagree")
             written, received = row.get("writtenNs"), row.get("receivedNs")
@@ -83,8 +98,8 @@ class Diagnostic:
                 raise ValueError("sequential hover requests overlap or changed order")
             previous = received
             text = result.get("text")
-            if not isinstance(text, str) or "verify_password" not in text or "FrameworkError" not in text:
-                raise ValueError("source hover is empty or has the wrong signature")
+            if not isinstance(text, str) or any(signature not in text for signature in expected):
+                raise ValueError("hover is empty or has the wrong signature")
             ready = [event for event in report.get("lifecycle", [])
                      if event.get("method") == "suprnova-lsp/activeWorkspaceChanged"
                      and event.get("params", {}).get("state") == "ready"
@@ -101,12 +116,12 @@ class Diagnostic:
                 raise ValueError("document route readiness was not observed before hover")
             durations.append(row["durationNs"])
         return {"firstNs": durations[0], "repeatedNs": durations[1:],
-                "stages": cls.stage_observations(report, sent),
+                "stages": cls.stage_observations(report, sent, source),
                 "diagnosticP95Ns": cls.percentile(durations, 95), "maxNs": max(durations),
                 "acceptance": "unverified: diagnostic counts are below the RSP minimum"}
 
     @staticmethod
-    def stage_observations(report, sent):
+    def stage_observations(report, sent, source):
         """Join native stage durations to this strictly sequential diagnostic workload."""
         completed = [event["fields"] for event in report.get("stages", [])
                      if event.get("message") == "analysis query completed" and event.get("fields", {}).get("query") == "hover"]
@@ -116,8 +131,8 @@ class Diagnostic:
             raise ValueError("sequential hover stage attribution is missing or duplicated")
         stages = []
         for row, execution, preparation in zip(sent, completed, prepared):
-            if execution.get("status") != "ok" or preparation.get("source") != "saved_exact":
-                raise ValueError("stage attribution does not describe successful saved-file hover")
+            if execution.get("status") != "ok" or preparation.get("source") != source:
+                raise ValueError("stage attribution describes a different document source")
             fields = [execution.get("queued_ms"), execution.get("elapsed_ms"), preparation.get("elapsed_us")]
             if any(type(value) not in {str, int} or not str(value).isdigit() for value in fields):
                 raise ValueError("stage durations are absent or malformed")
@@ -125,6 +140,51 @@ class Diagnostic:
                            "executionNs": int(fields[1]) * 1_000_000, "preparationNs": int(fields[2]) * 1000,
                            "correlation": "one outstanding hover; all three lifecycle/preparation observations in request order"})
         return stages
+
+    @staticmethod
+    def workload_plan(mode, directory, workload):
+        plan = {"file": "src/models/user.rs", "format": "json", "readinessBarrier": "ready", "documentReadinessBarrier": True,
+            "deferredBarrier": "after-queries", "idleMemory": False,
+            "queries": [{"kind": "hover", "label": f"source-{n}", "marker": "pub fn verify_password", "delta": 7} for n in range(3)],
+            "initializationOptions": {"cfg": {"test": False}, "cache": {"packageResidency": "workspace"},
+                "indexing": {"performancePreference": mode}, "rustdoc": {"automatic": {
+                    "artifactRoot": str(directory / mode / "compiler"), "toolchain": "nightly-2026-08-19", "jobs": 2}}}}
+        if workload == "source-only":
+            plan["initializationOptions"]["rustdoc"]["automatic"]["enabled"] = False
+            plan["idleMemory"] = True
+        if workload == "generated-settled":
+            original = (APP / plan["file"]).read_text()
+            signature = "pub fn verify_password(&self, password: &str) -> Result<bool, FrameworkError> {"
+            if original.count(signature) != 1:
+                raise ValueError("Devlist source method changed")
+            plan["text"] = original.replace(signature, signature + '\n        use suprnova::eloquent::Model as _;\n'
+                '        let rsp_query = User::query();\n        let rsp_without = User::without_global_scopes();\n'
+                '        let rsp_filter = User::filter("email", "member@example.test");\n')
+            plan.update(rustdocBarrier="before-queries", rustdocTimeoutMs=900000, deferredBarrier="before-queries", idleMemory=True,
+                queries=[{"kind": "hover", "label": marker, "marker": marker} for marker in ("rsp_query", "rsp_without", "rsp_filter")])
+        return plan
+
+    @classmethod
+    def generated_observation(cls, report):
+        sent = [row for row in report.get("transport", []) if row.get("method") == "textDocument/hover"]
+        for row in sent:
+            events = [event["params"] for event in report.get("lifecycle", [])
+                      if event.get("method") == "suprnova-lsp/rustdocStatus"
+                      and event.get("params", {}).get("workspaceRoot") in {str(APP), APP.as_uri()}
+                      and type(event.get("receivedNs")) is int and event["receivedNs"] <= row.get("writtenNs", -1)]
+            if not events or any(type(event.get("generation")) is not int for event in events):
+                raise ValueError("generated readiness was not independently observed before hover")
+            generation = max(event["generation"] for event in events)
+            latest = next(event for event in reversed(events) if event["generation"] == generation)
+            if latest.get("state") != "current":
+                raise ValueError("latest generated declarations were not current before hover")
+        memory = report.get("idleMemory") or {}
+        if not helpers.memory_ok(report):
+            raise ValueError("settled memory needs five genuine server/engine samples and indexing peak evidence")
+        samples = memory["samples"]
+        summary = cls.hover_observation(report, ["rsp_query", "rsp_without", "rsp_filter"], [("Builder<User>",)] * 3, "current")
+        summary["idleRssBytes"] = [sample["aggregateRssBytes"] for sample in samples]
+        return summary
 
     @staticmethod
     def configure_limits(nofile_soft):
@@ -139,7 +199,25 @@ class Diagnostic:
             resource.setrlimit(resource.RLIMIT_NOFILE, (nofile_soft, limits[1]))
         return {"inherited": list(limits), "effective": list(resource.getrlimit(resource.RLIMIT_NOFILE))}
 
-    async def run(self, modes, no_build, nofile_soft=None):
+    async def observe_mode(self, mode, directory, workload, command):
+        """Run one immutable workload through the bounded stdio observer."""
+        plan = self.workload_plan(mode, directory, workload)
+        plan_path = directory / f"{mode}-plan.json"
+        plan_path.write_text(json.dumps(plan, indent=2) + "\n")
+        runtime_minutes = 17 if workload == "generated-settled" else 5
+        text = await command(mode, "just", ["agent-debug", "--no-build", "--timeout", f"{runtime_minutes}m", "--measure",
+            "--log", "rg_lsp_engine=trace,rg_lsp_server=debug", "lsp-query", "--workspace-root", str(APP),
+            "--query-file", str(plan_path), "--timeout-ms", "300000", "--json"], timeout=(runtime_minutes + 1) * 60_000)
+        # The supervisor appends its own summary. The first JSON document is
+        # the query result; preserve the entire stdout separately as evidence.
+        start = text.index('{\n  "file"')
+        report, _ = json.JSONDecoder().raw_decode(text[start:])
+        observe = {"source": self.source_observation, "source-only": self.source_only_observation,
+                   "generated-settled": self.generated_observation}[workload]
+        summary = observe(report)
+        return {"raw": report, "summary": summary, "plan": plan}
+
+    async def run(self, modes, no_build, nofile_soft=None, workload="source"):
         limits = self.configure_limits(nofile_soft)
         runner = helpers.module("responsiveness_runner", ROOT / "tools/agent-debug.py")
         runner.install_signal_handlers()
@@ -163,7 +241,7 @@ class Diagnostic:
                 raise ValueError(f"{label}: observation failed; inspect {output}")
             return text
 
-        identity = {"purpose": "source/stage diagnostic, not RSP acceptance or idle-memory proof", "application": str(APP),
+        identity = {"purpose": "small diagnostic, not RSP acceptance", "workload": workload, "application": str(APP),
                     "openFileLimits": limits,
                     "sources": original, "frameworkRevision": REVISION, "buildProfile": "release",
                     "producerToolchain": "nightly-2026-08-19",
@@ -194,22 +272,7 @@ class Diagnostic:
             identity["binary"] = str(binary)
             identity["binarySha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
             for mode in modes:
-                plan = {"file": "src/models/user.rs", "format": "json", "readinessBarrier": "ready", "documentReadinessBarrier": True,
-                    "deferredBarrier": "after-queries", "idleMemory": False,
-                    "queries": [{"kind": "hover", "label": f"source-{n}", "marker": "pub fn verify_password", "delta": 7} for n in range(3)],
-                    "initializationOptions": {"cfg": {"test": False}, "cache": {"packageResidency": "workspace"},
-                        "indexing": {"performancePreference": mode}, "rustdoc": {"automatic": {
-                            "artifactRoot": str(directory / mode / "compiler"), "toolchain": "nightly-2026-08-19", "jobs": 2}}}}
-                plan_path = directory / f"{mode}-plan.json"
-                plan_path.write_text(json.dumps(plan, indent=2) + "\n")
-                text = await command(mode, "just", ["agent-debug", "--no-build", "--timeout", "5m", "--measure",
-                    "--log", "rg_lsp_engine=trace,rg_lsp_server=debug", "lsp-query", "--workspace-root", str(APP),
-                    "--query-file", str(plan_path), "--timeout-ms", "300000", "--json"], timeout=6 * 60_000)
-                # The supervisor appends its own summary. The first JSON document is
-                # the query result; preserve the entire stdout separately as evidence.
-                start = text.index('{\n  "file"')
-                report, _ = json.JSONDecoder().raw_decode(text[start:])
-                reports[mode] = {"raw": report, "summary": self.source_observation(report), "plan": plan}
+                reports[mode] = await self.observe_mode(mode, directory, workload, command)
             complete = True
         finally:
             after = self.inventory()
@@ -235,10 +298,11 @@ if __name__ == "__main__":
                         help="small source workload; emits no passing Sudus requirement verdicts")
     parser.add_argument("--mode", choices=MODES, action="append")
     parser.add_argument("--no-build", action="store_true", help="intentionally use an existing managed optimized binary")
+    parser.add_argument("--workload", choices=("source", "source-only", "generated-settled"), default="source")
     parser.add_argument("--nofile-soft", type=int, help="explicit open-file limit for this diagnostic process and its children only")
     options = parser.parse_args()
     try:
-        asyncio.run(Diagnostic().run(options.mode or MODES, options.no_build, options.nofile_soft))
+        asyncio.run(Diagnostic().run(options.mode or MODES, options.no_build, options.nofile_soft, options.workload))
     except (ValueError, RuntimeError, OSError, KeyError) as error:
         print(f"responsiveness observation incomplete: {error}", file=sys.stderr)
         sys.exit(2)
