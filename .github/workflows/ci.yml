@@ -48,7 +48,7 @@ jobs:
       - name: Install Zed WebAssembly target
         run: rustup target add wasm32-wasip2
       - name: Check Zed WebAssembly extension
-        run: cargo check -p suprnova-lsp-zed --target wasm32-wasip2
+        run: cargo check -p rust-glancer-zed --target wasm32-wasip2
 
   tests:
     name: tests (${{ matrix.os }})

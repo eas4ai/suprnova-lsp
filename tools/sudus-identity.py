@@ -47,7 +47,8 @@ def source_observations(root=ROOT):
     cache = (root / "crates/engine/project/src/storage/cache/instance.rs").read_text()
     worker = (root / "crates/lsp/server/src/rustdoc_worker/task.rs").read_text()
     cargo = tomllib.loads((root / "crates/rust-glancer/Cargo.toml").read_text())
-    workspace = tomllib.loads((root / "Cargo.toml").read_text())["workspace"]["package"]
+    workspace_manifest = tomllib.loads((root / "Cargo.toml").read_text())["workspace"]
+    workspace = workspace_manifest["package"]
     properties = package["contributes"]["configuration"]["properties"]
     commands = package["contributes"]["commands"]
     notifications = {f"suprnova-lsp/{name}" for name in NOTIFICATIONS}
@@ -56,7 +57,14 @@ def source_observations(root=ROOT):
         root / "Justfile", root / "editors/code/scripts/package-vsix.mjs",
         root / ".github/scripts/package_server_archive.py", *files(".github/workflows", ".yml"),
         *files(".vscode", ".json")])
-    old_entrypoint = re.search(r'(?<![/\w])rust-glancer(?=[\s"\'`.-]|$)', entrypoints)
+    # The separate Zed package keeps its internal name. Resolve Cargo selectors
+    # against manifests so an invented fork-prefixed name cannot pass this check.
+    package_names = {tomllib.loads((root / member / "Cargo.toml").read_text())["package"]["name"]
+                     for member in workspace_manifest["members"]}
+    selected_packages = re.findall(r'(?<!\S)-p\s+([\w-]+)', entrypoints)
+    valid_packages = bool(selected_packages) and all(name in package_names for name in selected_packages)
+    old_entrypoint = re.search(r'(?<![/\w])rust-glancer(?=[\s"\'`.-]|$)',
+                              entrypoints.replace("rust-glancer-zed", ""))
     licenses = all(hashlib.sha256((root / name).read_bytes()).hexdigest() == digest
                    for name, digest in LICENSE_DIGESTS.items())
     identities = {
@@ -80,7 +88,7 @@ def source_observations(root=ROOT):
             and workspace.get("repository") == "https://github.com/eas4ai/suprnova-lsp"
             and workspace.get("license") == "MIT OR Apache-2.0"
             and "Igor Aleksanov <popzxc@yandex.ru>" in workspace.get("authors", [])
-            and licenses and old_entrypoint is None
+            and licenses and old_entrypoint is None and valid_packages
             and (root / "README.md").read_text().startswith("# Suprnova LSP")
             and (root / "editors/code/README.md").read_text().startswith("# Suprnova LSP")
             and "Rust Glancer" in (root / "README.md").read_text()
