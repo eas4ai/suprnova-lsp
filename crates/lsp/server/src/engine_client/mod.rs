@@ -30,6 +30,7 @@ pub(crate) use self::project_status::{EngineProjectStatus, EngineProjectUpdate};
 mod project_status;
 
 const PROJECT_UPDATE_RPC_DEADLINE: Duration = Duration::from_secs(30 * 60);
+const INLAY_HINT_RPC_DEADLINE: Duration = Duration::from_secs(30);
 
 /// RPC client and saved-project status state for one engine process.
 ///
@@ -181,6 +182,10 @@ impl EngineClient {
         let mut context = tarpc::context::current();
         if Self::operation_may_rebuild_analysis(operation) {
             context.deadline = Instant::now() + PROJECT_UPDATE_RPC_DEADLINE;
+        } else if operation == "inlay_hint" {
+            // An unsaved file's hint range can rebuild several bodies. Allow that work to
+            // finish beyond tarpc's ten-second default; request cancellation still stops it.
+            context.deadline = Instant::now() + INLAY_HINT_RPC_DEADLINE;
         }
         context
     }
@@ -208,7 +213,43 @@ impl fmt::Debug for EngineClient {
 mod tests {
     use std::time::{Duration, Instant};
 
+    use futures::StreamExt as _;
+    use tarpc::server::{BaseChannel, Channel as _};
+
     use super::EngineClient;
+
+    #[tarpc::service]
+    trait QueryProbe {
+        async fn complete() -> usize;
+    }
+
+    #[derive(Clone)]
+    struct SlowQuery;
+
+    impl QueryProbe for SlowQuery {
+        async fn complete(self, _: tarpc::context::Context) -> usize {
+            tokio::time::sleep(Duration::from_secs(11)).await;
+            42
+        }
+    }
+
+    #[tokio::test]
+    async fn inlay_response_can_outlast_default_transport_deadline() {
+        let (client_transport, server_transport) = tarpc::transport::channel::unbounded();
+        let server = tokio::spawn(
+            BaseChannel::with_defaults(server_transport)
+                .execute(SlowQuery.serve())
+                .for_each_concurrent(None, |response| response),
+        );
+        let client =
+            QueryProbeClient::new(tarpc::client::Config::default(), client_transport).spawn();
+        let response = client.complete(EngineClient::context("inlay_hint")).await;
+        server.abort();
+        assert_eq!(
+            response.expect("a slow, valid inlay response must arrive"),
+            42
+        );
+    }
 
     #[test]
     fn project_update_operations_get_long_rpc_deadline() {
