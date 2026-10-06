@@ -1,8 +1,8 @@
 # Roadmap
 
-Current: rustdoc-automatic-worker
+Current: suprnova-lsp-identity
 
-The engine-import, Devlist User and editor-input commitments are Done, recorded as `7ccb5de8ae9cd0586774b640dbb47cfe111d57b0`, `88088a0c347ffbc3cf7e526dd763bd539a18d6a0`, and `ec0b18211f3637882fea3bfb482706415a3664cd`. No commitment is open. The developer requests automatic rustdoc JSON export in a debounced worker and selected automatic model and target discovery. The [AUT contract](automatic-rustdoc.md), EDT mode clarifications and two-second debounce were confirmed 2026-10-05. Mechanisms and final start authorization are being prepared.
+The engine-import, Devlist User, editor-input and automatic-worker commitments are Done, recorded as `7ccb5de8ae9cd0586774b640dbb47cfe111d57b0`, `88088a0c347ffbc3cf7e526dd763bd539a18d6a0`, `ec0b18211f3637882fea3bfb482706415a3664cd`, and `c2422443e63e78e192ea9427de4d9853ae5bbdfb`. No commitment is open. The developer's next priority is the Suprnova LSP identity rename. The [IDN contract](identity.md) was confirmed 2026-10-06. Reviewed mechanisms and final start authorization are being prepared.
 
 ## rustdoc-engine-import
 
@@ -51,6 +51,20 @@ and a live macro-edit case pass in both construction modes, concurrency/race/
 rollback and compiler-tree cleanup controls pass, comparable completed-indexing
 idle RSS and separate compiler/indexing peaks are recorded, repository Rust and
 extension checks pass, and Sudus review findings are resolved.
+
+## suprnova-lsp-identity
+
+Requirements: IDN-001, IDN-002, IDN-003, IDN-004, IDN-005
+
+Deliver independent extension, client, setting, command, server and artifact
+identities with matching local packaging. Preserve generated-model behavior,
+upstream attribution and external checkout boundaries. No publication or automatic
+installation is included. Final start authorization is still required.
+
+Done when the Agreed IDN requirements have current passing receipts
+from reviewed failing controls; genuine editor/LSP and local package observations
+pass; relevant Rust/extension checks pass; Sudus reviews close with no unresolved
+findings. Display text changes alone do not meet the proposed delivery.
 
 ## Later work
 
