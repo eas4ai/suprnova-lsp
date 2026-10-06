@@ -332,22 +332,26 @@ async def main():
         if code != 0:
             raise ValueError("sysroot unavailable")
         sources = user.source_inventory(metadata, Path(sysroot.strip()) / "lib/rustlib/src/rust/library")
-        # The producer deadline applies to each serial command. A cold multi-target
-        # application also needs preparation and replacement indexing after its exports.
+        # Give the real application's cold dependency builds a larger explicit deadline.
+        # It applies to each serial command; preparation and replacement indexing
+        # also need time after the selected targets have been exported.
+        devlist_timeout_ms = 30 * 60_000
         workspace_target_count = sum(
             bool(set(target["kind"]) & {"lib", "rlib", "dylib", "staticlib", "cdylib", "bin"})
             for package in metadata["packages"] if package["id"] in metadata["workspace_members"]
             for target in package["targets"])
-        worker_wait_seconds = 900 * (workspace_target_count + 1)
+        worker_wait_seconds = (devlist_timeout_ms // 1000) * (workspace_target_count + 1)
         for mode, preference in [("initial", "faster-builds"), ("batched", "lower-peak-memory")]:
             comparison = {"packages": user.package_identity(metadata), "sources": sources,
                 "sourceTextSha256": user.digest(overlay.encode()), "compiler": compiler, "targetCfg": cfg,
                 "sysroot": sysroot.strip(), "residency": "workspace", "indexingPreference": preference,
-                "configuration": user.producer_configuration(), "queryWorkload": ["query", "without", "filter", "source", "methods", "isolation", "inlay"]}
+                "configuration": user.producer_configuration(), "workerTimeoutMs": devlist_timeout_ms,
+                "queryWorkload": ["query", "without", "filter", "source", "methods", "isolation", "inlay"]}
             for prefix, scenario, automatic in [("user", "devlist", {}), ("source", "devlist-source", {"enabled": False})]:
                 report = await probe(f"{prefix}-{mode}", user.APP, scenario, preference,
                     documents=[{"file": "src/models/user.rs", "text": overlay}], automatic=automatic,
-                    cargo={"target": user.TARGET}, workerWaitSeconds=worker_wait_seconds)
+                    cargo={"target": user.TARGET}, timeoutMs=devlist_timeout_ms,
+                    workerWaitSeconds=worker_wait_seconds)
                 report["comparison"] = comparison
         if sources != user.source_inventory(metadata, Path(sysroot.strip()) / "lib/rustlib/src/rust/library"):
             raise ValueError("application, dependency or sysroot inputs changed")
