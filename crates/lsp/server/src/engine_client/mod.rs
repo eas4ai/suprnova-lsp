@@ -30,7 +30,7 @@ pub(crate) use self::project_status::{EngineProjectStatus, EngineProjectUpdate};
 mod project_status;
 
 const PROJECT_UPDATE_RPC_DEADLINE: Duration = Duration::from_secs(30 * 60);
-const INLAY_HINT_RPC_DEADLINE: Duration = Duration::from_secs(30);
+const ANALYSIS_QUERY_RPC_DEADLINE: Duration = Duration::from_secs(30);
 
 /// RPC client and saved-project status state for one engine process.
 ///
@@ -89,9 +89,12 @@ impl EngineClient {
         F: FnOnce(EngineServiceClient, tarpc::context::Context) -> Fut,
         Fut: Future<Output = Result<EngineResult<T>, TarpcRpcError>>,
     {
-        let result = request(self.engine_service_client.clone(), Self::context(operation))
-            .await
-            .with_context(|| format!("while attempting to call engine RPC `{operation}`"))?;
+        let result = request(
+            self.engine_service_client.clone(),
+            Self::context(operation, false),
+        )
+        .await
+        .with_context(|| format!("while attempting to call engine RPC `{operation}`"))?;
         result.map_err(anyhow::Error::from)
     }
 
@@ -109,7 +112,12 @@ impl EngineClient {
         F: FnOnce(EngineServiceClient, tarpc::context::Context) -> Fut,
         Fut: Future<Output = Result<Result<QueryValue<T>, QueryError>, TarpcRpcError>>,
     {
-        match request(self.engine_service_client.clone(), Self::context(operation)).await {
+        match request(
+            self.engine_service_client.clone(),
+            Self::context(operation, true),
+        )
+        .await
+        {
             Ok(result) => result,
             Err(error) => {
                 let error = anyhow::Error::new(error)
@@ -178,14 +186,14 @@ impl EngineClient {
         }
     }
 
-    fn context(operation: &'static str) -> tarpc::context::Context {
+    fn context(operation: &'static str, is_query: bool) -> tarpc::context::Context {
         let mut context = tarpc::context::current();
         if Self::operation_may_rebuild_analysis(operation) {
             context.deadline = Instant::now() + PROJECT_UPDATE_RPC_DEADLINE;
-        } else if operation == "inlay_hint" {
-            // An unsaved file's hint range can rebuild several bodies. Allow that work to
-            // finish beyond tarpc's ten-second default; request cancellation still stops it.
-            context.deadline = Instant::now() + INLAY_HINT_RPC_DEADLINE;
+        } else if is_query {
+            // Queries can wait behind indexing and rebuild captured editor bodies. Allow that
+            // work beyond tarpc's ten-second default; request cancellation still stops it.
+            context.deadline = Instant::now() + ANALYSIS_QUERY_RPC_DEADLINE;
         }
         context
     }
@@ -234,7 +242,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inlay_response_can_outlast_default_transport_deadline() {
+    async fn analysis_responses_can_outlast_default_transport_deadline() {
         let (client_transport, server_transport) = tarpc::transport::channel::unbounded();
         let server = tokio::spawn(
             BaseChannel::with_defaults(server_transport)
@@ -243,12 +251,20 @@ mod tests {
         );
         let client =
             QueryProbeClient::new(tarpc::client::Config::default(), client_transport).spawn();
-        let response = client.complete(EngineClient::context("inlay_hint")).await;
+        let responses =
+            futures::future::join_all(["hover", "completion", "inlay_hint"].map(|operation| {
+                let context = EngineClient::context(operation, true);
+                assert!(context.deadline < Instant::now() + Duration::from_secs(35));
+                client.complete(context)
+            }))
+            .await;
         server.abort();
-        assert_eq!(
-            response.expect("a slow, valid inlay response must arrive"),
-            42
-        );
+        for response in responses {
+            assert_eq!(
+                response.expect("a slow, valid analysis response must arrive"),
+                42
+            );
+        }
     }
 
     #[test]
@@ -261,7 +277,7 @@ mod tests {
             "publish_rustdoc",
             "rustdoc_requested",
         ] {
-            let context = EngineClient::context(operation);
+            let context = EngineClient::context(operation, false);
 
             assert!(
                 context.deadline > Instant::now() + Duration::from_secs(20 * 60),
@@ -271,12 +287,12 @@ mod tests {
     }
 
     #[test]
-    fn interactive_operations_keep_tarpc_default_deadline() {
-        let context = EngineClient::context("hover");
+    fn non_query_operations_keep_tarpc_default_deadline() {
+        let context = EngineClient::context("did_open", false);
 
         assert!(
             context.deadline < Instant::now() + Duration::from_secs(20),
-            "interactive engine calls should keep the default short tarpc deadline",
+            "ordinary notifications should keep the default short tarpc deadline",
         );
     }
 }
