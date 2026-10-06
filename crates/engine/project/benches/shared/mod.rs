@@ -105,7 +105,7 @@ impl BenchTarget {
 
         assert!(
             !targets.is_empty(),
-            "RUST_GLANCER_BENCH_TARGETS must select at least one benchmark target"
+            "SUPRNOVA_LSP_BENCH_TARGETS must select at least one benchmark target"
         );
 
         targets
@@ -129,7 +129,7 @@ impl BenchTarget {
                 manifest_path.exists(),
                 "rust-analyzer benchmark fixture is missing at {}.\n\
                  Run ./test_targets/bench_fixtures/fetch-rust-analyzer.sh, or set \
-                 RUST_GLANCER_BENCH_TARGETS=synthetic_body_heavy to run only a checked-in synthetic target.",
+                 SUPRNOVA_LSP_BENCH_TARGETS=synthetic_body_heavy to run only a checked-in synthetic target.",
                 self.project_root().display(),
             ),
         }
@@ -344,9 +344,9 @@ impl BenchFixture {
 }
 
 pub(crate) fn bench_targets() -> Vec<BenchTarget> {
-    match std::env::var("RUST_GLANCER_BENCH_TARGETS") {
+    match std::env::var("SUPRNOVA_LSP_BENCH_TARGETS") {
         Ok(value) => BenchTarget::parse_list(&value),
         Err(std::env::VarError::NotPresent) => BenchTarget::ALL.to_vec(),
-        Err(error) => panic!("failed to read RUST_GLANCER_BENCH_TARGETS: {error}"),
+        Err(error) => panic!("failed to read SUPRNOVA_LSP_BENCH_TARGETS: {error}"),
     }
 }
