@@ -161,7 +161,9 @@ async def main():
     directory = runner.create_run_directory("automatic-rustdoc")
     environment = dict(os.environ, RUSTUP_TOOLCHAIN=user.TOOLCHAIN, CARGO_BUILD_JOBS="2",
         RAYON_NUM_THREADS="2", RUST_MIN_STACK="16777216", CARGO_NET_OFFLINE="true",
-        CARGO_TARGET_DIR=str(ROOT / "target/agent-debug/automatic-consumer-target"), RUSTUP_AUTO_INSTALL="0")
+        CARGO_TARGET_DIR=str(ROOT / "target/agent-debug/automatic-consumer-target"), RUSTUP_AUTO_INSTALL="0",
+        # Metadata and lockfile setup otherwise write version caches before the worker starts.
+        CARGO_CACHE_RUSTC_INFO="0")
     build_env = dict(environment, RUSTUP_TOOLCHAIN="1.98.1", CARGO_TARGET_DIR=str(ROOT / "target"),
                      NEXTEST_EXPERIMENTAL_LIBTEST_JSON="1")
     commands, reports, traces = [], {}, {}
@@ -376,7 +378,9 @@ async def main():
             comparison = {"packages": user.package_identity(metadata), "sources": sources,
                 "sourceTextSha256": user.digest(overlay.encode()), "compiler": compiler, "targetCfg": cfg,
                 "sysroot": sysroot.strip(), "residency": "workspace", "indexingPreference": preference,
-                "configuration": user.producer_configuration(), "workerTimeoutMs": devlist_timeout_ms}
+                  "configuration": dict(user.producer_configuration(),
+                                        cargoCacheRustcInfo=environment["CARGO_CACHE_RUSTC_INFO"]),
+                  "workerTimeoutMs": devlist_timeout_ms}
             for prefix, scenario, automatic in [("user", "devlist", {}), ("source", "devlist-source", {"enabled": False})]:
                 report = await probe(f"{prefix}-{mode}", user.APP, scenario, preference,
                     documents=[{"file": "src/models/user.rs", "text": overlay}], automatic=automatic,

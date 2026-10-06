@@ -527,12 +527,19 @@ mod tests {
         let (_sender, mut changes) = tokio::sync::watch::channel(1);
         let mut pass = CompilerPass::new(&root, &config, artifacts.path(), 1, &mut changes);
         let mut command = pass.command("cargo", None);
-        command.args(["generate-lockfile", "--offline"]);
+        command
+            .env("CARGO_CACHE_RUSTC_INFO", "0")
+            .args(["generate-lockfile", "--offline"]);
         pass.run(&mut command, "prepare isolated compiler control", 32 * 1024)
             .await
             .unwrap();
         let mut command = pass.command("cargo", None);
-        command.args(["check", "--locked", "--offline", "--lib"]);
+        command.env("CARGO_CACHE_RUSTC_INFO", "0").args([
+            "check",
+            "--locked",
+            "--offline",
+            "--lib",
+        ]);
         pass.run(
             &mut command,
             "compile configured intermediate-output control",
