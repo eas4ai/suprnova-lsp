@@ -21,7 +21,7 @@ suite("Suprnova LSP extension", () => {
   let projects: vscode.Uri;
 
   suiteSetup(async () => {
-    const extension = vscode.extensions.getExtension("suprnova-lsp.suprnova-lsp");
+    const extension = vscode.extensions.getExtension("eas4ai.suprnova-lsp");
     assert.ok(extension, "VS Code should load Suprnova LSP");
     projects = vscode.Uri.file(path.resolve(extension.extensionPath, "../../test_targets"));
     await withTimeout(extension.activate(), "activate Suprnova LSP", 30_000);

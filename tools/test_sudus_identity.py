@@ -90,13 +90,13 @@ class PackagedIdentityIntegrity(unittest.TestCase):
                 "extension/package.json": json.dumps({"publisher": "eas4ai", "name": "suprnova-lsp", "displayName": "Suprnova LSP"}).encode(),
                 "extension.vsixmanifest": b'<PackageManifest><Identity Publisher="eas4ai" Id="suprnova-lsp" /></PackageManifest>',
                 "extension/server/suprnova-lsp": binary.read_bytes(),
-                "extension/LICENSE": b"LICENSE-MIT original license text\nLICENSE-APACHE original license text\n",
+                "extension/LICENSE.txt": b"LICENSE-MIT original license text\nLICENSE-APACHE original license text\n",
             }
             vsix = root / "extension.vsix"
             controls = [({}, None), ({"extension.vsixmanifest": b'<PackageManifest><Identity Publisher="rust-glancer" Id="rust-glancer" /></PackageManifest>'}, "extension"),
                         ({"extension/server/suprnova-lsp": b"another executable"}, "binary"),
                         ({"extension/server/rust-glancer": b"upstream executable"}, "binary"),
-                        ({"extension/LICENSE": b"different license text"}, "licenses")]
+                        ({"extension/LICENSE.txt": b"different license text"}, "licenses")]
             for changed, rejected in controls:
                 with zipfile.ZipFile(vsix, "w") as output:
                     for name, data in {**values, **changed}.items():
