@@ -1,61 +1,116 @@
 # Suprnova LSP
 
-An experimental Rust language server for Suprnova applications, optimized for
-low idle memory and fast editor restarts. It imports compiler-produced rustdoc
-JSON for generated model APIs without running rust-analyzer.
+An experimental Rust language server for Suprnova applications, designed to keep
+idle memory low. It understands generated model APIs by importing compiler-produced
+rustdoc JSON. It runs independently of rust-analyzer.
 
-This project aims to be 90% complete, being complete enough for day-to-day work
-without trying to be rust-analyzer 2.0.
+## Suprnova support
 
-This fork lives at [eas4ai/suprnova-lsp](https://github.com/eas4ai/suprnova-lsp).
+- Hover, completion, and type inference for generated model methods, including
+  query builders such as `Post::query()` returning `Builder<Post>`.
+- Automatic discovery of Suprnova models and their Cargo targets.
+- Background rustdoc exports that refresh after saved changes, with a configurable
+  two-second debounce.
+- Indexing and cache settings for balancing memory use and indexing speed.
 
-## Installation
+This is a preview. Initial indexing and compiler exports can take time; hover may
+show **Loading…** while indexing is in progress. Compiler builds can use more memory
+than the idle language server.
 
-Build the server with `cargo build --release --locked -p suprnova-lsp`.
-For VS Code, run `npm ci` and `npm run package:vsix` in `editors/code`, then
-install the generated local VSIX. See the [extension guide](editors/code/README.md)
-for configuration and development commands.
+## Install in VS Code
 
-The extension ID is `eas4ai.suprnova-lsp`. Settings and commands use
-`suprnova-lsp.*`; copy desired upstream settings to that prefix manually.
-Automatic rustdoc exports use a two-second debounce. Explicit prepared exports
-use `suprnova-lsp.rustdoc.inputs`. Server logging uses `SUPRNOVA_LSP_LOG`.
+Download a VSIX from the [GitHub releases](https://github.com/eas4ai/suprnova-lsp/releases)
+page that matches your operating system and architecture:
 
-## AI use disclaimer
+| Platform            | VSIX target    |
+| ------------------- | -------------- |
+| Linux x64           | `linux-x64`    |
+| Linux ARM64         | `linux-arm64`  |
+| macOS Intel         | `darwin-x64`   |
+| macOS Apple Silicon | `darwin-arm64` |
+| Windows x64         | `win32-x64`    |
 
-This project is being built with heavy use of LLMs.
-LLMs are used as a tool, not as a brain replacement.
+Run **Extensions: Install from VSIX…** in VS Code, select the downloaded file, and
+reload the window. Each VSIX includes the matching server binary. The extension ID
+is `eas4ai.suprnova-lsp`.
 
-I do consider the code to be _my_, and I am spending a lot of time caring about the code
-quality. So I consider it to be rather readable and maintainable. It might not be the
-idiomatic example of compiler-adjacent tooling (I don't have that much domain experience),
-but I am working on improving it as I work on it.
+Install Rust with Cargo and rustup. Automatic model exports use a pinned nightly
+toolchain, which you must install explicitly:
 
-So if it is slop, then it is _my_ slop, and the best way to help is to tell me what's
-wrong. This way I will be able to learn something and hopefully make the project better.
+```sh
+rustup toolchain install nightly-2026-08-19 --profile minimal
+```
 
-## Acknowledgements
+For standard-library indexing, install `rust-src` for your application's active
+toolchain from its workspace:
 
-[Rust Glancer](https://github.com/rust-glancer/rust-glancer), created by Igor
-Aleksanov, provides this fork's language-server foundation. Its original author
-credits and dual license are preserved.
+```sh
+rustup component add rust-src
+```
 
-[rust-analyzer](https://github.com/rust-lang/rust-analyzer) is an obvious inspiration, motivation, source of learning material and the place where I've hijacked a ton of ideas. Rust is lucky to have such a great LSP, and everyone working on it is awesome.
+Open your Suprnova application's Cargo workspace. Automatic discovery and exports
+are enabled by default; you do not need to maintain a list of models. Exports use
+locked dependency resolution, so keep the application's `Cargo.lock` up to date.
 
-[chalk](https://github.com/rust-lang/chalk) turned out a really pleasant project to integrate, and it comes with [lovely documentation](https://rust-lang.github.io/chalk/book/).
+## Configuration
 
-Without [jemalloc](https://github.com/jemalloc/jemalloc) and [tikv-jemallocator](https://github.com/tikv/jemallocator) this project wouldn't have been possible. Not only it's awesome as an allocator, but it's also saved me hundreds of hours profiling allocations.
+Settings use the `suprnova-lsp.*` prefix. For example, in VS Code's `settings.json`:
 
-On the same note, [mimalloc](https://github.com/microsoft/mimalloc) and [mimalloc_rust](https://github.com/purpleprotocol/mimalloc_rust) turned out to work even better for the purpose of this project.
+```json
+{
+  "suprnova-lsp.rustdoc.automatic": {
+    "enabled": true,
+    "debounceMs": 2000,
+    "toolchain": "nightly-2026-08-19"
+  },
+  "suprnova-lsp.indexing.performancePreference": "lower-peak-memory"
+}
+```
+
+The example selects smaller indexing batches to reduce peak memory; the default
+is `faster-builds`. Restart the server after changing the indexing preference.
+Increase `debounceMs` to give bursts of saved changes more time to settle.
+
+Prepared rustdoc exports can also be configured through
+`suprnova-lsp.rustdoc.inputs`. See the [extension guide](editors/code/README.md) for
+additional settings and development commands.
+
+For troubleshooting, open the **Suprnova LSP** output channel. After correcting a
+toolchain or compilation error, run **Suprnova LSP: Reindex Workspace** to retry.
+Server logging is controlled by `SUPRNOVA_LSP_LOG`.
+
+## Build from source
+
+Build the server from the repository root:
+
+```sh
+cargo build --release --locked -p suprnova-lsp
+```
+
+To build a local VS Code package:
+
+```sh
+cd editors/code
+npm ci
+npm run package:vsix
+```
+
+GitHub release CI builds native VSIX files and standalone server archives for all
+five platforms above. Releases include `SHA256SUMS` for verifying downloads.
 
 ## Contributing
 
-See [CONTRIBUTING.md](docs/src/intro/CONTRIBUTING.md).
+See the [contributor guide](docs/src/intro/CONTRIBUTING.md) for the development
+workflow. Keep changes focused on Suprnova editor support and preserve low idle
+memory use.
 
 ## License
 
-Licensed under either of:
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
+Licensed under either the [MIT license](LICENSE-MIT) or
+[Apache License, Version 2.0](LICENSE-APACHE), at your option.
 
-at your option.
+## Attribution
+
+Suprnova LSP builds on [Rust Glancer](https://github.com/rust-glancer/rust-glancer),
+created by Igor Aleksanov. We thank its author and contributors for the language
+server foundation. The original copyright notices and dual license are preserved.
