@@ -30,6 +30,26 @@ suite("Rust Glancer extension", () => {
   teardown(async function () {
     if (this.currentTest?.state === "failed") {
       const evidence = await Promise.allSettled([clientState(), serverOutput()]);
+      const reportPath = process.env.RUST_GLANCER_EXTENSION_TEST_REPORT;
+      if (reportPath !== undefined) {
+        // VS Code can omit large console objects. Keep the full failure evidence
+        // beside the managed test report so compiler diagnostics survive.
+        await fs.writeFile(
+          `${reportPath}.diagnostics.json`,
+          JSON.stringify(
+            {
+              test: this.currentTest.fullTitle(),
+              evidence: evidence.map((result) =>
+                result.status === "fulfilled"
+                  ? result
+                  : { status: result.status, reason: String(result.reason) },
+              ),
+            },
+            null,
+            2,
+          ),
+        );
+      }
       for (const result of evidence) {
         console.error(result.status === "fulfilled" ? result.value : result.reason);
       }
@@ -178,10 +198,33 @@ suite("Rust Glancer extension", () => {
         vscode.Uri.file(path.join(root, "src/lib.rs")),
       );
       await vscode.window.showTextDocument(document);
-      await waitForReadyWorkspace(path.basename(root), 900_000);
+      const automaticState = async () => {
+        const state = await clientState();
+        const reportPath = process.env.RUST_GLANCER_EXTENSION_TEST_REPORT;
+        if (reportPath !== undefined) {
+          await fs.writeFile(`${reportPath}.worker-state.json`, JSON.stringify(state, null, 2));
+        }
+        if (state.session?.status.details.generatedApiState === "failed") {
+          throw new Error(
+            `Automatic model export failed: ${state.session.status.details.generatedApiMessage}`,
+          );
+        }
+        return state;
+      };
+      await waitFor(
+        "automatic workspace ready",
+        automaticState,
+        ({ session }) =>
+          session?.running === true &&
+          session.hasClient &&
+          session.status.state === "ready" &&
+          path.basename(session.status.details.activeWorkspaceRoot ?? "") === path.basename(root),
+        900_000,
+      );
       await waitFor(
         "automatic model hover",
         async () => {
+          await automaticState();
           const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
             "vscode.executeHoverProvider",
             document.uri,
