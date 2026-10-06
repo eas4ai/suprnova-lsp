@@ -56,27 +56,27 @@ needs dependency sources to already exist in Cargo's local registry checkout.
 To run only the checked-in synthetic target:
 
 ```sh
-RUST_GLANCER_BENCH_TARGETS=synthetic_body_heavy cargo bench -p rg_project --bench analysis_pipeline
+SUPRNOVA_LSP_BENCH_TARGETS=synthetic_body_heavy cargo bench -p rg_project --bench analysis_pipeline
 ```
 
 To run one of the phase-focused synthetic targets:
 
 ```sh
-RUST_GLANCER_BENCH_TARGETS=synthetic_parse_heavy cargo bench -p rg_project --bench analysis_pipeline
-RUST_GLANCER_BENCH_TARGETS=synthetic_item_tree_heavy cargo bench -p rg_project --bench analysis_pipeline
-RUST_GLANCER_BENCH_TARGETS=synthetic_def_map_heavy cargo bench -p rg_project --bench analysis_pipeline
+SUPRNOVA_LSP_BENCH_TARGETS=synthetic_parse_heavy cargo bench -p rg_project --bench analysis_pipeline
+SUPRNOVA_LSP_BENCH_TARGETS=synthetic_item_tree_heavy cargo bench -p rg_project --bench analysis_pipeline
+SUPRNOVA_LSP_BENCH_TARGETS=synthetic_def_map_heavy cargo bench -p rg_project --bench analysis_pipeline
 ```
 
 To run only the small app:
 
 ```sh
-RUST_GLANCER_BENCH_TARGETS=small_app cargo bench -p rg_project --bench analysis_pipeline
+SUPRNOVA_LSP_BENCH_TARGETS=small_app cargo bench -p rg_project --bench analysis_pipeline
 ```
 
 To run only rust-analyzer:
 
 ```sh
-RUST_GLANCER_BENCH_TARGETS=rust_analyzer cargo bench -p rg_project --bench analysis_pipeline
+SUPRNOVA_LSP_BENCH_TARGETS=rust_analyzer cargo bench -p rg_project --bench analysis_pipeline
 ```
 
 To run all configured targets:
