@@ -23,6 +23,40 @@ probe = mechanism.editor.module("automatic_probe_test", ROOT / "tools/automatic-
 
 
 class Integrity(unittest.TestCase):
+    def test_devlist_idle_comparison_requires_matching_observed_queries(self):
+        idle = {"indexingComplete": True, "metric": "sum-of-process-RSS",
+                "samples": [{"processRssBytes": {"1": 100, "2": 200}, "aggregateRssBytes": 300} for _ in range(5)]}
+        indexing = {"indexingPeakRssBytes": 500, "indexingSamples": 5, "samplingIntervalMs": 100}
+        workload = [{"method": method, "params": {"position": {"line": index, "character": 0}}}
+                    for index, method in enumerate(["textDocument/hover"] * 4
+                        + ["textDocument/completion"] * 3 + ["textDocument/inlayHint"])]
+        reports = {mode: {"cases": {name: {"passed": True, "evidence": {"idleMemory": copy.deepcopy(idle)}}
+                                   for name in names}, "comparison": {"target": "same"},
+                          "evidence": {"indexingMemory": copy.deepcopy(indexing),
+                              "queryWorkload": copy.deepcopy(workload),
+                              "events": [{"event": "finished", "code": 0, "compilerPeakRssBytes": 1000}]}}
+                   for mode, names in mechanism.EXPECTED.items()}
+        traces = {mode: {"successfulExecObserved": True, "rustAnalyzer": [],
+                        "rustdoc": [] if mode.startswith("source-") else ["observed"]}
+                  for mode in mechanism.EXPECTED}
+        def accepted(values):
+            return mechanism.assess(dict.fromkeys(mechanism.PROTO, True), True, values, traces, True, True)["AUT-009"]
+        self.assertTrue(accepted(reports))
+        for mutation in ["missing", "short", "different-position", "both-empty"]:
+            broken = copy.deepcopy(reports)
+            evidence = broken["source-initial"]["evidence"]
+            if mutation == "missing":
+                evidence.pop("queryWorkload")
+            elif mutation == "short":
+                evidence["queryWorkload"].pop()
+            elif mutation == "different-position":
+                evidence["queryWorkload"][0]["params"]["position"]["line"] += 1
+            else:
+                evidence["queryWorkload"] = []
+                broken["user-initial"]["evidence"]["queryWorkload"] = []
+            with self.subTest(mutation=mutation):
+                self.assertFalse(accepted(broken), "planned workload labels cannot replace observed query equality")
+
     def test_cleanup_controls_allow_preparation_before_the_held_export(self):
         async def check():
             with tempfile.TemporaryDirectory() as directory:
@@ -252,6 +286,21 @@ class Integrity(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     await value.case("held-query-cleanup", value.held_query)
         asyncio.run(check())
+
+
+class QueryObservationIntegrity(unittest.IsolatedAsyncioTestCase):
+    async def test_query_observation_captures_sent_coordinates_without_request_ids(self):
+        client = probe.ObservedClient.__new__(probe.ObservedClient)
+        client.query_workload = []
+        query = {"jsonrpc": "2.0", "id": 19, "method": "textDocument/hover",
+                 "params": {"position": {"line": 7, "character": 3}}}
+        with mock.patch.object(probe.lsp.LspClient, "send", new_callable=mock.AsyncMock) as send:
+            await client.send(query)
+            send.assert_awaited_once_with(query)
+            await client.send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
+        query["params"]["position"]["line"] = 99
+        self.assertEqual(client.query_workload, [{"method": "textDocument/hover",
+            "params": {"position": {"line": 7, "character": 3}}}])
 
 
 if __name__ == "__main__":

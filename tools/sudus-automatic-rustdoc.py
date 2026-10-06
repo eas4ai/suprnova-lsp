@@ -119,6 +119,11 @@ def assess(tests, editor_passed, reports, traces, retained, described):
         automatic, source = reports[f"user-{mode}"], reports[f"source-{mode}"]
         memory &= one(f"user-{mode}") and one(f"source-{mode}")
         memory &= isinstance(automatic.get("comparison"), dict) and automatic["comparison"] == source.get("comparison")
+        workload = automatic.get("evidence", {}).get("queryWorkload")
+        memory &= isinstance(workload, list) and [entry.get("method") if isinstance(entry, dict) else None
+                    for entry in workload] == (["textDocument/hover"] * 4
+                        + ["textDocument/completion"] * 3 + ["textDocument/inlayHint"])
+        memory &= workload == source.get("evidence", {}).get("queryWorkload")
         memory &= bool(traces.get(f"user-{mode}", {}).get("rustdoc"))
         memory &= traces.get(f"source-{mode}", {}).get("rustdoc") == []
         for report, case_name in [(automatic, "genuine-user"), (source, "source-user")]:
@@ -345,8 +350,7 @@ async def main():
             comparison = {"packages": user.package_identity(metadata), "sources": sources,
                 "sourceTextSha256": user.digest(overlay.encode()), "compiler": compiler, "targetCfg": cfg,
                 "sysroot": sysroot.strip(), "residency": "workspace", "indexingPreference": preference,
-                "configuration": user.producer_configuration(), "workerTimeoutMs": devlist_timeout_ms,
-                "queryWorkload": ["query", "without", "filter", "source", "methods", "isolation", "inlay"]}
+                "configuration": user.producer_configuration(), "workerTimeoutMs": devlist_timeout_ms}
             for prefix, scenario, automatic in [("user", "devlist", {}), ("source", "devlist-source", {"enabled": False})]:
                 report = await probe(f"{prefix}-{mode}", user.APP, scenario, preference,
                     documents=[{"file": "src/models/user.rs", "text": overlay}], automatic=automatic,
