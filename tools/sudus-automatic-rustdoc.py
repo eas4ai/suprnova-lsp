@@ -174,6 +174,7 @@ async def main():
     async def fixture(name):
         target = directory / name / "fixture"
         shutil.copytree(ROOT / "crates/engine/rustdoc/fixtures/automatic-models", target)
+        (target / ".ignore").write_text("src/lib.rs\n")
         code, _ = await run(name + "-lock", "cargo", ["generate-lockfile", "--offline",
                            "--manifest-path", str(target / "Cargo.toml")], cwd=target)
         if code != 0:
