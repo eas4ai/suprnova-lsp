@@ -150,6 +150,12 @@ def retained_layout_ok():
     return True
 
 
+def unowned_outputs(paths):
+    # Include empty directories as well as file contents when comparing Cargo writes.
+    return {str(path): user.digest(path.read_bytes()) if path.is_file() else "directory"
+            for directory in paths for path in directory.rglob("*")}
+
+
 async def main():
     runner.install_signal_handlers()
     directory = runner.create_run_directory("automatic-rustdoc")
@@ -175,6 +181,12 @@ async def main():
         target = directory / name / "fixture"
         shutil.copytree(ROOT / "crates/engine/rustdoc/fixtures/automatic-models", target)
         (target / ".ignore").write_text("src/lib.rs\n")
+        ordinary = target.parent / "ordinary-build"
+        ordinary.mkdir()
+        (ordinary / "unowned-sentinel").write_text("preserve this file\n")
+        (target / ".cargo").mkdir()
+        (target / ".cargo/config.toml").write_text(
+            "[build]\nbuild-dir = " + json.dumps(str(ordinary)) + "\n")
         code, _ = await run(name + "-lock", "cargo", ["generate-lockfile", "--offline",
                            "--manifest-path", str(target / "Cargo.toml")], cwd=target)
         if code != 0:
@@ -188,15 +200,24 @@ async def main():
         artifacts.mkdir()
         sentinel = artifacts / "unowned-sentinel"
         sentinel.write_text("preserve this file\n")
+        unowned = list(directory.glob("*-fixture/ordinary-build"))
+        inherited = work / "inherited-build"
+        inherited.mkdir()
+        (inherited / "unowned-sentinel").write_text("preserve this file\n")
+        unowned.append(inherited)
         plan = {"root": str(root), "binary": str(binary), "scenario": scenario,
             "preference": preference, "artifactRoot": str(artifacts), "control": str(work / "control.json"),
             "events": str(work / "cargo-events.jsonl"), "report": str(work / "report.json"),
-            "documents": [{"file": "src/lib.rs"}, {"file": "src/main.rs"}], **options}
+            "documents": [{"file": "src/lib.rs"}, {"file": "src/main.rs"}],
+            "unownedBuildDirectories": [str(path) for path in unowned], **options}
         path = work / "plan.json"
         path.write_text(json.dumps(plan))
         env = dict(environment, PATH=str(proxy_tools) + os.pathsep + environment["PATH"],
             AUTOMATIC_RUSTDOC_CONTROL=plan["control"], AUTOMATIC_RUSTDOC_EVENTS=plan["events"],
             AUTOMATIC_RUSTDOC_REAL_CARGO=real_cargo)
+        if scenario == "lifecycle" and preference == "lower-peak-memory":
+            env["CARGO_BUILD_BUILD_DIR"] = str(inherited)
+        unowned_before = unowned_outputs(unowned)
         before = {str(p): user.digest(p.read_bytes()) for p in root.rglob("*")
                   if p.is_file() and (p.suffix == ".rs" or p.name in {"Cargo.toml", "Cargo.lock"})
                   and "target" not in p.relative_to(root).parts}
@@ -212,6 +233,9 @@ async def main():
             "-o", str(trace), sys.executable, str(ROOT / "tools/automatic-rustdoc-probe.py"), str(path)],
             env=env, timeout=timeout)
         report = observation(json.loads(Path(plan["report"]).read_text()), mode, code)
+        unowned_after = unowned_outputs(unowned)
+        if unowned_before != unowned_after:
+            raise ValueError(f"{mode}: worker changed unowned Cargo intermediate output")
         after = {str(p): user.digest(p.read_bytes()) for p in root.rglob("*")
                  if p.is_file() and (p.suffix == ".rs" or p.name in {"Cargo.toml", "Cargo.lock"})
                  and "target" not in p.relative_to(root).parts}
@@ -255,7 +279,8 @@ async def main():
         second = await fixture("second-fixture")
         # Prepared precedence uses a genuine separately staged export. It never supplies
         # bytes to an automatic run, including the mandatory real Devlist acceptance.
-        prepare_env = dict(environment, CARGO_TARGET_DIR=str(ROOT / "target/agent-debug/automatic-fixture-target"))
+        prepare_env = dict(environment, CARGO_TARGET_DIR=str(ROOT / "target/agent-debug/automatic-fixture-target"),
+                           CARGO_BUILD_BUILD_DIR=str(ROOT / "target/agent-debug/automatic-fixture-target"))
         code, _ = await run("prepared-export", "cargo", ["rustdoc", "--manifest-path", str(initial / "Cargo.toml"),
             "--locked", "--offline", "--lib", "--jobs", "2", "--", "-Z", "unstable-options",
             "--output-format", "json", "--document-private-items", "--document-hidden-items"], env=prepare_env, cwd=initial)

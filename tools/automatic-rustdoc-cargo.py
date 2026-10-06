@@ -21,7 +21,8 @@ class CargoProbe:
     def record(self, event, **values):
         record = {"event": event, "monotonicNs": time.monotonic_ns(),
                   "pid": os.getpid(), "pgid": os.getpgrp(), "cwd": os.getcwd(),
-                  "args": self.args, "toolchain": os.environ.get("RUSTUP_TOOLCHAIN"), **values}
+                  "args": self.args, "toolchain": os.environ.get("RUSTUP_TOOLCHAIN"),
+                  "buildDirectory": os.environ.get("CARGO_BUILD_BUILD_DIR"), **values}
         with self.events.open("a") as stream:
             stream.write(json.dumps(record) + "\n")
 
