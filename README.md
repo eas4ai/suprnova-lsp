@@ -1,5 +1,7 @@
 # Suprnova LSP
 
+![Suprnova LSP social card](docs/assets/suprnova-lsp.jpg)
+
 An experimental Rust language server for Suprnova applications, designed to keep
 idle memory low. It understands generated model APIs by importing compiler-produced
 rustdoc JSON. It runs independently of rust-analyzer.

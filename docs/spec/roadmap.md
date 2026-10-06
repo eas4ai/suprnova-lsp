@@ -1,8 +1,8 @@
 # Roadmap
 
-Current: suprnova-lsp-identity
+Current: indexing-responsiveness
 
-The engine-import, Devlist User, editor-input and automatic-worker commitments are Done, recorded as `7ccb5de8ae9cd0586774b640dbb47cfe111d57b0`, `88088a0c347ffbc3cf7e526dd763bd539a18d6a0`, `ec0b18211f3637882fea3bfb482706415a3664cd`, and `c2422443e63e78e192ea9427de4d9853ae5bbdfb`. No commitment is open. The developer's next priority is the Suprnova LSP identity rename. The [IDN contract](identity.md) was confirmed 2026-10-06. Reviewed mechanisms and final start authorization are being prepared.
+The engine-import, Devlist User, editor-input and automatic-worker commitments are Done, recorded as `7ccb5de8ae9cd0586774b640dbb47cfe111d57b0`, `88088a0c347ffbc3cf7e526dd763bd539a18d6a0`, `ec0b18211f3637882fea3bfb482706415a3664cd`, and `c2422443e63e78e192ea9427de4d9853ae5bbdfb`. The identity commitment is also Done; no commitment is open. The developer confirmed the [responsiveness contract](responsiveness.md) and [three staged plans](../../.planning/indexing-responsiveness/README.md) on 2026-10-06. `Current:` names the prepared next commitment; reviewed mechanisms and start authorization are being prepared.
 
 ## rustdoc-engine-import
 
@@ -58,13 +58,32 @@ Requirements: IDN-001, IDN-002, IDN-003, IDN-004, IDN-005
 
 Deliver independent extension, client, setting, command, server and artifact
 identities with matching local packaging. Preserve generated-model behavior,
-upstream attribution and external checkout boundaries. No publication or automatic
-installation is included. Final start authorization is still required.
+upstream attribution and external checkout boundaries. This commitment is Done;
+subsequent GitHub publication was separately requested by the developer.
 
 Done when the Agreed IDN requirements have current passing receipts
 from reviewed failing controls; genuine editor/LSP and local package observations
 pass; relevant Rust/extension checks pass; Sudus reviews close with no unresolved
 findings. Display text changes alone do not meet the proposed delivery.
+
+## indexing-responsiveness
+
+Requirements: RSP-001, RSP-002, RSP-003, RSP-004, RSP-005, RSP-006
+
+Measure real Devlist hover delays before selecting a fix. Deliver p95 below 200 ms
+for the specified eligible first-hover and repeated-hover series during active
+background work and after settlement. Preserve captured revisions, saved-change
+ordering, generated-model correctness, cancellation, background progress and
+existing residency/release rules. Record matched settled idle RSS and verified
+process cleanup. [Execution plans](../../.planning/indexing-responsiveness/README.md).
+
+Done when all six requirements have fresh passing receipts from reviewed
+mechanisms, all required real application timing series and semantic results
+pass, genuine editor/ordering/cancellation checks pass, idle-memory and process
+observations are complete, relevant repository checks pass, and Sudus reviews
+close with every finding resolved or explicitly declined. A fast settled hover
+or a longer transport deadline does not satisfy this commitment. CI policy,
+unrelated portability failures, packaging and releases remain separate work.
 
 ## Later work
 
