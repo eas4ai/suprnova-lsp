@@ -1,4 +1,0 @@
-[package]
-name = "bench_item_tree_heavy"
-version = "0.1.0"
-edition = "2024"
