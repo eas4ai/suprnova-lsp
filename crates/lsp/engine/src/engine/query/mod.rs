@@ -191,6 +191,12 @@ impl<'a> QueryRunner<'a> {
             };
             (targets, source_targets, source, source_selection)
         };
+        tracing::trace!(
+            query,
+            phase = "source and declaration associations",
+            elapsed_us = started.elapsed().as_micros(),
+            "document analysis phase"
+        );
 
         let prepared = match source {
             DocumentSourceView::SavedExact(line_index) => {
@@ -201,14 +207,22 @@ impl<'a> QueryRunner<'a> {
                     .iter()
                     .map(|target| (target.crate_ref, target.context.file))
                     .collect::<UniqueVec<_>>();
+                let materialization_started = Instant::now();
                 self.project
                     .materialize_saved_project(
                         AnalysisSurface::Files(files.as_slice()),
                         &cancellation.token(),
                     )
                     .context("prepare exact saved document analysis")?;
+                tracing::trace!(
+                    query,
+                    phase = "saved file materialization",
+                    elapsed_us = materialization_started.elapsed().as_micros(),
+                    "document analysis phase"
+                );
                 rg_std::check_cancel!(cancellation, "after exact saved document preparation");
 
+                let view_started = Instant::now();
                 let snapshot = self
                     .project
                     .saved_snapshot()
@@ -220,6 +234,12 @@ impl<'a> QueryRunner<'a> {
                 let analysis = snapshot
                     .analysis_for_crates(crates.as_slice(), cancellation.token())
                     .context("load exact saved document analysis")?;
+                tracing::trace!(
+                    query,
+                    phase = "saved analysis view",
+                    elapsed_us = view_started.elapsed().as_micros(),
+                    "document analysis phase"
+                );
                 DocumentAnalysis {
                     snapshot,
                     analysis,
@@ -235,6 +255,9 @@ impl<'a> QueryRunner<'a> {
                     .saved_snapshot()
                     .context("borrow saved project for current document")?;
                 let source = source_view.shared_source();
+                // Checkpoint intervals include work since the preceding boundary. The first
+                // interval includes opening the read view and preparing current declarations.
+                let mut phase_started = Instant::now();
                 let (analysis, build_summary) = snapshot
                     .analysis_for_current_source(
                         &source_targets,
@@ -242,6 +265,13 @@ impl<'a> QueryRunner<'a> {
                         source_selection,
                         cancellation.token(),
                         |checkpoint| {
+                            tracing::trace!(
+                                query,
+                                phase = Self::current_source_checkpoint(checkpoint),
+                                elapsed_us = phase_started.elapsed().as_micros(),
+                                "document analysis phase"
+                            );
+                            phase_started = Instant::now();
                             rg_std::check_cancel!(
                                 cancellation,
                                 Self::current_source_checkpoint(checkpoint)

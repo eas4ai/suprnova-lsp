@@ -57,15 +57,15 @@ class Diagnostic:
         return files
 
     @classmethod
-    def source_observation(cls, report):
+    def source_observation(cls, report, source="saved_exact"):
         return cls.hover_observation(report, [f"source-{n}" for n in range(3)],
-            [("verify_password", "Result<bool, FrameworkError>")] * 3, "saved_exact")
+            [("verify_password", "Result<bool, FrameworkError>")] * 3, source)
 
     @classmethod
-    def source_only_observation(cls, report):
+    def source_only_observation(cls, report, source="saved_exact"):
         if any(event.get("method") == "suprnova-lsp/rustdocStatus" for event in report.get("lifecycle", [])):
             raise ValueError("automatic-disabled control observed worker activity")
-        summary = cls.source_observation(report)
+        summary = cls.source_observation(report, source)
         summary["idleRssBytes"] = cls.idle_observation(report)
         return summary
 
@@ -149,6 +149,22 @@ class Diagnostic:
         if len(completed) != len(sent) or len(prepared) != len(sent):
             raise ValueError("sequential hover stage attribution is missing or duplicated")
         stages = []
+        # Native work is serialized and this driver sends one hover at a time.
+        # Group phase events at the matching completion rather than by phase name,
+        # which repeats for several Cargo interpretations and requests.
+        phase_groups, phases = [], []
+        for event in report.get("stages", []):
+            fields = event.get("fields", {})
+            if event.get("message") == "document analysis phase" and fields.get("query") == "hover":
+                elapsed = fields.get("elapsed_us")
+                if type(elapsed) not in {str, int} or not str(elapsed).isdigit() or not isinstance(fields.get("phase"), str):
+                    raise ValueError("preparation phase is malformed")
+                phases.append({"phase": fields["phase"], "durationNs": int(elapsed) * 1000})
+            if event.get("message") == "analysis query completed" and fields.get("query") == "hover":
+                phase_groups.append(phases)
+                phases = []
+        if phases:
+            raise ValueError("preparation phases lack an analysis completion")
         for row, execution, preparation in zip(sent, completed, prepared):
             if execution.get("status") != "ok" or preparation.get("source") != source:
                 raise ValueError("stage attribution describes a different document source")
@@ -157,6 +173,7 @@ class Diagnostic:
                 raise ValueError("stage durations are absent or malformed")
             stages.append({"id": row["id"], "transportNs": row["durationNs"], "queuedNs": int(fields[0]) * 1_000_000,
                            "executionNs": int(fields[1]) * 1_000_000, "preparationNs": int(fields[2]) * 1000,
+                           "preparationPhases": phase_groups[len(stages)],
                            "correlation": "one outstanding hover; all three lifecycle/preparation observations in request order"})
         return stages
 
@@ -168,10 +185,16 @@ class Diagnostic:
             "initializationOptions": {"cfg": {"test": False}, "cache": {"packageResidency": "workspace"},
                 "indexing": {"performancePreference": mode}, "rustdoc": {"automatic": {
                     "artifactRoot": str(directory / mode / "compiler"), "toolchain": "nightly-2026-08-19", "jobs": 2}}}}
-        if workload == "source-only":
+        if workload in {"source-only", "source-current"}:
             plan["initializationOptions"]["rustdoc"]["automatic"]["enabled"] = False
             plan["idleMemory"] = True
             plan["hoverCleanupBarrier"] = True
+        if workload == "source-current":
+            original = (APP / plan["file"]).read_text()
+            signature = "pub fn verify_password(&self, password: &str) -> Result<bool, FrameworkError> {"
+            if original.count(signature) != 1:
+                raise ValueError("Devlist source method changed")
+            plan["text"] = original.replace(signature, signature + "\n")
         if workload == "generated-settled":
             original = (APP / plan["file"]).read_text()
             signature = "pub fn verify_password(&self, password: &str) -> Result<bool, FrameworkError> {"
@@ -229,8 +252,9 @@ class Diagnostic:
         start = text.index('{\n  "file"')
         report, _ = json.JSONDecoder().raw_decode(text[start:])
         observe = {"source": self.source_observation, "source-only": self.source_only_observation,
+                   "source-current": self.source_only_observation,
                    "generated-settled": self.generated_observation}[workload]
-        summary = observe(report)
+        summary = observe(report, "current") if workload == "source-current" else observe(report)
         return {"raw": report, "summary": summary, "plan": plan}
 
     async def run(self, modes, no_build, nofile_soft=None, workload="source"):
@@ -314,7 +338,7 @@ if __name__ == "__main__":
                         help="small source workload; emits no passing Sudus requirement verdicts")
     parser.add_argument("--mode", choices=MODES, action="append")
     parser.add_argument("--no-build", action="store_true", help="intentionally use an existing managed optimized binary")
-    parser.add_argument("--workload", choices=("source", "source-only", "generated-settled"), default="source")
+    parser.add_argument("--workload", choices=("source", "source-only", "source-current", "generated-settled"), default="source")
     parser.add_argument("--nofile-soft", type=int, help="explicit open-file limit for this diagnostic process and its children only")
     options = parser.parse_args()
     try:

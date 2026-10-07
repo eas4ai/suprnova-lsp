@@ -56,6 +56,18 @@ class LedgerIntegrity(unittest.TestCase):
             with self.assertRaises(ValueError):
                 observation.Diagnostic.percentile(invalid, 95)
 
+    def test_preparation_phases_keep_request_order_and_reject_unfinished_work(self):
+        report = copy.deepcopy(self.report)
+        index = next(n for n, event in enumerate(report["stages"]) if event["message"] == "analysis query completed")
+        phase = {"message": "document analysis phase", "fields": {"query": "hover", "phase": "saved file materialization", "elapsed_us": "7"}}
+        report["stages"].insert(index, phase)
+        result = observation.Diagnostic.source_observation(report)
+        self.assertEqual(result["stages"][0]["preparationPhases"], [{"phase": "saved file materialization", "durationNs": 7000}])
+        self.assertEqual(result["stages"][1]["preparationPhases"], [])
+        report["stages"].append(phase)
+        with self.assertRaisesRegex(ValueError, "lack an analysis completion"):
+            observation.Diagnostic.source_observation(report)
+
     def test_rejects_dropped_failed_duplicated_or_changed_samples(self):
         for alteration in ["drop", "error", "duplicate", "wrong-signature", "different-ledger", "timestamp", "duration"]:
             report = copy.deepcopy(self.report)
