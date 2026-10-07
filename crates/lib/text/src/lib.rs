@@ -16,7 +16,7 @@ use std::{
 };
 
 use rg_std::{MemorySize, Shrink};
-use wincode::{SchemaRead, SchemaWrite};
+use wincode::{SchemaRead, SchemaReadContext, SchemaWrite, len::SeqLen as _};
 
 /// Rust language edition used to interpret and present source text.
 ///
@@ -169,16 +169,33 @@ where
     type Dst = Name;
 
     fn read(
-        reader: impl wincode::io::Reader<'de>,
+        mut reader: impl wincode::io::Reader<'de>,
         dst: &mut std::mem::MaybeUninit<Self::Dst>,
     ) -> wincode::ReadResult<()> {
-        let text = <String as SchemaRead<C>>::get(reader)?;
+        // Cache sections already provide bytes for the decoder. Intern their names
+        // directly instead of allocating a temporary String for each occurrence.
+        // Streaming readers keep the owned path with the same allocation limit.
+        let len = C::LengthEncoding::read_prealloc_check::<u8>(reader.by_ref())?;
+        let text = if reader.supports_borrow(wincode::io::BorrowKind::CallSite) {
+            let bytes = reader.take_scoped(len)?;
+            Cow::Borrowed(
+                std::str::from_utf8(bytes).map_err(wincode::error::invalid_utf8_encoding)?,
+            )
+        } else {
+            Cow::Owned(<String as SchemaReadContext<C, _>>::get_with_context(
+                wincode::context::Len(len),
+                reader,
+            )?)
+        };
         let name = DECODE_NAME_INTERNER.with(|interner| {
             interner
                 .borrow_mut()
                 .as_mut()
-                .map(|interner| interner.intern(&text))
-                .unwrap_or_else(|| Name::from(text))
+                .map(|interner| interner.intern(text.as_ref()))
+                .unwrap_or_else(|| match text {
+                    Cow::Borrowed(text) => Name::new(text),
+                    Cow::Owned(text) => Name::from(text),
+                })
         });
         dst.write(name);
         Ok(())
@@ -628,6 +645,96 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(first.as_str().as_ptr(), second.as_str().as_ptr());
+    }
+
+    #[test]
+    fn schema_decode_borrows_name_bytes_before_interning() {
+        use std::{cell::Cell, mem::MaybeUninit};
+
+        use wincode::io::Reader;
+
+        struct ScopedReader<'a> {
+            bytes: &'a [u8],
+            copied: &'a Cell<usize>,
+        }
+
+        impl<'a> Reader<'a> for ScopedReader<'a> {
+            const BORROW_KINDS: u8 = wincode::io::BorrowKind::CallSite.mask();
+
+            fn copy_into_slice(
+                &mut self,
+                destination: &mut [MaybeUninit<u8>],
+            ) -> Result<(), wincode::io::ReadError> {
+                self.copied.set(self.copied.get() + destination.len());
+                self.bytes.copy_into_slice(destination)
+            }
+
+            fn take_scoped(&mut self, len: usize) -> Result<&[u8], wincode::io::ReadError> {
+                self.bytes.take_scoped(len)
+            }
+        }
+
+        let config = wincode::config::Configuration::default();
+        let text = "RepeatedDependencyName";
+        let bytes = wincode::config::serialize(&text, config).unwrap();
+        let copied = Cell::new(0);
+        let reader = ScopedReader {
+            bytes: &bytes,
+            copied: &copied,
+        };
+        let (_interner, decoded) = super::with_decode_name_interner(NameInterner::new(), || {
+            wincode::config::deserialize_from::<Name, _>(reader, config).unwrap()
+        });
+        assert_eq!(decoded, text);
+        assert_eq!(
+            copied.get(),
+            bytes.len() - text.len(),
+            "only the length prefix needs copying"
+        );
+    }
+
+    #[test]
+    fn schema_decode_keeps_streaming_names_and_rejects_malformed_bytes() {
+        use wincode::io::std_read::ReadAdapter;
+
+        let config = wincode::config::Configuration::default();
+        for (spelling, expected) in [("r#type", "type"), ("'r#fn", "'fn"), ("λ", "λ")] {
+            let bytes = wincode::config::serialize(&spelling, config).unwrap();
+            let from_slice = wincode::config::deserialize_exact::<Name, _>(&bytes, config).unwrap();
+            let from_scoped =
+                wincode::config::deserialize_from::<Name, _>(std::io::Cursor::new(&bytes), config)
+                    .unwrap();
+            let from_stream = wincode::config::deserialize_from::<Name, _>(
+                ReadAdapter::new(bytes.as_slice()),
+                config,
+            )
+            .unwrap();
+            assert_eq!(from_slice, expected);
+            assert_eq!(from_scoped, from_slice);
+            assert_eq!(from_stream, from_slice);
+        }
+
+        let mut invalid_utf8 = wincode::config::serialize(&"x", config).unwrap();
+        *invalid_utf8.last_mut().unwrap() = 0xff;
+        let truncated = &invalid_utf8[..invalid_utf8.len() - 1];
+        for bytes in [invalid_utf8.as_slice(), truncated] {
+            assert!(wincode::config::deserialize_exact::<Name, _>(bytes, config).is_err());
+            assert!(
+                wincode::config::deserialize_from::<Name, _>(ReadAdapter::new(bytes), config)
+                    .is_err()
+            );
+        }
+        let over_limit =
+            wincode::config::serialize(&"a name longer than the decode limit", config).unwrap();
+        let limited = config.with_preallocation_size_limit::<16>();
+        assert!(wincode::config::deserialize_exact::<Name, _>(&over_limit, limited).is_err());
+        assert!(
+            wincode::config::deserialize_from::<Name, _>(
+                ReadAdapter::new(over_limit.as_slice()),
+                limited
+            )
+            .is_err()
+        );
     }
 
     fn stored_weak_count(interner: &NameInterner) -> usize {
