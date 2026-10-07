@@ -1,10 +1,10 @@
 {
   "compiler": "rustc 1.100.0-nightly (e71c0f1e3 2026-08-18)\nbinary: rustc\ncommit-hash: e71c0f1e3395b10a8c331317be1a5c107bdf7b2e\ncommit-date: 2026-08-18\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0-nightly\nLLVM version: 23.1.0\n",
-  "compilerPeakRssBytes": 1259352064,
-  "compilerRun": "target/agent-debug/runs/20261004T184353341Z-suprnova-user-3911167-bccff1",
+  "compilerPeakRssBytes": 3249446912,
+  "compilerRun": "target/agent-debug/runs/20261007T152858816Z-suprnova-user-514328-68dbf9",
   "configuration": {
     "cargoConfig": {
-      "/home/shawn/.cargo/config.toml": "c1ca0fad3355e8a97b3825613a607344749755a5e83f7d6cb317b4f3d6110083",
+      "/home/shawn/.cargo/config.toml": "4c95efa242af6479eba64f93e620b80c0633bc439372490db445291a98f947b1",
       "/home/shawn/workspace2/devlist.app/.cargo/config.toml": "80ad7dfb1c43a5a8217eefafb833db91a3bc6182158d7c7eb740f26c13da61e3"
     },
     "environment": {
@@ -19,8 +19,8 @@
       "RUSTFLAGS": null
     }
   },
-  "exportBytes": 54572583,
-  "exportSha256": "ef261b876e75981043d9022cf30e1ba38999a012137b0a956676cad97cea8754",
+  "exportBytes": 54572011,
+  "exportSha256": "1ca416428e5c53e800fca47a6da1981a3f9fca80325bcaa2c87f3f49f44f98ba",
   "frameworkRevision": "3229aa9af542c991196274fa3c235cdce88a68e2",
   "packages": {
     "features": [
