@@ -89,9 +89,14 @@ class ResponsivenessCheck:
             candidate_path = await observer.SourceSeries().run(observer.MODES, False, 4096)
             candidate = cls.read_report(candidate_path)
             identity = cls.report_identity(candidate)
-            for field in ("sources", "metadataSha256", "buildCompiler", "producerCompiler", "cacheState", "openFileLimits"):
+            for field in ("sources", "metadataSha256", "buildCompiler", "producerCompiler", "cacheState"):
                 if identity[field] != baseline[field]:
                     raise ValueError("baseline/candidate measurement conditions differ: " + field)
+            # The collector sets the measured processes' limit before spawning
+            # them. Keep the parent-shell limit as provenance, but compare the
+            # effective limit that the compiler and server actually inherit.
+            if identity["openFileLimits"]["effective"] != baseline["openFileLimits"]["effective"]:
+                raise ValueError("baseline/candidate effective open-file limits differ")
             if candidate.get("binaryUnchanged") is not True:
                 raise ValueError("candidate binary changed during observation")
             if candidate.get("runtimeSourcesUnchanged") is not True or identity.get("runtimeSourcesSha256") != observer.Diagnostic.runtime_fingerprint():

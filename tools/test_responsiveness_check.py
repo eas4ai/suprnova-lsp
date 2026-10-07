@@ -2,11 +2,16 @@
 """Ensure original measurement violations cannot become accepted baseline evidence."""
 
 import copy
+import asyncio
+from contextlib import redirect_stdout
 import importlib.util
+import io
 import json
 from pathlib import Path
+import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -57,6 +62,27 @@ class BaselineIntegrity(unittest.TestCase):
                 raw["lifecycle"] = [row for row in raw["lifecycle"] if row["method"] != "suprnova-lsp/rustdocStatus"]
             with self.subTest(violation=violation), self.assertRaises(ValueError):
                 self.validate(reports)
+
+    def test_compares_measured_file_limits_without_requiring_the_same_parent_shell(self):
+        baseline = self.reports["source"]["identity"]
+        candidate = copy.deepcopy(self.reports["source"])
+        candidate["binaryUnchanged"] = True
+        candidate["runtimeSourcesUnchanged"] = True
+        candidate["identity"]["runtimeSourcesSha256"] = "native-source"
+        candidate["identity"]["openFileLimits"]["inherited"][0] = 524288
+        for effective, expected in (([4096, 524288], True), ([1024, 524288], False)):
+            candidate["identity"]["openFileLimits"]["effective"] = effective
+            with self.subTest(effective=effective), tempfile.TemporaryDirectory() as scratch, \
+                 patch.object(check.ResponsivenessCheck, "baseline", return_value=baseline), \
+                 patch.object(check.ResponsivenessCheck, "read_report", return_value=candidate), \
+                 patch.object(check.observer.Diagnostic, "inventory", return_value=baseline["sources"]), \
+                 patch.object(check.observer.Diagnostic, "runtime_fingerprint", return_value="native-source"), \
+                 patch.object(check.observer.SourceSeries, "run", new_callable=AsyncMock, return_value=Path(scratch) / "candidate.json"), \
+                 patch.object(check.observer.helpers, "module", return_value=SimpleNamespace(create_run_directory=lambda _: Path(scratch))), \
+                 redirect_stdout(io.StringIO()):
+                asyncio.run(check.ResponsivenessCheck.run())
+                results = json.loads((Path(scratch) / "observations.json").read_text())
+                self.assertIs(results["RSP-001"]["passed"], expected)
 
 
 if __name__ == "__main__":
