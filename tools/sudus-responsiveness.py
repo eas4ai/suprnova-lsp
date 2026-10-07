@@ -25,6 +25,9 @@ lsp = helpers.module("responsiveness_lsp", ROOT / "tools/lsp-query.py")
 
 
 class Diagnostic:
+    purpose = "small diagnostic, not RSP acceptance"
+    run_kind = "rsp-diagnostic"
+
     @staticmethod
     def percentile(values, percentile):
         if not values or any(type(value) is not int or value < 0 for value in values):
@@ -64,9 +67,9 @@ class Diagnostic:
         return files
 
     @classmethod
-    def source_observation(cls, report, source="saved_exact"):
-        return cls.hover_observation(report, [f"source-{n}" for n in range(3)],
-            [("verify_password", "Result<bool, FrameworkError>")] * 3, source)
+    def source_observation(cls, report, source="saved_exact", count=3):
+        return cls.hover_observation(report, [f"source-{n}" for n in range(count)],
+            [("verify_password", "Result<bool, FrameworkError>")] * count, source)
 
     @classmethod
     def source_only_observation(cls, report, source="saved_exact"):
@@ -243,13 +246,19 @@ class Diagnostic:
             resource.setrlimit(resource.RLIMIT_NOFILE, (nofile_soft, limits[1]))
         return {"inherited": list(limits), "effective": list(resource.getrlimit(resource.RLIMIT_NOFILE))}
 
-    async def observe_mode(self, mode, directory, workload, command):
+    async def observe_mode(self, mode, directory, workload, command, session_number=None):
         """Run one immutable workload through the bounded stdio observer."""
         plan = self.workload_plan(mode, directory, workload)
-        plan_path = directory / f"{mode}-plan.json"
+        label = mode
+        if session_number is not None:
+            label = f"{mode}-{session_number:02}"
+            plan["queries"] = [dict(plan["queries"][0], label=f"source-{n}") for n in range(6)]
+            plan["workerRunningBarrier"] = True
+            plan["initializationOptions"]["rustdoc"]["automatic"]["artifactRoot"] = str(directory / label / "compiler")
+        plan_path = directory / f"{label}-plan.json"
         plan_path.write_text(json.dumps(plan, indent=2) + "\n")
         runtime_minutes = 17 if workload == "generated-settled" else 5
-        text = await command(mode, "just", ["agent-debug", "--no-build", "--timeout", f"{runtime_minutes}m", "--measure",
+        text = await command(label, "just", ["agent-debug", "--no-build", "--timeout", f"{runtime_minutes}m", "--measure",
             "--log", "rg_lsp_engine=trace,rg_lsp_server=debug", "lsp-query", "--workspace-root", str(APP),
             "--query-file", str(plan_path), "--timeout-ms", "300000", "--json"], timeout=(runtime_minutes + 1) * 60_000)
         # The supervisor appends its own summary. The first JSON document is
@@ -259,14 +268,17 @@ class Diagnostic:
         observe = {"source": self.source_observation, "source-only": self.source_only_observation,
                    "source-current": self.source_only_observation,
                    "generated-settled": self.generated_observation}[workload]
-        summary = observe(report, "current") if workload == "source-current" else observe(report)
+        if session_number is not None:
+            summary = self.source_observation(report, count=6)
+        else:
+            summary = observe(report, "current") if workload == "source-current" else observe(report)
         return {"raw": report, "summary": summary, "plan": plan}
 
     async def run(self, modes, no_build, nofile_soft=None, workload="source"):
         limits = self.configure_limits(nofile_soft)
         runner = helpers.module("responsiveness_runner", ROOT / "tools/agent-debug.py")
         runner.install_signal_handlers()
-        directory = runner.create_run_directory("rsp-diagnostic")
+        directory = runner.create_run_directory(self.run_kind)
         commands, reports = [], {}
         original = self.inventory()
         build_environment = dict(os.environ, RUSTUP_TOOLCHAIN="1.98.1", CARGO_BUILD_JOBS="2",
@@ -286,7 +298,7 @@ class Diagnostic:
                 raise ValueError(f"{label}: observation failed; inspect {output}")
             return text
 
-        identity = {"purpose": "small diagnostic, not RSP acceptance", "workload": workload, "application": str(APP),
+        identity = {"purpose": self.purpose, "workload": workload, "application": str(APP),
                     "openFileLimits": limits,
                     "sources": original, "frameworkRevision": REVISION, "buildProfile": "release",
                     "producerToolchain": "nightly-2026-08-19",
@@ -321,33 +333,133 @@ class Diagnostic:
             complete = True
         finally:
             after = self.inventory()
+            binary_unchanged = None
+            if "binary" in identity:
+                binary_unchanged = hashlib.sha256(Path(identity["binary"]).read_bytes()).hexdigest() == identity["binarySha256"]
             result = {"identity": identity, "reports": reports, "commands": commands,
                       "observationComplete": complete,
-                      "applicationInputsUnchanged": original == after,
+                        "applicationInputsUnchanged": original == after,
+                        "binaryUnchanged": binary_unchanged,
                       "processCleanup": runner.summarize_cleanup(commands),
                       "requirements": {f"RSP-{n:03}": "unverified" for n in range(1, 7)}}
             if not complete:
                 result["processCleanup"]["status"] = "unverified"
                 result["processCleanup"]["reason"] = "incomplete observation; inspect the individual supervisor artifacts"
             (directory / "report.json").write_text(json.dumps(result, indent=2) + "\n")
-            print(f"Diagnostic report: {directory / 'report.json'}", flush=True)
+            print(f"Observation report: {directory / 'report.json'}", flush=True)
             if original != after:
                 raise ValueError("application Rust/Cargo inputs changed during observation")
+            if binary_unchanged is False:
+                raise ValueError("managed server binary changed during observation")
         for mode, report in reports.items():
             print(mode, json.dumps(report["summary"]))
 
 
+class SourceSeries(Diagnostic):
+    """A complete source/active-worker cohort; other contract windows stay unverified."""
+
+    purpose = "source active-worker baseline series; not complete RSP acceptance"
+    run_kind = "rsp-source-series"
+
+    @staticmethod
+    def worker_overlap(report):
+        events = [event for event in report.get("lifecycle", [])
+                  if event.get("method") == "suprnova-lsp/rustdocStatus"
+                  and event.get("params", {}).get("workspaceRoot") in {str(APP), APP.as_uri()}]
+        if any(type(event.get("receivedNs")) is not int or type(event["params"].get("generation")) is not int
+               or event["params"]["generation"] < 0 for event in events):
+            raise ValueError("worker overlap has invalid timestamps or generations")
+        generations = []
+        for row in report["transport"]:
+            if row["method"] != "textDocument/hover":
+                continue
+            before = [event for event in events if event["receivedNs"] <= row["writtenNs"]]
+            if not before:
+                raise ValueError("worker was not observed before hover")
+            generation = max(event["params"]["generation"] for event in before)
+            latest = next(event["params"] for event in reversed(before) if event["params"]["generation"] == generation)
+            if latest.get("state") != "running":
+                raise ValueError("worker was not running before hover")
+            during = [event for event in events if row["writtenNs"] < event["receivedNs"] <= row["receivedNs"]
+                      and event["params"]["generation"] >= generation]
+            if any(event["params"]["generation"] != generation or event["params"].get("state") != "running" for event in during):
+                raise ValueError("worker changed state during hover response")
+            generations.append(generation)
+        return generations
+
+    @classmethod
+    def assess(cls, sessions, mode):
+        if mode not in MODES or len(sessions) != 20:
+            raise ValueError("source series requires 20 independent sessions in one indexing mode")
+        identities, first, repeated, stages, generations = set(), [], [], [], []
+        for session in sessions:
+            raw, plan = session["raw"], session["plan"]
+            # Only artifact paths vary between sessions. Every sampled query is
+            # the same saved declaration, with no body overlay or hover warm-up.
+            expected = cls.workload_plan(mode, ROOT / "target/agent-debug", "source")
+            expected["queries"] = [dict(expected["queries"][0], label=f"source-{n}") for n in range(6)]
+            expected["workerRunningBarrier"] = True
+            actual = json.loads(json.dumps(plan))
+            actual["initializationOptions"]["rustdoc"]["automatic"]["artifactRoot"] = expected["initializationOptions"]["rustdoc"]["automatic"]["artifactRoot"]
+            if actual != expected:
+                raise ValueError("source series mixes modes, symbols or measurement configuration")
+            initialized = [row for row in raw["transport"] if row.get("method") == "initialize"]
+            pid = raw.get("session", {}).get("serverPid")
+            if len(initialized) != 1 or initialized[0].get("status") != "success" or type(pid) is not int or pid <= 0:
+                raise ValueError("source series lacks a successful fresh server initialization")
+            timestamp = initialized[0].get("receivedNs")
+            if type(timestamp) is not int or timestamp < 0:
+                raise ValueError("source session initialization timestamp is invalid")
+            identity = (pid, timestamp)
+            if identity in identities:
+                raise ValueError("source series reuses a server session")
+            identities.add(identity)
+            summary = cls.source_observation(raw, count=6)
+            if timestamp >= next(row["writtenNs"] for row in raw["transport"] if row["method"] == "textDocument/hover"):
+                raise ValueError("hover precedes its server initialization")
+            generations.append(cls.worker_overlap(raw))
+            first.append(summary["firstNs"])
+            repeated.extend(summary["repeatedNs"])
+            stages.append(summary["stages"])
+        result = {"mode": mode, "symbols": "source", "window": "automatic-worker-active",
+                  "workerGenerations": generations, "stages": stages,
+                  "acceptance": "unverified: other required windows and before/after comparisons remain pending"}
+        for cohort, samples in (("first", first), ("repeated", repeated)):
+            p95 = cls.percentile(samples, 95)
+            result[cohort] = {"count": len(samples), "rawNs": samples, "firstResponseNs": samples[0],
+                "p50Ns": cls.percentile(samples, 50), "p95Ns": p95, "maxNs": max(samples),
+                "failures": 0, "belowTarget": p95 < 200_000_000}
+        return result
+
+    async def observe_mode(self, mode, directory, workload, command):
+        sessions = []
+        for number in range(20):
+            sessions.append(await super().observe_mode(mode, directory, workload, command, session_number=number))
+            # Preserve successful sessions if a later one fails. Failed commands
+            # keep their own transport ledger and supervised cleanup artifacts.
+            (directory / f"{mode}-sessions.json").write_text(json.dumps(sessions, indent=2) + "\n")
+        return {"sessions": sessions, "summary": self.assess(sessions, mode)}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--diagnostic", action="store_true", required=True,
-                        help="small source workload; emits no passing Sudus requirement verdicts")
+    purpose = parser.add_mutually_exclusive_group(required=True)
+    purpose.add_argument("--diagnostic", action="store_true",
+                          help="small source workload; emits no passing Sudus requirement verdicts")
+    purpose.add_argument("--source-series", action="store_true",
+                         help="20 fresh source sessions, five repeated requests each, all during observed worker activity")
     parser.add_argument("--mode", choices=MODES, action="append")
     parser.add_argument("--no-build", action="store_true", help="intentionally use an existing managed optimized binary")
     parser.add_argument("--workload", choices=("source", "source-only", "source-current", "generated-settled"), default="source")
     parser.add_argument("--nofile-soft", type=int, help="explicit open-file limit for this diagnostic process and its children only")
     options = parser.parse_args()
+    if options.mode and len(set(options.mode)) != len(options.mode):
+        parser.error("--mode values must be distinct")
+    if options.source_series and options.workload != "source":
+        parser.error("--source-series requires the automatic-enabled source workload")
     try:
-        asyncio.run(Diagnostic().run(options.mode or MODES, options.no_build, options.nofile_soft, options.workload))
+        observer = SourceSeries() if options.source_series else Diagnostic()
+        asyncio.run(observer.run(options.mode or MODES, options.no_build, options.nofile_soft, options.workload))
     except (ValueError, RuntimeError, OSError, KeyError) as error:
         print(f"responsiveness observation incomplete: {error}", file=sys.stderr)
         sys.exit(2)
