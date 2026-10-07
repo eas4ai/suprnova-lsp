@@ -288,14 +288,23 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
         let visible_crates = rg_def_map::DefMapQuery::new(self.def_map)
             .item_lookup_crates_from(self.crate_ref)
             .context("find the current body's visible lookup crates")?;
+        let visibility_us = lookup_started.elapsed().as_micros();
+        let prefetch_started = Instant::now();
         self.semantic_ir
             .prefetch_lookup_indexes(visible_crates.as_slice(), &cancellation)
             .context("prefetch the current body's lookup artifacts")?;
+        let prefetch_us = prefetch_started.elapsed().as_micros();
+        let composition_started = Instant::now();
         let item_lookup_query =
             ItemLookupQuery::build_with_cache(&crate_items, &self.item_lookup_cache, &cancellation)
                 .context("build the current body's visible item lookup query")?;
         tracing::trace!(
             elapsed_us = lookup_started.elapsed().as_micros(),
+            visibility_us,
+            prefetch_us,
+            composition_us = composition_started.elapsed().as_micros(),
+            visible_crate_count = visible_crates.len(),
+            thread_id = ?std::thread::current().id(),
             "current body visible item lookup prepared"
         );
 

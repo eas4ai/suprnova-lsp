@@ -223,6 +223,7 @@ impl LoadDefMap for DefMapPackageLoader {
             crate_id = crate_id.0,
             elapsed_us = started.elapsed().as_micros(),
             section = "def_map.crate",
+            thread_id = ?std::thread::current().id(),
             "query artifact loaded"
         );
         result
@@ -263,6 +264,7 @@ impl LoadSemanticIr for SemanticIrPackageLoader {
             crate_id = crate_id.0,
             elapsed_us = started.elapsed().as_micros(),
             section = "semantic_ir.items",
+            thread_id = ?std::thread::current().id(),
             "query artifact loaded"
         );
         result
@@ -285,6 +287,7 @@ impl LoadSemanticIr for SemanticIrPackageLoader {
             crate_id = crate_id.0,
             elapsed_us = started.elapsed().as_micros(),
             section = "semantic_ir.lookup_index",
+            thread_id = ?std::thread::current().id(),
             "query artifact loaded"
         );
         result
