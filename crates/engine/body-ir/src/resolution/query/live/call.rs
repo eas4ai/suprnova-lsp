@@ -8,7 +8,8 @@
 
 use rg_def_map::DefMapSource;
 use rg_ir_model::{
-    ExprId, FunctionRef, ItemOwner, Mutability, ScopeId, SemanticItemRef, identity::DeclarationRef,
+    ExprId, FunctionRef, ItemOwner, Mutability, ScopeId, SemanticItemRef, TraitDefRef,
+    identity::DeclarationRef,
 };
 use rg_item_tree::{GenericArg as ItemGenericArg, ParamKind, SelfParamKind};
 use rg_package_store::PackageStoreError;
@@ -38,6 +39,7 @@ pub(crate) struct LiveCallTarget<'s> {
     pub table: Option<InferenceTable<'s>>,
     // Lookup can retain a declaration for navigation even when its trial cannot supply types.
     pub can_infer: bool,
+    pub proven_parent: Option<TraitDefRef>,
 }
 
 impl<'query, D, I> LiveBodyQuery<'query, D, I>
@@ -237,6 +239,7 @@ where
                                 first_written: 0,
                                 table: None,
                                 can_infer: true,
+                                proven_parent: None,
                             });
                         }
                     }
@@ -269,6 +272,9 @@ where
                 // A possible proof can learn from call arguments later. Missing callback data
                 // still leaves a navigation candidate, but cannot supply inference evidence.
                 can_infer: matches!(candidate.outcome, Outcome::Proven | Outcome::Ambiguous),
+                proven_parent: candidate
+                    .trait_ref
+                    .filter(|_| candidate.outcome == Outcome::Proven),
             })
             .collect())
     }

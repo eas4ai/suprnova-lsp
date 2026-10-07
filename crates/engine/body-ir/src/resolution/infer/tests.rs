@@ -489,6 +489,190 @@ fn make<T>() -> Builder<T> { loop {} }
 }
 
 #[test]
+fn binding_hover_reuses_only_proven_parent_bounds_for_closed_zero_argument_calls() {
+    #[derive(Clone, Copy)]
+    struct Observed<'a, S> {
+        source: S,
+        bounds: PackageSlot,
+        reads: &'a Cell<usize>,
+    }
+    impl<'query, S: rg_semantic_ir::ItemStoreSource<'query>> rg_semantic_ir::ItemStoreSource<'query>
+        for Observed<'_, S>
+    {
+        type Error = S::Error;
+
+        fn item_store_for_origin(
+            &self,
+            origin: DefMapRef,
+        ) -> Result<Option<&'query rg_semantic_ir::ItemStore>, S::Error> {
+            if matches!(origin, DefMapRef::Crate(krate) if krate.package == self.bounds) {
+                self.reads.set(self.reads.get() + 1);
+            }
+            self.source.item_store_for_origin(origin)
+        }
+
+        fn included_stores(&self) -> Result<Vec<&'query rg_semantic_ir::ItemStore>, S::Error> {
+            self.source.included_stores()
+        }
+    }
+
+    let fixture = crate::testonly::BodyIrFixture::build(
+        r#"
+//- /Cargo.toml
+[workspace]
+members = ["app", "bounds"]
+resolver = "3"
+//- /bounds/Cargo.toml
+[package]
+name = "bounds"
+version = "0.1.0"
+edition = "2024"
+//- /bounds/src/lib.rs
+pub trait Deep {}
+pub trait Extra {}
+//- /app/Cargo.toml
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+bounds = { path = "../bounds" }
+//- /app/src/lib.rs
+struct User;
+struct Builder<T>(T);
+trait Model: bounds::Deep {
+    type Value;
+    fn query() -> Builder<Self>;
+    fn own_bound() -> Builder<Self> where Self: bounds::Extra;
+    fn generic<T>() -> Builder<T>;
+    fn projection() -> Self::Value;
+    fn argument(value: u8) -> Builder<Self>;
+}
+impl bounds::Deep for User {}
+impl bounds::Extra for User {}
+impl Model for User { type Value = Builder<User>; }
+fn closed() { let selected = User::query(); let unrelated = 1_u8; }
+fn own_bound() { let selected = User::own_bound(); let unrelated = 1_u8; }
+fn argument() { let selected = User::argument(1_u8); let unrelated = 1_u8; }
+fn generic() { let selected = User::generic(); let later: Builder<User> = selected; }
+fn projection() { let selected = User::projection(); let unrelated = 1_u8; }
+"#,
+    );
+    let package = |name| {
+        PackageSlot(
+            fixture
+                .parse_db()
+                .packages()
+                .iter()
+                .position(|p| p.package_name() == name)
+                .unwrap(),
+        )
+    };
+    let target = CrateRef {
+        package: package("app"),
+        crate_id: CrateId(0),
+    };
+    let bodies = fixture
+        .body_ir_db()
+        .resident_package(target.package)
+        .unwrap()
+        .crate_bodies(target.crate_id)
+        .unwrap();
+    let def_map = fixture
+        .def_map_db()
+        .read_txn(rg_def_map::DefMapLoader::resident_only("parent proof"));
+    let items = fixture
+        .semantic_ir_db()
+        .read_txn(rg_semantic_ir::SemanticIrLoader::resident_only(
+            "parent proof",
+        ));
+    let cancellation = CancellationToken::new();
+    let lookup = rg_semantic_ir::ItemLookupQuery::build_from(
+        &rg_semantic_ir::CrateItemQuery::new(&def_map, &items, target),
+        &cancellation,
+    )
+    .unwrap();
+    let reads = Cell::new(0);
+    let observed = Observed {
+        source: &items,
+        bounds: package("bounds"),
+        reads: &reads,
+    };
+    let mut compared = 0;
+    for (id, body) in bodies.bodies().iter().enumerate() {
+        let Some((binding, selected)) = body
+            .bindings()
+            .iter()
+            .enumerate()
+            .find(|(_, b)| b.name.as_ref().is_some_and(|n| n.as_str() == "selected"))
+        else {
+            continue;
+        };
+        let infer = |offset| {
+            super::InferenceContext::new(
+                &def_map,
+                observed,
+                &lookup,
+                BodyRef {
+                    crate_ref: target,
+                    body: BodyId(id),
+                },
+                body,
+                &cancellation,
+            )
+            .infer_body(offset)
+            .unwrap()
+        };
+        reads.set(0);
+        let full = infer(None);
+        assert!(
+            reads.get() > 0,
+            "full inference must load the inherited bounds"
+        );
+        reads.set(0);
+        let hovered = infer(Some(selected.name_span.unwrap().start));
+        let binding = BindingId(binding);
+        assert_eq!(hovered.bindings[binding], full.bindings[binding]);
+        assert!(!hovered.bindings[binding].has_unknown());
+        for (expr, data) in body.exprs().iter().enumerate() {
+            if matches!(data.kind, crate::ExprKind::Call { .. }) {
+                assert_eq!(hovered.call(ExprId(expr)), full.call(ExprId(expr)));
+            }
+        }
+        // Only query() has no own requirements, arguments or unresolved return components.
+        let query = full
+            .call(
+                body.exprs()
+                    .iter()
+                    .enumerate()
+                    .find(|(_, e)| matches!(e.kind, crate::ExprKind::Call { .. }))
+                    .map(|(i, _)| ExprId(i))
+                    .unwrap(),
+            )
+            .unwrap();
+        let name = &rg_semantic_ir::ItemStoreQuery::new(&items)
+            .function_data(query.function())
+            .unwrap()
+            .unwrap()
+            .name;
+        if name.as_str() == "query" {
+            assert_eq!(
+                reads.get(),
+                0,
+                "the proven parent must not load its bounds again"
+            );
+        } else {
+            assert!(
+                reads.get() > 0,
+                "own requirements and unresolved signatures keep full checks"
+            );
+        }
+        compared += 1;
+    }
+    assert_eq!(compared, 5);
+}
+
+#[test]
 fn absent_named_trait_surface_does_not_read_lexical_scopes() {
     #[derive(Clone, Copy)]
     struct ScopeTrap;

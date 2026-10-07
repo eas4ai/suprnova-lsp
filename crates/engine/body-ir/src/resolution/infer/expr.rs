@@ -110,7 +110,7 @@ where
                             .resolve(self.inference.binding_ty(binding));
                         if !ty.has_var()
                             && !ty.has_unknown()
-                            && Self::settled_hover_type(&self.inference.table().finalize(ty))
+                            && Self::settled_hover_type(&self.inference.table().finalize(ty), true)
                         {
                             rg_std::check_cancel!(self.context, "settled binding hover");
                             self.hover_type_settled = true;

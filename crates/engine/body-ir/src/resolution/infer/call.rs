@@ -6,7 +6,7 @@
 
 use anyhow::Context as _;
 use rg_def_map::DefMapSource;
-use rg_ir_model::{ExprId, FunctionRef, GenericDefRef};
+use rg_ir_model::{ExprId, FunctionRef, GenericDefRef, ItemOwner};
 use rg_package_store::PackageStoreError;
 use rg_semantic_ir::ItemStoreSource;
 use rg_ty::solver::{CallableSignature, GenericArgs, InferenceTable, SolverInterner, Ty};
@@ -101,6 +101,7 @@ where
         {
             self.coerce_expr_ty(call, expected);
         }
+        let arguments_started = std::time::Instant::now();
         for (index, arg) in args.iter().enumerate() {
             if matches!(
                 self.body.expr_unchecked(*arg).kind,
@@ -115,6 +116,11 @@ where
             self.infer_expr(*arg, &expected)
                 .context("infer call argument")?;
         }
+        tracing::trace!(
+            phase = "call arguments",
+            elapsed_us = arguments_started.elapsed().as_micros(),
+            "body inference phase"
+        );
         if let Some(prepared) = prepared {
             self.finish_call(prepared, args);
         } else {
@@ -214,7 +220,26 @@ where
                 }
             }
             subst.fresh_for(table, generics.iter().map(|p| p.param()));
-            let Some(mut signature) = table.instantiate_function(function, &subst) else {
+            // For a binding probe, `User::query() -> Builder<User>` already has all its type
+            // evidence. Rechecking the proven parent cannot change that closed signature. Own
+            // bounds, arguments and unresolved types still need ordinary predicate fulfillment.
+            let reuse_parent = if self.hover_binding.is_some()
+                && target.proven_parent.is_some()
+                && target.explicit_args.is_empty()
+                && matches!(&self.body.expr_unchecked(call).kind, ExprKind::Call { args, .. } if args.is_empty())
+                && let Some(data) = self.context.item_query().function_data(function)?
+                && matches!(data.owner, ItemOwner::Trait(id) if target.proven_parent.is_some_and(|parent| parent.origin == function.origin && parent.id == id))
+                && data.signature.generics().is_none()
+                && data.signature.params().is_empty()
+                && let Some(signature) = self.cx.function_signature(function)
+            {
+                let ret = table.resolve(subst.apply(self.cx, signature.ret));
+                !ret.has_var() && !ret.has_unknown()
+                    && Self::settled_hover_type(&table.finalize(ret), false)
+            } else {
+                false
+            };
+            let Some(mut signature) = table.instantiate_function(function, &subst, !reuse_parent) else {
                 return Ok(None);
             };
             // Normalize once and retain the resulting slots. Later argument evidence can finish
@@ -262,7 +287,9 @@ where
             // complete self parameter so a by-value reference receiver keeps its reference.
             self.inference.table().unify(receiver, param);
         }
+        let fulfill_started = std::time::Instant::now();
         let _ = self.inference.table().fulfill();
+        tracing::trace!(phase = "call fulfillment", elapsed_us = fulfill_started.elapsed().as_micros(), function = ?prepared.selected.function, "body inference phase");
         self.inference
             .set_selected_call(prepared.call, prepared.selected);
     }

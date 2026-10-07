@@ -169,14 +169,15 @@ where
 
     // Be conservative about types with projections, closures, or unevaluated constants. Their
     // spelling can look complete while later work still supplies part of their meaning.
-    fn settled_hover_type(ty: &rg_ty::Ty) -> bool {
+    fn settled_hover_type(ty: &rg_ty::Ty, allow_parameters: bool) -> bool {
         match ty {
             rg_ty::Ty::Adt(adt) => adt.args.iter().all(|arg| match arg {
-                rg_ty::GenericArg::Type(ty) => Self::settled_hover_type(ty),
+                rg_ty::GenericArg::Type(ty) => Self::settled_hover_type(ty, allow_parameters),
                 rg_ty::GenericArg::Lifetime(_) => true,
                 rg_ty::GenericArg::Const(value) => !matches!(value, rg_ty::ConstValue::Unknown),
             }),
-            rg_ty::Ty::Unit | rg_ty::Ty::Primitive(_) | rg_ty::Ty::Param(_) => true,
+            rg_ty::Ty::Unit | rg_ty::Ty::Primitive(_) => true,
+            rg_ty::Ty::Param(_) => allow_parameters,
             _ => false,
         }
     }
