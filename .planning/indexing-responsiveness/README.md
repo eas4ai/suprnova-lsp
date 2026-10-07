@@ -1,7 +1,8 @@
 # Indexing Responsiveness Plans
 
-Status: Contract confirmed 2026-10-06; mechanism preparation is next. No implementation,
-measurements, mechanism declaration, new commitment start, or release is claimed.
+Status: Contract confirmed 2026-10-06; bounded source and generated diagnostics
+collected, mechanism preparation in progress. Full acceptance, mechanism
+declaration, new commitment start and a production responsiveness fix remain pending.
 
 Contract: [RSP-001 through RSP-006](../../docs/spec/responsiveness.md).
 Commitment: `indexing-responsiveness`. The roadmap names this prepared commitment;

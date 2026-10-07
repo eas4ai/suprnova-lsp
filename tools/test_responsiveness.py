@@ -35,9 +35,11 @@ class LedgerIntegrity(unittest.TestCase):
                            "params": {"root": str(observation.APP), "state": "ready"}}],
             "stages": [{"message": "editor document analysis route published", "observedNs": 95,
                         "fields": {"path": str(observation.APP / "src/models/user.rs"), "ready": True}}]}
+        self.report["barriers"] = {"hoverCleanup": True}
         for _ in range(3):
             self.report["stages"].extend([
-                {"message": "analysis query completed", "fields": {"query": "hover", "status": "ok", "queued_ms": "0", "elapsed_ms": "0"}},
+                {"message": "memory report", "observedNs": 170, "fields": {"label": "hover"}},
+                {"message": "analysis query completed", "observedNs": 160, "fields": {"query": "hover", "status": "ok", "queued_ms": "0", "elapsed_ms": "0"}},
                 {"message": "document analysis prepared", "fields": {"query": "hover", "source": "saved_exact", "elapsed_us": "0"}},
             ])
 
@@ -84,7 +86,7 @@ class LedgerIntegrity(unittest.TestCase):
             observation.Diagnostic.source_observation(dict(self.report, stages=stages))
 
     def test_missing_queue_evidence_cannot_pass_diagnostic(self):
-        del self.report["stages"][1]["fields"]["queued_ms"]
+        del self.report["stages"][2]["fields"]["queued_ms"]
         with self.assertRaisesRegex(ValueError, "stage durations"):
             observation.Diagnostic.source_observation(self.report)
 
@@ -100,9 +102,9 @@ class LedgerIntegrity(unittest.TestCase):
         report["lifecycle"].append(current)
         report["idleMemory"] = {"indexingComplete": True, "metric": "sum-of-process-RSS",
             "indexingPeakRssBytes": 1000, "indexingSamples": 10, "samplingIntervalMs": 100,
-            "samples": [{"processRssBytes": {"1": 40, "2": 60}, "aggregateRssBytes": 100}] * 5}
+            "samples": [{"observedNs": 180, "processRssBytes": {"1": 40, "2": 60}, "aggregateRssBytes": 100}] * 5}
         self.assertEqual(observation.Diagnostic.generated_observation(report)["idleRssBytes"], [100] * 5)
-        for violation in ("late", "pending", "missing-memory", "wrong-type"):
+        for violation in ("late", "pending", "missing-memory", "wrong-type", "premature-idle", "missing-purge"):
             broken = copy.deepcopy(report)
             if violation == "late":
                 broken["lifecycle"][-1]["receivedNs"] = 1000
@@ -112,6 +114,10 @@ class LedgerIntegrity(unittest.TestCase):
                 broken["lifecycle"].append(current)
             elif violation == "missing-memory":
                 broken["idleMemory"]["samples"].pop()
+            elif violation == "premature-idle":
+                broken["idleMemory"]["samples"][0]["observedNs"] = 169
+            elif violation == "missing-purge":
+                broken["stages"] = [event for event in broken["stages"] if event["message"] != "memory report"]
             else:
                 broken["results"][0]["text"] = "Builder<Unrelated>"
             with self.subTest(violation=violation), self.assertRaises(ValueError):
@@ -121,7 +127,7 @@ class LedgerIntegrity(unittest.TestCase):
         report = copy.deepcopy(self.report)
         report["idleMemory"] = {"indexingComplete": True, "metric": "sum-of-process-RSS",
             "indexingPeakRssBytes": 1000, "indexingSamples": 10, "samplingIntervalMs": 100,
-            "samples": [{"processRssBytes": {"1": 40, "2": 60}, "aggregateRssBytes": 100}] * 5}
+            "samples": [{"observedNs": 180, "processRssBytes": {"1": 40, "2": 60}, "aggregateRssBytes": 100}] * 5}
         self.assertEqual(observation.Diagnostic.source_only_observation(report)["idleRssBytes"], [100] * 5)
         report["lifecycle"].append({"method": "suprnova-lsp/rustdocStatus"})
         with self.assertRaisesRegex(ValueError, "worker activity"):
@@ -329,6 +335,30 @@ class PipeTiming(unittest.IsolatedAsyncioTestCase):
             "message": "export rejected"}}, 100)
         with self.assertRaisesRegex(lsp.LspQueryError, "export rejected"):
             await self.client.wait_for_rustdoc_current(observation.APP)
+
+    async def test_idle_barrier_waits_for_purge_after_successful_reply(self):
+        self.drained.set()
+        task = await self.begin()
+        self.stdout.feed_data(self.frame({"jsonrpc": "2.0", "id": 1, "result": {"contents": "User"}}))
+        await asyncio.wait_for(task, 1)
+        waiter = asyncio.create_task(self.client.wait_for_observation(
+            self.client.observation.hover_cleanup_complete, "hover cleanup"))
+        self.requests.append(waiter)
+
+        def log(message, **fields):
+            self.stderr.feed_data(json.dumps({"schema": "suprnova-lsp-log/v1", "message": message,
+                                             "fields": fields}).encode() + b"\n")
+
+        log("analysis query completed", query="hover", status="ok")
+        await asyncio.sleep(0)
+        self.assertFalse(waiter.done(), "response and analysis completion do not prove released loads")
+        log("memory report", label="after deferred indexing finish")
+        await asyncio.sleep(0)
+        self.assertFalse(waiter.done(), "an unrelated purge cannot settle this query")
+        self.clock = 120
+        log("memory report", label="hover")
+        await asyncio.wait_for(waiter, 1)
+        self.assertEqual(self.client.observation.stages[-1]["observedNs"], 120)
 
 
 class FailedCliEvidence(unittest.IsolatedAsyncioTestCase):

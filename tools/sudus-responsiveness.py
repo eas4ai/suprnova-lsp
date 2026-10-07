@@ -21,6 +21,7 @@ spec = spec_from_file_location("responsiveness_helpers", ROOT / "tools/sudus-edi
 helpers = module_from_spec(spec)
 sys.modules[spec.name] = helpers
 spec.loader.exec_module(helpers)
+lsp = helpers.module("responsiveness_lsp", ROOT / "tools/lsp-query.py")
 
 
 class Diagnostic:
@@ -64,11 +65,29 @@ class Diagnostic:
     def source_only_observation(cls, report):
         if any(event.get("method") == "suprnova-lsp/rustdocStatus" for event in report.get("lifecycle", [])):
             raise ValueError("automatic-disabled control observed worker activity")
-        if not helpers.memory_ok(report):
-            raise ValueError("automatic-disabled control lacks settled memory evidence")
         summary = cls.source_observation(report)
-        summary["idleRssBytes"] = [sample["aggregateRssBytes"] for sample in report["idleMemory"]["samples"]]
+        summary["idleRssBytes"] = cls.idle_observation(report)
         return summary
+
+    @staticmethod
+    def idle_observation(report):
+        if not helpers.memory_ok(report) or report.get("barriers", {}).get("hoverCleanup") is not True:
+            raise ValueError("settled memory lacks independent hover cleanup evidence")
+        observations = lsp.TransportObservations()
+        observations.requests = {row["id"]: row for row in report.get("transport", [])}
+        observations.stages = report.get("stages", [])
+        if not observations.hover_cleanup_complete():
+            raise ValueError("settled memory precedes hover cleanup")
+        released = [event["observedNs"] for event in observations.stages
+                    if event["message"] == "memory report" and event["fields"].get("label") == "hover"]
+        previous = max(released)
+        samples = report["idleMemory"]["samples"]
+        for sample in samples:
+            timestamp = sample.get("observedNs")
+            if type(timestamp) is not int or timestamp < previous:
+                raise ValueError("idle memory timestamp is missing or precedes request release")
+            previous = timestamp
+        return [sample["aggregateRssBytes"] for sample in samples]
 
     @classmethod
     def hover_observation(cls, report, labels, signatures, source):
@@ -152,6 +171,7 @@ class Diagnostic:
         if workload == "source-only":
             plan["initializationOptions"]["rustdoc"]["automatic"]["enabled"] = False
             plan["idleMemory"] = True
+            plan["hoverCleanupBarrier"] = True
         if workload == "generated-settled":
             original = (APP / plan["file"]).read_text()
             signature = "pub fn verify_password(&self, password: &str) -> Result<bool, FrameworkError> {"
@@ -160,7 +180,7 @@ class Diagnostic:
             plan["text"] = original.replace(signature, signature + '\n        use suprnova::eloquent::Model as _;\n'
                 '        let rsp_query = User::query();\n        let rsp_without = User::without_global_scopes();\n'
                 '        let rsp_filter = User::filter("email", "member@example.test");\n')
-            plan.update(rustdocBarrier="before-queries", rustdocTimeoutMs=900000, deferredBarrier="before-queries", idleMemory=True,
+            plan.update(rustdocBarrier="before-queries", rustdocTimeoutMs=900000, deferredBarrier="before-queries", idleMemory=True, hoverCleanupBarrier=True,
                 queries=[{"kind": "hover", "label": marker, "marker": marker} for marker in ("rsp_query", "rsp_without", "rsp_filter")])
         return plan
 
@@ -178,12 +198,8 @@ class Diagnostic:
             latest = next(event for event in reversed(events) if event["generation"] == generation)
             if latest.get("state") != "current":
                 raise ValueError("latest generated declarations were not current before hover")
-        memory = report.get("idleMemory") or {}
-        if not helpers.memory_ok(report):
-            raise ValueError("settled memory needs five genuine server/engine samples and indexing peak evidence")
-        samples = memory["samples"]
         summary = cls.hover_observation(report, ["rsp_query", "rsp_without", "rsp_filter"], [("Builder<User>",)] * 3, "current")
-        summary["idleRssBytes"] = [sample["aggregateRssBytes"] for sample in samples]
+        summary["idleRssBytes"] = cls.idle_observation(report)
         return summary
 
     @staticmethod

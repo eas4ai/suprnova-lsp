@@ -140,3 +140,22 @@ diagnostics explicitly use a process-local open-file limit of 4096. The default
 1024 failure remains disclosed; raising that limit is not a production fix.
 Full cohorts, generated overlap, matched before/after idle pairs, complete RSP
 mechanism controls and the commitment start remain pending.
+
+The genuine generated-variable workload also completed in both modes:
+`User::query()`, `without_global_scopes()` and `filter()` inferred `Builder<User>`.
+Its three settled transports were 295–298 ms in faster-builds and 300–309 ms in
+lower-memory mode, with zero native queue milliseconds and 254–267 ms in
+preparation. Worker running-to-current took 856 and 821 seconds respectively;
+this includes compilation and publication, not compiler time alone. Artifacts:
+`20261006T233656243Z-rsp-diagnostic-1962525-9c1ed3`. This is an unsaved overlay
+within the real User method, so investigate both saved-file and current-source
+preparation rather than assuming one narrower saved-body change solves both.
+
+The initial generated RSS series began before an independently observed final
+request purge and its first sample was higher than later samples. Keep those
+raw values; do not treat them as the required settled comparison. Subsequent
+hover-only RSS workloads opt into `hoverCleanupBarrier`, which waits for the
+existing post-release allocator report. Record monotonic sample timestamps and
+verify they follow that event. A later source-control replay overlapped another
+owned compiler and is observer verification only; do not pool it with the initial
+causal control or use the difference as a worker-cost estimate.
