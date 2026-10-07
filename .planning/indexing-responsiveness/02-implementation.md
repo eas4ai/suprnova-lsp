@@ -1,6 +1,6 @@
 # Plan 02 — Implement the Measured Fix
 
-Status: Approved 2026-10-06; execution pending. Depends on Plan 01. Requirements: RSP-002 through RSP-006.
+Status: Approved 2026-10-06; diagnostics support branch B, production execution pending. Depends on Plan 01. Requirements: RSP-002 through RSP-006.
 
 Run only the branch or combination justified by the trace. Begin a Sudus lease
 before declared-input edits, add a test exposing the actual failure, commit the
@@ -66,6 +66,31 @@ current-body selection/preparation owners reached from those functions.
 Do not introduce a durable body/query cache or retain whole-project snapshots as
 a shortcut. If caching becomes necessary, it is a separate measured decision with
 explicit version keys, eviction and retained-memory evidence.
+
+### Measured starting points
+
+The automatic-disabled Devlist control spent 729 ms materializing saved file
+bodies before its first source hover. The same method with a body-neutral unsaved
+newline took 206–300 ms, even though only one body was selected. These observations
+support preparation work; their queue waits were 0–2 ms. They are small diagnostics,
+not the full RSP acceptance series.
+
+Investigate whether a hover on a declaration's name can use the already-published
+declaration without preparing its expression body. Verify saved/current coordinates,
+changed headers, enclosing impl generics, documentation links and body-local names
+before choosing that route. Expression and binding hovers still need genuine body
+facts; a declaration shortcut cannot establish the generated-variable target.
+
+For current bodies, mechanical lowering measured only 108–128 microseconds in the
+inner trace. Pattern bindings took 49–59 ms and body resolution 69–76 ms. The much
+larger owner-to-lowering interval includes saved nested-body indexing and visible
+item lookup. Time those two operations independently before changing them. Inspect
+existing request-scoped lookup reuse and loading boundaries; preserve visibility,
+language-item precedence, cancellation and release without a persistent cache.
+
+Inner trace artifact: `20261007T002413229Z-rsp-diagnostic-2232792-4c3a52`. It adds
+`rg_body_ir::build::current=trace` to the diagnostic logging policy; keep that
+difference separate from the fixed logging used for final latency comparisons.
 
 ## C. Reduce cleanup delays between requests
 

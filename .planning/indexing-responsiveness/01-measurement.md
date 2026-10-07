@@ -184,3 +184,10 @@ and verified all owned process groups empty. They use the same optimized instrum
 binary and disclosed logging/process settings. They remain small diagnostics.
 Plan 02B has measured support; a saved-only change cannot by itself establish
 the generated unsaved-body target. Full cohorts and mechanism controls remain pending.
+
+An inner-stage repeat with `rg_body_ir::build::current=trace` measured mechanical
+lowering at 108–128 microseconds. The slow owner-to-lowering interval therefore
+belongs primarily to preparation before lowering, not lowering itself. Preserve
+this extra tracing policy with the diagnostic identity and independently time
+saved nested-body indexing and visible-item lookup next. Artifact:
+`20261007T002413229Z-rsp-diagnostic-2232792-4c3a52`.
