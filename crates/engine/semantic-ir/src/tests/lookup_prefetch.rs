@@ -2,7 +2,7 @@ use std::{
     sync::{
         Arc, Condvar, Mutex, Weak,
         atomic::{AtomicUsize, Ordering},
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Receiver, RecvTimeoutError, Sender},
     },
     time::Duration,
 };
@@ -31,6 +31,7 @@ struct LookupReads {
 struct LookupLoader {
     state: Arc<LookupReads>,
     failed_package: Option<PackageSlot>,
+    blocked_package: Option<PackageSlot>,
 }
 
 impl LookupLoader {
@@ -48,6 +49,7 @@ impl LookupLoader {
                     indexes: Mutex::new(Vec::new()),
                 }),
                 failed_package,
+                blocked_package: None,
             },
             receiver,
         )
@@ -63,6 +65,15 @@ impl LookupLoader {
     fn release(&self) {
         *self.state.released.lock().unwrap() = true;
         self.state.release.notify_all();
+    }
+
+    fn started_reads(
+        receiver: &Receiver<CrateRef>,
+        count: usize,
+    ) -> Result<Vec<CrateRef>, RecvTimeoutError> {
+        (0..count)
+            .map(|_| receiver.recv_timeout(Duration::from_secs(10)))
+            .collect()
     }
 
     fn crates(packages: usize) -> Vec<CrateRef> {
@@ -107,7 +118,11 @@ impl LoadSemanticIr for LookupLoader {
         self.state.reads.lock().unwrap().push(crate_ref);
         self.state.started.send(crate_ref).unwrap();
         let mut released = self.state.released.lock().unwrap();
-        while !*released {
+        while !*released
+            && self
+                .blocked_package
+                .is_none_or(|blocked| blocked == package)
+        {
             released = self.state.release.wait(released).unwrap();
         }
         self.state.active.fetch_sub(1, Ordering::SeqCst);
@@ -128,6 +143,29 @@ impl LoadSemanticIr for LookupLoader {
 }
 
 #[test]
+fn lookup_prefetch_keeps_reading_when_one_artifact_is_slow() {
+    let (mut loader, started) = LookupLoader::new(false, None);
+    loader.blocked_package = Some(PackageSlot(0));
+    let txn = loader.transaction(12);
+    let request = std::thread::spawn(move || {
+        txn.prefetch_lookup_indexes(&LookupLoader::crates(12), &CancellationToken::new())
+    });
+    // Keep the first artifact blocked while the other readers take all remaining work.
+    // Fixed chunks leave later artifacts behind that blocked read.
+    let progress = LookupLoader::started_reads(&started, 12);
+    loader.release();
+    request.join().unwrap().unwrap();
+    assert_eq!(
+        progress
+            .expect("a slow artifact must not prevent the other readers from taking work")
+            .len(),
+        12
+    );
+    assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
+    assert_eq!(loader.state.reads.lock().unwrap().len(), 12);
+}
+
+#[test]
 fn lookup_prefetch_overlaps_bounded_reads_and_releases_them_with_the_transaction() {
     let (loader, started) = LookupLoader::new(false, None);
     let txn = loader.transaction(12);
@@ -137,9 +175,7 @@ fn lookup_prefetch_overlaps_bounded_reads_and_releases_them_with_the_transaction
         let request = scope.spawn(|| txn.prefetch_lookup_indexes(&crates, &cancellation));
         // Each reader blocks inside its first load. Observe the overlap before releasing any read;
         // the deadline only bounds a broken implementation, not a performance assertion.
-        let overlap = (0..4)
-            .map(|_| started.recv_timeout(Duration::from_secs(10)))
-            .collect::<Result<Vec<_>, _>>();
+        let overlap = LookupLoader::started_reads(&started, 4);
         loader.release();
         request.join().unwrap().unwrap();
         assert_eq!(
@@ -183,9 +219,7 @@ fn lookup_prefetch_cancellation_stops_each_readers_next_load() {
     let cancellation = CancellationToken::new();
     std::thread::scope(|scope| {
         let request = scope.spawn(|| txn.prefetch_lookup_indexes(&crates, &cancellation));
-        let overlap = (0..4)
-            .map(|_| started.recv_timeout(Duration::from_secs(10)))
-            .collect::<Result<Vec<_>, _>>();
+        let overlap = LookupLoader::started_reads(&started, 4);
         cancellation.cancel();
         loader.release();
         let error = request
