@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dropping_running_query_releases_the_lane_for_the_next_request() {
+    async fn cancelled_running_and_queued_hovers_release_the_lane_for_a_valid_hover() {
         use std::{
             sync::{
                 Arc, Mutex,
@@ -234,7 +234,7 @@ mod tests {
                 false
             }
         }
-        let (fixture, _) = test_fixture::fixture_crate_with_markers(
+        let fixture = test_fixture::fixture_crate(
             r#"
 //- /Cargo.toml
 [package]
@@ -243,7 +243,7 @@ version = "0.1.0"
 edition = "2024"
 
 //- /src/lib.rs
-pub struct Ready;
+pub fn value() { let selected = 7_u64; }
 "#,
         );
         let memory = Arc::new(QueryBarrier::default());
@@ -256,6 +256,8 @@ pub struct Ready;
                 root: fixture.path(""),
                 configuration: rg_lsp_proto::AnalysisConfig {
                     sysroot_discovery: rg_lsp_proto::SysrootDiscovery::Disabled,
+                    indexing_preference:
+                        rg_lsp_proto::IndexingPerformancePreference::LowerPeakMemory,
                     ..Default::default()
                 }
                 .into(),
@@ -264,11 +266,25 @@ pub struct Ready;
             .await
             .expect("fixture engine initializes");
         let purges_before = memory.purges.load(Ordering::SeqCst);
+        let source = std::fs::read_to_string(fixture.path("src/lib.rs")).unwrap();
+        let document = rg_lsp_proto::EditorDocumentSnapshot::new(
+            fixture.path("src/lib.rs"),
+            rg_lsp_proto::OpenDocumentSession::new(1),
+            rg_lsp_proto::DocumentRevision::new(1),
+            Some(1),
+            source.clone(),
+        );
+        let input = rg_lsp_proto::GlobalPositionSnapshot::new(
+            document.target().clone(),
+            rg_lsp_proto::OpenDocumentsRevision::new(1),
+            vec![document],
+            gen_lsp_types::Position::new(0, source.find("selected").unwrap() as u32 + 1),
+        );
         let (started, observed) = mpsc::sync_channel(1);
         let (resume, paused) = mpsc::channel();
         *memory.armed.lock().expect("query barrier lock") = Some((started, paused));
-        let mut abandoned = Box::pin(engine.query(|respond_to| EngineCommand::WorkspaceSymbol {
-            query: "Ready".into(),
+        let mut abandoned = Box::pin(engine.query(|respond_to| EngineCommand::Hover {
+            input: input.clone(),
             respond_to,
         }));
         let mut context = Context::from_waker(noop_waker_ref());
@@ -276,8 +292,14 @@ pub struct Ready;
         observed
             .recv_timeout(Duration::from_secs(5))
             .expect("request reaches running lifecycle");
-        let mut next = Box::pin(engine.query(|respond_to| EngineCommand::WorkspaceSymbol {
-            query: "Ready".into(),
+        let mut queued = Box::pin(engine.query(|respond_to| EngineCommand::Hover {
+            input: input.clone(),
+            respond_to,
+        }));
+        assert!(queued.as_mut().poll(&mut context).is_pending());
+        drop(queued);
+        let mut next = Box::pin(engine.query(|respond_to| EngineCommand::Hover {
+            input: input.clone(),
             respond_to,
         }));
         assert!(next.as_mut().poll(&mut context).is_pending());
@@ -289,15 +311,22 @@ pub struct Ready;
             .await
             .expect("next queued request can run")
             .expect("saved project remains queryable");
-        assert_eq!(result.value().len(), 1);
-        assert_eq!(result.value()[0].base_symbol_information.name, "Ready");
-        assert!(
-            memory.purges.load(Ordering::SeqCst) > purges_before,
-            "abandoned request finishes cleanup before the next command"
-        );
+        let hover = result
+            .value()
+            .as_ref()
+            .expect("subsequent hover has a type");
+        let gen_lsp_types::Contents::MarkupContent(content) = &hover.contents else {
+            panic!("hover returns the real formatted binding type");
+        };
+        assert!(content.value.contains("u64"));
         engine
             .request(EngineCommand::Shutdown)
             .await
             .expect("fixture engine shuts down");
+        assert_eq!(
+            memory.purges.load(Ordering::SeqCst) - purges_before,
+            2,
+            "running and valid hovers release their loads; the cancelled queued hover never starts"
+        );
     }
 }

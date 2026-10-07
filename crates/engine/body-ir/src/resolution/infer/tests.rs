@@ -405,6 +405,13 @@ fn labelled() { 'done: { let selected = Model::query(); let later = 1_u8; } }
 fn closure() { let selected = || 1; let later: u64 = selected(); }
 fn closure_argument() { let selected = accepts_closure(|| 1_u8); let unrelated = 1_u8; }
 fn accepts_closure(value: fn() -> u8) -> Builder<Model> { loop {} }
+fn invalid_argument() { let selected = expects_u8(true); let unrelated = 1_u8; }
+fn invalid_arity() { let selected = expects_u8(); let unrelated = 1_u8; }
+fn invalid_bound() { let selected = expects_marker(true); let unrelated = 1_u8; }
+fn invalid_annotation() { let selected: Builder<u8> = Model::query(); let unrelated = 1_u8; }
+fn expects_u8(value: u8) -> Builder<Model> { loop {} }
+trait Marker {}
+fn expects_marker<T: Marker>(value: T) -> Builder<Model> { loop {} }
 fn array() { let selected = [1_u8; 3]; let later = selected; }
 trait Source { type Value; }
 fn projection<T: Source>(value: T::Value) { let selected = value; let later = 1_u8; }
@@ -496,11 +503,11 @@ fn make<T>() -> Builder<T> { loop {} }
         }
         compared += 1;
     }
-    assert_eq!(compared, 9);
+    assert_eq!(compared, 13);
 }
 
 #[test]
-fn binding_hover_reuses_only_proven_parent_bounds_for_closed_zero_argument_calls() {
+fn binding_hover_omits_only_irrelevant_obligations_for_closed_calls() {
     #[derive(Clone, Copy)]
     struct Observed<'a, S> {
         source: S,
@@ -672,7 +679,8 @@ fn filter() { let selected = User::filter("member"); let unrelated = 1_u8; }
                 assert_eq!(hovered.call(ExprId(expr)), full.call(ExprId(expr)));
             }
         }
-        // Only query() has no own requirements, arguments or unresolved return components.
+        // query() reuses its proven parent. filter() infers its written argument before omitting
+        // obligations that cannot change its closed return or inferred argument types.
         let query = full
             .call(
                 body.exprs()

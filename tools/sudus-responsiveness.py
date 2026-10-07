@@ -402,8 +402,11 @@ class Diagnostic:
             if not result["runtimeSourcesUnchanged"]:
                 raise ValueError("native source changed during observation")
         for mode, report in reports.items():
-            print(mode, json.dumps({key: value for key, value in report["summary"].items()
-                                   if key not in {"stages", "workerGenerations"}}))
+            if "summary" in report:
+                print(mode, json.dumps({key: value for key, value in report["summary"].items()
+                                       if key not in {"stages", "workerGenerations"}}))
+            else:
+                print(mode, "observed", len(report["series"]), "separate latency series")
         return directory / "report.json"
 
 
@@ -513,7 +516,12 @@ class AcceptanceMatrix(Diagnostic):
             "enabled": window == "worker", "artifactRoot": str(directory / mode / "compiler"),
             "toolchain": "nightly-2026-08-19", "jobs": 2}
         if window == "worker":
-            plan["workerRunningBarrier"] = True
+            if symbol == "source":
+                plan["workerRunningBarrier"] = True
+            else:
+                plan["initializationOptions"]["rustdoc"].pop("inputs")
+                plan["workerReindexBarrier"] = True
+                plan["rustdocTimeoutMs"] = 900000
         if window == "deferred":
             plan["deferredWindow"] = True
         query = plan["queries"][0] if symbol == "source" else next(q for q in plan["queries"] if q["marker"] == symbol)
@@ -530,7 +538,7 @@ class AcceptanceMatrix(Diagnostic):
                   if event.get("message") == "configured rustdoc declarations published"
                   and type(event.get("observedNs")) is int and event["observedNs"] <= written
                   and all(event.get("fields", {}).get(key) == value for key, value in fields.items())]
-        if len(events) != 1 or type(events[0]["fields"].get("generation")) is not int:
+        if len(events) != 1 or type(events[0]["fields"].get("generation")) is not int or events[0]["fields"]["generation"] < 0:
             raise ValueError("configured generated declarations lack independent publication evidence")
         return events[0]["fields"]["generation"]
 
@@ -550,7 +558,7 @@ class AcceptanceMatrix(Diagnostic):
                       if event.get("message") in {"deferred indexing lifecycle started", "deferred indexing lifecycle finished"}
                       and event.get("fields", {}).get("root") == str(APP)
                       and type(event.get("observedNs")) is int and event["observedNs"] <= row["writtenNs"]]
-            if not events or any(type(event["fields"].get("generation")) is not int for event in events):
+            if not events or any(type(event["fields"].get("generation")) is not int or event["fields"]["generation"] < 0 for event in events):
                 raise ValueError("hover lacks accepted deferred-generation evidence")
             generation = max(event["fields"]["generation"] for event in events)
             latest = next(event for event in reversed(events) if event["fields"]["generation"] == generation)
@@ -571,7 +579,8 @@ class AcceptanceMatrix(Diagnostic):
             if actual != expected:
                 raise ValueError("latency series mixes modes, symbols or configuration")
             initialized = [row for row in raw["transport"] if row.get("method") == "initialize"]
-            pid = raw.get("session", {}).get("serverPid")
+            identity = raw.get("session")
+            pid = identity.get("serverPid") if isinstance(identity, dict) else None
             if len(initialized) != 1 or initialized[0].get("status") != "success" or type(pid) is not int or pid <= 0:
                 raise ValueError("latency series lacks fresh successful server initialization")
             initialized_ns = initialized[0].get("receivedNs")
@@ -586,6 +595,11 @@ class AcceptanceMatrix(Diagnostic):
                     raise ValueError("deferred workload ledger contradicts its unsent remainder")
                 if count < 6 and boundary.get("closedBeforeNextSend") is not True:
                     raise ValueError("deferred samples disappeared without an observed closed window")
+                if count < 6:
+                    closed_ns = boundary.get("closedNs")
+                    if type(closed_ns) is not int or closed_ns < initialized_ns or (sent and closed_ns < sent[-1]["receivedNs"]):
+                        raise ValueError("deferred window closure lacks an ordered observation")
+                    cls.window_evidence(raw, "closed", [{"writtenNs": closed_ns}])
                 if not count:
                     if raw.get("results"):
                         raise ValueError("unsent deferred session contains fabricated replies")
@@ -597,7 +611,9 @@ class AcceptanceMatrix(Diagnostic):
             summary = cls.hover_observation(raw, labels, signatures, "saved_exact" if symbol == "source" else "current")
             if initialized_ns >= sent[0]["writtenNs"]:
                 raise ValueError("hover preceded initialization")
-            if symbol != "source":
+            if symbol != "source" and window == "worker":
+                cls.worker_publication(raw, sent)
+            elif symbol != "source":
                 for row in sent:
                     cls.configured_publication(raw, plan, row["writtenNs"])
             evidence.append(cls.window_evidence(raw, window, sent))
@@ -615,17 +631,71 @@ class AcceptanceMatrix(Diagnostic):
         return result
 
     @staticmethod
+    def worker_publication(raw, sent):
+        reindex = [row for row in raw["transport"] if row.get("method") == "workspace/executeCommand"]
+        if len(reindex) != 1 or reindex[0].get("status") != "success" or type(reindex[0].get("receivedNs")) is not int:
+            raise ValueError("generated worker overlap lacks a successful editor reindex")
+        initial = [event for event in raw.get("lifecycle", [])
+                   if event.get("method") == "suprnova-lsp/rustdocStatus"
+                   and event.get("params", {}).get("workspaceRoot") in {str(APP), APP.as_uri()}
+                   and type(event.get("receivedNs")) is int and event["receivedNs"] <= reindex[0]["writtenNs"]]
+        if not initial or any(type(event["params"].get("generation")) is not int or event["params"]["generation"] < 0 for event in initial):
+            raise ValueError("initial generated publication lacks worker-generation evidence")
+        generation = max(event["params"]["generation"] for event in initial)
+        latest = next(event for event in reversed(initial) if event["params"]["generation"] == generation)
+        if latest["params"].get("state") != "current":
+            raise ValueError("generated declarations were not current before the editor reindex")
+        if reindex[0]["receivedNs"] >= sent[0]["writtenNs"] or any(value <= generation for value in SourceSeries.worker_overlap(raw)):
+            raise ValueError("generated hovers did not overlap a subsequent worker generation")
+
+    @staticmethod
     def read_sessions(references):
         sessions = []
         for reference in references:
             path = Path(reference["path"]).resolve(strict=True)
             if not path.is_relative_to(ROOT / "target/agent-debug"):
                 raise ValueError("session evidence escapes the owned artifact root")
+            if path.stat().st_size > 4 * 1024 * 1024:
+                raise ValueError("session evidence exceeds its size bound")
             data = path.read_bytes()
-            if len(data) > 4 * 1024 * 1024 or hashlib.sha256(data).hexdigest() != reference["sha256"]:
+            if hashlib.sha256(data).hexdigest() != reference["sha256"]:
                 raise ValueError("session evidence changed or exceeds its size bound")
             sessions.append(json.loads(data))
         return sessions
+
+    @classmethod
+    def validate_series(cls, reports, commands, directory):
+        """Every supervised matrix command must have its own unchanged session artifact."""
+        labels, identities, summaries = [], set(), {}
+        if set(reports) != set(MODES):
+            raise ValueError("latency matrix requires both indexing modes")
+        for mode in MODES:
+            expected = [symbol + "/" + window for symbol in cls.symbols for window in cls.windows
+                        if not (mode == "lower-peak-memory" and window == "deferred")]
+            series = reports[mode]["series"]
+            if set(series) != set(expected):
+                raise ValueError("latency matrix is missing or inventing a required series")
+            for key in expected:
+                symbol, window = key.split("/")
+                references = series[key]["sessions"]
+                for number, reference in enumerate(references):
+                    label = f"matrix-{mode}-{symbol}-{window}-{number:03}"
+                    if reference.get("label") != label or Path(reference["path"]) != directory / f"{label}-session.json":
+                        raise ValueError("latency matrix omitted or substituted a session artifact")
+                    labels.append(label)
+                sessions = cls.read_sessions(references)
+                summaries[mode + "/" + key] = cls.assess(sessions, mode, directory, symbol, window)
+                for session in sessions:
+                    raw = session["raw"]
+                    initialized = [row for row in raw["transport"] if row.get("method") == "initialize"]
+                    identity = (raw.get("session", {}).get("serverPid"), initialized[0].get("receivedNs")) if initialized else None
+                    if identity is None or identity in identities:
+                        raise ValueError("latency matrix reused a server session across series")
+                    identities.add(identity)
+        observed = [command for command in commands if command.get("phase", "").startswith("matrix-")]
+        if [command["phase"] for command in observed] != labels or any(command.get("code") != 0 for command in observed):
+            raise ValueError("latency matrix discarded or added a supervised session")
+        return summaries
 
     async def observe_mode(self, mode, directory, workload, command):
         series = {}
@@ -638,7 +708,8 @@ class AcceptanceMatrix(Diagnostic):
                     label = f"matrix-{mode}-{symbol}-{window}-{number:03}"
                     plan = self.series_plan(mode, directory, symbol, window)
                     plan["initializationOptions"]["rustdoc"]["automatic"]["artifactRoot"] = str(directory / label / "compiler")
-                    raw = await self.observe_plan(label, plan, directory, command)
+                    raw = await self.observe_plan(label, plan, directory, command,
+                                                  runtime_minutes=17 if symbol != "source" and window == "worker" else 5)
                     session = {"raw": raw, "plan": plan}
                     path = directory / f"{label}-session.json"
                     data = (json.dumps(session, indent=2) + "\n").encode()
@@ -654,6 +725,54 @@ class AcceptanceMatrix(Diagnostic):
         return {"series": series, "initialDeferredWindow": "structurally absent: lower-peak-memory finishes bodies before publication" if mode == "lower-peak-memory" else "observed per request"}
 
 
+class IdlePairs(Diagnostic):
+    """Compare preserved baseline and current binaries after identical generated queries settle."""
+
+    purpose = "three matched settled idle-memory pairs; latency acceptance is separate"
+    run_kind = "rsp-idle-pairs"
+
+    async def observe_mode(self, mode, directory, workload, command):
+        manifest = json.loads(self.baseline_manifest.read_text())
+        baseline = Path(manifest["retainedBinary"])
+        original = manifest["identity"]
+        digest = hashlib.sha256(baseline.read_bytes()).hexdigest()
+        if digest != original["binarySha256"] or original["sources"] != self.inventory():
+            raise ValueError("preserved baseline binary or application identity changed")
+        candidate = self.helpers_binary
+        candidate_digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        pairs = []
+        for number in range(3):
+            pair = {}
+            # Reverse the middle pair so one binary is not always the page-cache beneficiary.
+            order = ("candidate", "baseline") if number == 1 else ("baseline", "candidate")
+            for kind in order:
+                binary = baseline if kind == "baseline" else candidate
+                self.binary = binary
+                try:
+                    plan = self.workload_plan(mode, directory, "generated-captured")
+                    raw = await self.observe_plan(f"idle-{mode}-{number}-{kind}", plan, directory, command)
+                finally:
+                    self.binary = None
+                summary = self.hover_observation(raw, ["rsp_query", "rsp_without", "rsp_filter"],
+                                                 [("Builder<User>",)] * 3, "current")
+                summary["idleRssBytes"] = self.idle_observation(raw)
+                expected_digest = digest if kind == "baseline" else candidate_digest
+                if hashlib.sha256(binary.read_bytes()).hexdigest() != expected_digest:
+                    raise ValueError("idle-memory binary changed during observation")
+                pair[kind] = {"raw": raw, "plan": plan, "summary": summary,
+                              "binary": str(binary), "binarySha256": expected_digest}
+            if pair["baseline"]["plan"] != pair["candidate"]["plan"]:
+                raise ValueError("idle-memory pair used different workloads or configurations")
+            pairs.append(pair)
+            (directory / f"{mode}-idle-pairs.json").write_text(json.dumps(pairs, indent=2) + "\n")
+        medians = {kind: [self.percentile(pair[kind]["summary"]["idleRssBytes"], 50) for pair in pairs]
+                   for kind in ("baseline", "candidate")}
+        return {"pairs": pairs, "baselineProvenance": manifest,
+                "summary": {"pairMediansBytes": medians,
+                            "medianDeltaBytes": self.percentile(medians["candidate"], 50) - self.percentile(medians["baseline"], 50),
+                            "acceptance": "retained-state inspection and investigation remain required"}}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     purpose = parser.add_mutually_exclusive_group(required=True)
@@ -662,10 +781,12 @@ if __name__ == "__main__":
     purpose.add_argument("--source-series", action="store_true",
                           help="20 fresh source sessions, five repeated requests each, all during observed worker activity")
     purpose.add_argument("--acceptance-matrix", action="store_true", help="all required latency symbols/windows with separate first and repeated cohorts")
+    purpose.add_argument("--idle-pairs", action="store_true", help="three matched baseline/candidate idle-memory pairs per mode")
     parser.add_argument("--mode", choices=MODES, action="append")
     parser.add_argument("--no-build", action="store_true", help="intentionally use an existing managed optimized binary")
     parser.add_argument("--workload", choices=("source", "source-only", "source-current", "generated-settled", "generated-captured"), default="source")
     parser.add_argument("--binary", type=Path, help="preserved native baseline binary; requires --no-build")
+    parser.add_argument("--baseline-manifest", type=Path, help="preserved baseline provenance for --idle-pairs")
     parser.add_argument("--inner-trace", action="store_true", help="disclose additional current-body stage tracing for diagnosis")
     parser.add_argument("--nofile-soft", type=int, help="explicit open-file limit for this diagnostic process and its children only")
     options = parser.parse_args()
@@ -676,10 +797,16 @@ if __name__ == "__main__":
     if options.binary and not options.no_build:
         parser.error("--binary requires --no-build")
     try:
-        observer = AcceptanceMatrix() if options.acceptance_matrix else SourceSeries() if options.source_series else Diagnostic()
+        observer = IdlePairs() if options.idle_pairs else AcceptanceMatrix() if options.acceptance_matrix else SourceSeries() if options.source_series else Diagnostic()
         if options.acceptance_matrix and options.workload != "generated-captured":
             parser.error("--acceptance-matrix requires --workload generated-captured")
         observer.binary = options.binary.resolve(strict=True) if options.binary else None
+        if options.idle_pairs:
+            if options.binary or not options.baseline_manifest or options.workload != "generated-captured":
+                parser.error("--idle-pairs requires --baseline-manifest and --workload generated-captured, using the managed candidate binary")
+            observer.baseline_manifest = options.baseline_manifest.resolve(strict=True)
+            runner = helpers.module("idle_pair_runner", ROOT / "tools/agent-debug.py")
+            observer.helpers_binary = runner.rust_glancer_binary("release")
         if options.inner_trace:
             observer.log_filter += ",rg_body_ir::build::current=trace,rg_body_ir::resolution=trace,rg_project::storage::loaders=trace"
         asyncio.run(observer.run(options.mode or MODES, options.no_build, options.nofile_soft, options.workload))
