@@ -34,6 +34,13 @@ class Diagnostic:
         return sorted(values)[(len(values) * percentile + 99) // 100 - 1]
 
     @staticmethod
+    def duration_ns(value, unit_ns):
+        """Native durations may be JSON integers or tracing's decimal strings."""
+        if type(value) not in {str, int} or not str(value).isdigit():
+            raise ValueError("stage durations are absent or malformed")
+        return int(value) * unit_ns
+
+    @staticmethod
     def inventory():
         """Hash application Rust/Cargo inputs without reading secrets or changing Git state."""
         if APP.resolve() == PROTECTED or PROTECTED in APP.resolve().parents:
@@ -139,8 +146,8 @@ class Diagnostic:
                 "diagnosticP95Ns": cls.percentile(durations, 95), "maxNs": max(durations),
                 "acceptance": "unverified: diagnostic counts are below the RSP minimum"}
 
-    @staticmethod
-    def stage_observations(report, sent, source):
+    @classmethod
+    def stage_observations(cls, report, sent, source):
         """Join native stage durations to this strictly sequential diagnostic workload."""
         completed = [event["fields"] for event in report.get("stages", [])
                      if event.get("message") == "analysis query completed" and event.get("fields", {}).get("query") == "hover"]
@@ -156,10 +163,9 @@ class Diagnostic:
         for event in report.get("stages", []):
             fields = event.get("fields", {})
             if event.get("message") == "document analysis phase" and fields.get("query") == "hover":
-                elapsed = fields.get("elapsed_us")
-                if type(elapsed) not in {str, int} or not str(elapsed).isdigit() or not isinstance(fields.get("phase"), str):
+                if not isinstance(fields.get("phase"), str):
                     raise ValueError("preparation phase is malformed")
-                phases.append({"phase": fields["phase"], "durationNs": int(elapsed) * 1000})
+                phases.append({"phase": fields["phase"], "durationNs": cls.duration_ns(fields.get("elapsed_us"), 1000)})
             if event.get("message") == "analysis query completed" and fields.get("query") == "hover":
                 phase_groups.append(phases)
                 phases = []
@@ -168,11 +174,10 @@ class Diagnostic:
         for row, execution, preparation in zip(sent, completed, prepared):
             if execution.get("status") != "ok" or preparation.get("source") != source:
                 raise ValueError("stage attribution describes a different document source")
-            fields = [execution.get("queued_ms"), execution.get("elapsed_ms"), preparation.get("elapsed_us")]
-            if any(type(value) not in {str, int} or not str(value).isdigit() for value in fields):
-                raise ValueError("stage durations are absent or malformed")
-            stages.append({"id": row["id"], "transportNs": row["durationNs"], "queuedNs": int(fields[0]) * 1_000_000,
-                           "executionNs": int(fields[1]) * 1_000_000, "preparationNs": int(fields[2]) * 1000,
+            stages.append({"id": row["id"], "transportNs": row["durationNs"],
+                           "queuedNs": cls.duration_ns(execution.get("queued_ms"), 1_000_000),
+                           "executionNs": cls.duration_ns(execution.get("elapsed_ms"), 1_000_000),
+                           "preparationNs": cls.duration_ns(preparation.get("elapsed_us"), 1000),
                            "preparationPhases": phase_groups[len(stages)],
                            "correlation": "one outstanding hover; all three lifecycle/preparation observations in request order"})
         return stages
