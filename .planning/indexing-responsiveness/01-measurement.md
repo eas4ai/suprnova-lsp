@@ -191,3 +191,23 @@ belongs primarily to preparation before lowering, not lowering itself. Preserve
 this extra tracing policy with the diagnostic identity and independently time
 saved nested-body indexing and visible-item lookup next. Artifact:
 `20261007T002413229Z-rsp-diagnostic-2232792-4c3a52`.
+
+## Source active-worker cohort baseline
+
+`20261007T013638910Z-rsp-source-series-2570895-e4d1a7` records 20 fresh
+server sessions and 100 subsequent requests in each mode, with no hover warm-up.
+Every request returned the expected `verify_password` signature; each complete
+response interval had independently observed worker-running evidence.
+First/repeated p95 values were 1,176,134,064 / 8,122,919 ns in faster-builds and
+6,120,531 / 6,733,308 ns in lower-peak-memory. The faster-builds first cohort
+fails the target. The other three source cohorts meet it for this workload.
+
+All 45 supervised commands verified cleanup; application Rust/Cargo inputs and
+the server binary were unchanged. These runs use existing LSP caches, fresh
+compiler artifact roots, phase tracing and the explicit process-local 4096 file
+limit. They contain no settled idle RSS and do not establish generated-model,
+deferred-body-window, before/after or whole-RSP acceptance. Removing the slowest
+reply, worker readiness, session independence or mode consistency from each real
+report is rejected. These integrity controls are not Sudus review receipts.
+The optimized baseline binary is retained by SHA-256 under
+`target/agent-debug/responsiveness-baseline/` for later comparison.
