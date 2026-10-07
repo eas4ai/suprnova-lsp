@@ -1022,6 +1022,7 @@ fn unavailable_candidate_does_not_change_independent_selection_or_normalization(
                     Ok::<_, std::convert::Infallible>(preparing.instantiate_function(
                         missing_function,
                         &solver::InferenceSubstitution::new(),
+                        true,
                     ))
                 })
                 .expect("fixture reads are infallible");

@@ -223,20 +223,26 @@ impl<'s> InferenceTable<'s> {
     /// For `fn copy<T: Clone>(value: T) -> T` with `T = ?T`, the parameter, return type, and queued
     /// `?T: Clone` goal all share that variable. Learning the argument type then gives the bound
     /// the same evidence without rebuilding the signature.
+    /// A request-local probe may omit predicates only when its caller has proved the declaring
+    /// trait, checked that the function has no own requirements, and obtained a closed return type.
     pub fn instantiate_function(
         &self,
         function: FunctionRef,
         subst: &InferenceSubstitution<'s>,
+        include_predicates: bool,
     ) -> Option<CallableSignature<'s>> {
         let cx = self.interner();
         let callbacks = cx.track_callbacks();
         let signature = cx.function_signature(function)?;
-        let clauses = subst.apply(cx, cx.predicates(DefId::Function(function)));
+        let clauses =
+            include_predicates.then(|| subst.apply(cx, cx.predicates(DefId::Function(function))));
         if callbacks.failure().is_some() {
             return None;
         }
-        for clause in clauses {
-            self.register(clause);
+        if let Some(clauses) = clauses {
+            for clause in clauses {
+                self.register(clause);
+            }
         }
         Some(CallableSignature {
             params: subst.apply(cx, signature.params),

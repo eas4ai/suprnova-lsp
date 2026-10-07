@@ -169,15 +169,26 @@ where
 
     // Be conservative about types with projections, closures, or unevaluated constants. Their
     // spelling can look complete while later work still supplies part of their meaning.
-    fn settled_hover_type(ty: &rg_ty::Ty) -> bool {
+    fn settled_hover_type(ty: &rg_ty::Ty, allow_parameters: bool) -> bool {
         match ty {
             rg_ty::Ty::Adt(adt) => adt.args.iter().all(|arg| match arg {
-                rg_ty::GenericArg::Type(ty) => Self::settled_hover_type(ty),
+                rg_ty::GenericArg::Type(ty) => Self::settled_hover_type(ty, allow_parameters),
                 rg_ty::GenericArg::Lifetime(_) => true,
-                rg_ty::GenericArg::Const(value) => !matches!(value, rg_ty::ConstValue::Unknown),
+                rg_ty::GenericArg::Const(value) => {
+                    matches!(value, rg_ty::ConstValue::Scalar(_))
+                        || allow_parameters && matches!(value, rg_ty::ConstValue::Param(_))
+                }
             }),
-            rg_ty::Ty::Unit | rg_ty::Ty::Primitive(_) | rg_ty::Ty::Param(_) => true,
+            rg_ty::Ty::Unit | rg_ty::Ty::Primitive(_) => true,
+            rg_ty::Ty::Param(_) => allow_parameters,
             _ => false,
+        }
+    }
+
+    fn settled_hover_argument(ty: &rg_ty::Ty) -> bool {
+        match ty {
+            rg_ty::Ty::Reference { inner, .. } => Self::settled_hover_argument(inner),
+            _ => Self::settled_hover_type(ty, false),
         }
     }
 
@@ -204,6 +215,10 @@ where
         if self.hover_binding.is_some() && !self.hover_type_settled {
             rg_std::check_cancel!(self.context, "unfinished binding hover");
             return Ok(None);
+        }
+        if self.hover_type_settled {
+            rg_std::check_cancel!(self.context, "finalize binding hover facts");
+            return Ok(Some(self.finish_coercions().finish()));
         }
         // The last subtree may have supplied evidence for earlier operations. Complete those
         // before choosing the declarations that editor queries will see.

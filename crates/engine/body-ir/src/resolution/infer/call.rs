@@ -6,10 +6,10 @@
 
 use anyhow::Context as _;
 use rg_def_map::DefMapSource;
-use rg_ir_model::{ExprId, FunctionRef, GenericDefRef};
+use rg_ir_model::{ExprId, FunctionRef, GenericDefRef, ItemOwner};
 use rg_package_store::PackageStoreError;
 use rg_semantic_ir::ItemStoreSource;
-use rg_ty::solver::{CallableSignature, GenericArgs, InferenceTable, SolverInterner, Ty};
+use rg_ty::solver::{CallableSignature, GenericArgs, InferenceTable, Outcome, SolverInterner, Ty};
 
 use super::{BodyInference, deferred::DeferredKind};
 use crate::{CallFacts, body::ExprKind};
@@ -44,6 +44,7 @@ pub(super) struct PreparedCall<'s> {
     // `value.method(arg)` supplies `self` separately; `Type::method(value, arg)` writes it out.
     first_written_param_idx: usize,
     receiver_ty: Option<Ty<'s>>,
+    applicability_proven: bool,
 }
 
 impl<'s> PreparedCall<'s> {
@@ -101,6 +102,7 @@ where
         {
             self.coerce_expr_ty(call, expected);
         }
+        let arguments_started = std::time::Instant::now();
         for (index, arg) in args.iter().enumerate() {
             if matches!(
                 self.body.expr_unchecked(*arg).kind,
@@ -115,8 +117,44 @@ where
             self.infer_expr(*arg, &expected)
                 .context("infer call argument")?;
         }
+        tracing::trace!(
+            phase = "call arguments",
+            elapsed_us = arguments_started.elapsed().as_micros(),
+            "body inference phase"
+        );
+        let mut closed_probe = false;
         if let Some(prepared) = prepared {
-            self.finish_call(prepared, args);
+            let table = self.inference.table();
+            let ret = table.resolve(prepared.signature.ret);
+            closed_probe = self.hover_binding.is_some()
+                && prepared.applicability_proven
+                && !ret.has_var()
+                && !ret.has_unknown()
+                && !table.has_pending_projection(ret)
+                && Self::settled_hover_type(&table.finalize(ret), false)
+                && args.iter().all(|arg| {
+                    let ty = table.resolve(self.inference.expr_ty(*arg));
+                    !matches!(
+                        self.body.expr_unchecked(*arg).kind,
+                        ExprKind::Closure { .. }
+                    ) && !ty.has_var()
+                        && !ty.has_unknown()
+                        && !table.has_pending_projection(ty)
+                        && Self::settled_hover_argument(&table.finalize(ty))
+                })
+                && table
+                    .finalize_args(prepared.selected.generic_args)
+                    .iter()
+                    .all(|arg| match arg {
+                        rg_ty::GenericArg::Type(ty) => Self::settled_hover_argument(ty),
+                        rg_ty::GenericArg::Lifetime(lifetime) => {
+                            !matches!(lifetime, rg_ty::Lifetime::Param(_))
+                        }
+                        rg_ty::GenericArg::Const(value) => {
+                            matches!(value, rg_ty::ConstValue::Scalar(_))
+                        }
+                    });
+            self.finish_call(prepared, args, !closed_probe);
         } else {
             // Only lookup needs a body-level retry. Once a call is selected, its remaining
             // predicates and projections are already in the inference table's goal queue.
@@ -134,6 +172,14 @@ where
             } else {
                 self.defer(pending, None);
             }
+        }
+
+        // Written arguments have supplied their types and generic slots. With no unresolved
+        // return or argument component, remaining goals can validate this use but cannot change
+        // the binding's type. Binding probes do not supply diagnostics or persist these facts.
+        if closed_probe {
+            rg_std::check_cancel!(self.context, "closed call binding probe");
+            return Ok(());
         }
 
         // Callable bounds can now constrain the prepared closure signatures. Make that evidence
@@ -181,7 +227,7 @@ where
             .live()
             .call_targets(call, resolution, receiver, self.inference.table())?
             .into_iter()
-            .filter(|t| t.can_infer);
+            .filter(|t| matches!(t.outcome, Outcome::Proven | Outcome::Ambiguous));
         let Some(target) = targets.next() else {
             return Ok(None);
         };
@@ -214,7 +260,26 @@ where
                 }
             }
             subst.fresh_for(table, generics.iter().map(|p| p.param()));
-            let Some(mut signature) = table.instantiate_function(function, &subst) else {
+            // For a binding probe, `User::query() -> Builder<User>` already has all its type
+            // evidence. Rechecking the proven parent cannot change that closed signature. Own
+            // bounds, arguments and unresolved types still need ordinary predicate fulfillment.
+            let reuse_parent = if self.hover_binding.is_some()
+                && target.proven_parent.is_some()
+                && target.explicit_args.is_empty()
+                && matches!(&self.body.expr_unchecked(call).kind, ExprKind::Call { args, .. } if args.is_empty())
+                && let Some(data) = self.context.item_query().function_data(function)?
+                && matches!(data.owner, ItemOwner::Trait(id) if target.proven_parent.is_some_and(|parent| parent.origin == function.origin && parent.id == id))
+                && data.signature.generics().is_none()
+                && data.signature.params().is_empty()
+                && let Some(signature) = self.cx.function_signature(function)
+            {
+                let ret = table.resolve(subst.apply(self.cx, signature.ret));
+                !ret.has_var() && !ret.has_unknown()
+                    && Self::settled_hover_type(&table.finalize(ret), false)
+            } else {
+                false
+            };
+            let Some(mut signature) = table.instantiate_function(function, &subst, !reuse_parent) else {
                 return Ok(None);
             };
             // Normalize once and retain the resulting slots. Later argument evidence can finish
@@ -229,6 +294,7 @@ where
                 signature,
                 first_written_param_idx: target.first_written,
                 receiver_ty: target.receiver,
+                applicability_proven: target.outcome == Outcome::Proven,
             }))
         })?;
         tracing::trace!(phase = "call signature preparation", elapsed_us = signature_started.elapsed().as_micros(), function = ?function, "body inference phase");
@@ -244,7 +310,12 @@ where
 
     /// Connect argument results to the prepared signature, then retain the call for finalization.
     /// Bounds can remain pending: later body evidence still reaches their shared variables.
-    pub(super) fn finish_call(&mut self, prepared: PreparedCall<'s>, args: &[ExprId]) {
+    pub(super) fn finish_call(
+        &mut self,
+        prepared: PreparedCall<'s>,
+        args: &[ExprId],
+        fulfill: bool,
+    ) {
         for (arg, param) in args.iter().zip(
             prepared
                 .signature
@@ -262,7 +333,11 @@ where
             // complete self parameter so a by-value reference receiver keeps its reference.
             self.inference.table().unify(receiver, param);
         }
-        let _ = self.inference.table().fulfill();
+        let fulfill_started = std::time::Instant::now();
+        if fulfill {
+            let _ = self.inference.table().fulfill();
+        }
+        tracing::trace!(phase = "call fulfillment", elapsed_us = fulfill_started.elapsed().as_micros(), function = ?prepared.selected.function, "body inference phase");
         self.inference
             .set_selected_call(prepared.call, prepared.selected);
     }
