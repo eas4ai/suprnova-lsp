@@ -688,7 +688,7 @@ class TransportObservations:
             if not isinstance(event, dict) or event.get("schema") != "suprnova-lsp-log/v1":
                 continue
             message = event.get("message", "")
-            if message not in {"editor document analysis route published", "analysis query started", "analysis query completed", "document analysis prepared", "memory report"}:
+            if message not in {"editor document analysis route published", "analysis query started", "analysis query completed", "document analysis prepared", "document analysis phase", "memory report"}:
                 continue
             if len(self.stages) >= MAX_OBSERVED_EVENTS:
                 raise LspQueryError("stage observation limit exceeded")
