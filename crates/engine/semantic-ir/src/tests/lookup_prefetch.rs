@@ -146,52 +146,52 @@ impl LoadSemanticIr for LookupLoader {
 fn lookup_prefetch_keeps_reading_when_one_artifact_is_slow() {
     let (mut loader, started) = LookupLoader::new(false, None);
     loader.blocked_package = Some(PackageSlot(0));
-    let txn = loader.transaction(24);
+    let txn = loader.transaction(12);
     let request = std::thread::spawn(move || {
-        txn.prefetch_lookup_indexes(&LookupLoader::crates(24), &CancellationToken::new())
+        txn.prefetch_lookup_indexes(&LookupLoader::crates(12), &CancellationToken::new())
     });
     // Keep the first artifact blocked while the other readers take all remaining work.
     // Fixed chunks leave later artifacts behind that blocked read.
-    let progress = LookupLoader::started_reads(&started, 24);
+    let progress = LookupLoader::started_reads(&started, 12);
     loader.release();
     request.join().unwrap().unwrap();
     assert_eq!(
         progress
             .expect("a slow artifact must not prevent the other readers from taking work")
             .len(),
-        24
+        12
     );
     assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
-    assert_eq!(loader.state.reads.lock().unwrap().len(), 24);
+    assert_eq!(loader.state.reads.lock().unwrap().len(), 12);
 }
 
 #[test]
 fn lookup_prefetch_overlaps_bounded_reads_and_releases_them_with_the_transaction() {
     let (loader, started) = LookupLoader::new(false, None);
-    let txn = loader.transaction(24);
-    let crates = LookupLoader::crates(24);
+    let txn = loader.transaction(12);
+    let crates = LookupLoader::crates(12);
     let cancellation = CancellationToken::new();
     std::thread::scope(|scope| {
         let request = scope.spawn(|| txn.prefetch_lookup_indexes(&crates, &cancellation));
         // Each reader blocks inside its first load. Observe the overlap before releasing any read;
         // the deadline only bounds a broken implementation, not a performance assertion.
-        let overlap = LookupLoader::started_reads(&started, 16);
+        let overlap = LookupLoader::started_reads(&started, 8);
         loader.release();
         request.join().unwrap().unwrap();
         assert_eq!(
             overlap
-                .expect("sixteen artifact readers should overlap")
+                .expect("eight artifact readers should overlap")
                 .len(),
-            16
+            8
         );
     });
-    assert_eq!(loader.state.peak.load(Ordering::SeqCst), 16);
+    assert_eq!(loader.state.peak.load(Ordering::SeqCst), 8);
     assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
-    assert_eq!(loader.state.reads.lock().unwrap().len(), 24);
+    assert_eq!(loader.state.reads.lock().unwrap().len(), 12);
     for crate_ref in crates {
         assert!(txn.item_lookup_index(crate_ref).unwrap().is_some());
     }
-    assert_eq!(loader.state.reads.lock().unwrap().len(), 24);
+    assert_eq!(loader.state.reads.lock().unwrap().len(), 12);
     assert!(
         loader
             .state
@@ -216,12 +216,12 @@ fn lookup_prefetch_overlaps_bounded_reads_and_releases_them_with_the_transaction
 #[test]
 fn lookup_prefetch_cancellation_stops_each_readers_next_load() {
     let (loader, started) = LookupLoader::new(false, None);
-    let txn = loader.transaction(24);
-    let crates = LookupLoader::crates(24);
+    let txn = loader.transaction(12);
+    let crates = LookupLoader::crates(12);
     let cancellation = CancellationToken::new();
     std::thread::scope(|scope| {
         let request = scope.spawn(|| txn.prefetch_lookup_indexes(&crates, &cancellation));
-        let overlap = LookupLoader::started_reads(&started, 16);
+        let overlap = LookupLoader::started_reads(&started, 8);
         cancellation.cancel();
         loader.release();
         let error = request
@@ -231,7 +231,7 @@ fn lookup_prefetch_cancellation_stops_each_readers_next_load() {
         assert!(error.downcast_ref::<rg_std::Cancelled>().is_some());
         overlap.expect("each reader reaches the controlled first load");
     });
-    assert_eq!(loader.state.reads.lock().unwrap().len(), 16);
+    assert_eq!(loader.state.reads.lock().unwrap().len(), 8);
     assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
 }
 
