@@ -285,6 +285,12 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
 
         let crate_items = CrateItemQuery::new(self.def_map, self.semantic_ir, self.crate_ref);
         let lookup_started = Instant::now();
+        let visible_crates = rg_def_map::DefMapQuery::new(self.def_map)
+            .item_lookup_crates_from(self.crate_ref)
+            .context("find the current body's visible lookup crates")?;
+        self.semantic_ir
+            .prefetch_lookup_indexes(visible_crates.as_slice(), &cancellation)
+            .context("prefetch the current body's lookup artifacts")?;
         let item_lookup_query =
             ItemLookupQuery::build_with_cache(&crate_items, &self.item_lookup_cache, &cancellation)
                 .context("build the current body's visible item lookup query")?;

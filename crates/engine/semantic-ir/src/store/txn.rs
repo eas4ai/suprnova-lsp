@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use rg_ir_model::{CrateRef, DefMapRef, PackageSlot};
 use rg_package_store::PackageStoreError;
 
@@ -85,6 +86,52 @@ impl<'db> SemanticIrReadTxn<'db> {
             PackageReadEntry::Lazy(package) => package.lookup_index(crate_ref),
             PackageReadEntry::Excluded => unreachable!("excluded entries fail in entry()"),
         }
+    }
+
+    /// Load selected lookup indexes into this frozen transaction before composing a query.
+    ///
+    /// A cursor query may need indexes from hundreds of dependencies. Their artifact reads are
+    /// independent, so up to four temporary readers overlap them. These readers do not perform
+    /// semantic queries or publish state; their decoded indexes belong to this transaction, and all
+    /// readers finish before it can be released. Ordinary lookup still chooses visibility order.
+    pub fn prefetch_lookup_indexes(
+        &self,
+        crates: &[CrateRef],
+        cancellation: &rg_std::CancellationToken,
+    ) -> anyhow::Result<()> {
+        rg_std::check_cancel!(cancellation, "before lookup artifact prefetch");
+        if crates.is_empty() {
+            return Ok(());
+        }
+
+        std::thread::scope(|scope| {
+            let mut readers = Vec::new();
+            for chunk in crates.chunks(crates.len().div_ceil(4)) {
+                readers.push(
+                    std::thread::Builder::new()
+                        .name("lookup-artifacts".to_owned())
+                        .spawn_scoped(scope, move || {
+                            for crate_ref in chunk {
+                                rg_std::check_cancel!(
+                                    cancellation,
+                                    "prefetch visible lookup index"
+                                );
+                                self.item_lookup_index(*crate_ref)?;
+                            }
+                            Ok::<_, anyhow::Error>(())
+                        })
+                        .context("start a lookup artifact reader")?,
+                );
+            }
+            for reader in readers {
+                match reader.join() {
+                    Ok(result) => result?,
+                    Err(panic) => std::panic::resume_unwind(panic),
+                }
+            }
+            rg_std::check_cancel!(cancellation, "after lookup artifact prefetch");
+            Ok(())
+        })
     }
 
     /// Enumerate selected crate identities from manifests without loading declaration shards.
