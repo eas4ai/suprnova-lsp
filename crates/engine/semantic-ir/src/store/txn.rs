@@ -94,7 +94,7 @@ impl<'db> SemanticIrReadTxn<'db> {
     /// Load selected lookup indexes into this frozen transaction before composing a query.
     ///
     /// A cursor query may need indexes from hundreds of dependencies. Their artifact reads are
-    /// independent, so up to eight temporary readers overlap them. These readers do not perform
+    /// independent, so up to sixteen temporary readers overlap them. These readers do not perform
     /// semantic queries or publish state; their decoded indexes belong to this transaction, and all
     /// readers finish before it can be released. Ordinary lookup still chooses visibility order.
     pub fn prefetch_lookup_indexes(
@@ -110,7 +110,7 @@ impl<'db> SemanticIrReadTxn<'db> {
         let next = AtomicUsize::new(0);
         std::thread::scope(|scope| {
             let mut readers = Vec::new();
-            for _ in 0..crates.len().min(8) {
+            for _ in 0..crates.len().min(16) {
                 let next = &next;
                 readers.push(
                     std::thread::Builder::new()
