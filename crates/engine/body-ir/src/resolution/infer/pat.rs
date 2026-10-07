@@ -25,12 +25,17 @@ where
 {
     /// Seed bindings from the function signature before any body expression can read them.
     /// Destructured parameters then project that signature type into their individual bindings.
-    pub(super) fn infer_parameters(&mut self) -> anyhow::Result<()> {
-        let signature = self
-            .body
-            .owner()
-            .function()
-            .and_then(|function| self.cx.function_signature(function));
+    pub(super) fn infer_parameters(&mut self, complete_body: bool) -> anyhow::Result<()> {
+        // A binding probe needs the written parameter annotations. The complete signature also
+        // lowers the return type, which can load large declarations unrelated to that binding.
+        let signature = complete_body
+            .then(|| {
+                self.body
+                    .owner()
+                    .function()
+                    .and_then(|function| self.cx.function_signature(function))
+            })
+            .flatten();
         // A missing arrow has no body expectation, even though the semantic signature uses unit.
         if let Some(function) = self.body.owner().function()
             && self

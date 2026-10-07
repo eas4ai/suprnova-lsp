@@ -28,7 +28,7 @@ lsp = helpers.module("responsiveness_lsp", ROOT / "tools/lsp-query.py")
 class Diagnostic:
     purpose = "small diagnostic, not RSP acceptance"
     run_kind = "rsp-diagnostic"
-    log_filter = "rg_lsp_engine=trace,rg_lsp_server=debug"
+    log_filter = "rg_lsp_engine=trace,rg_lsp_server=debug,rg_lsp_server::client_status=trace"
 
     @staticmethod
     def percentile(values, percentile):
@@ -507,7 +507,7 @@ if __name__ == "__main__":
     try:
         observer = SourceSeries() if options.source_series else Diagnostic()
         if options.inner_trace:
-            observer.log_filter += ",rg_body_ir::build::current=trace,rg_project::storage::loaders=trace"
+            observer.log_filter += ",rg_body_ir::build::current=trace,rg_body_ir::resolution::infer=trace,rg_project::storage::loaders=trace"
         asyncio.run(observer.run(options.mode or MODES, options.no_build, options.nofile_soft, options.workload))
     except (ValueError, RuntimeError, OSError, KeyError) as error:
         print(f"responsiveness observation incomplete: {error}", file=sys.stderr)

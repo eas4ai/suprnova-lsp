@@ -368,7 +368,7 @@ pub fn compute() -> u32 { let first = 1_u32; let second = first + 2; second + 3 
             body,
             &cancellation,
         )
-        .infer_body();
+        .infer_body(None);
         if cancel {
             let error = result.expect_err("unfinished inference must have no facts");
             let cancelled = error
@@ -382,4 +382,108 @@ pub fn compute() -> u32 { let first = 1_u32; let second = first + 2; second + 3 
         }
         assert!(CANCEL_AFTER_EXPRESSIONS.with(|remaining| remaining.get().is_none()));
     }
+}
+
+#[test]
+fn binding_hover_skips_unrelated_statements_only_after_its_type_settles() {
+    let fixture = crate::testonly::BodyIrFixture::build(
+        r#"
+//- /Cargo.toml
+[package]
+name = "binding_hover"
+version = "0.1.0"
+edition = "2024"
+//- /src/lib.rs
+struct Model;
+struct Builder<T>(T);
+impl Model { fn query() -> Builder<Model> { loop {} } }
+fn concrete() { let selected = Model::query(); let unrelated = 1_u8; }
+fn number() { let selected = 1; let later: u64 = selected; }
+fn generic() { let selected = make(); let later: Builder<Model> = selected; }
+fn nested() { { let selected = Model::query(); let later = 1_u8; } }
+fn labelled() { 'done: { let selected = Model::query(); let later = 1_u8; } }
+fn closure() { let selected = || 1; let later: u64 = selected(); }
+fn array() { let selected = [1_u8; 3]; let later = selected; }
+trait Source { type Value; }
+fn projection<T: Source>(value: T::Value) { let selected = value; let later = 1_u8; }
+fn make<T>() -> Builder<T> { loop {} }
+"#,
+    );
+    let target = body_ref().crate_ref;
+    let bodies = fixture
+        .body_ir_db()
+        .resident_package(target.package)
+        .unwrap()
+        .crate_bodies(target.crate_id)
+        .unwrap();
+    let def_map = fixture
+        .def_map_db()
+        .read_txn(rg_def_map::DefMapLoader::resident_only("hover fixture"));
+    let semantic_ir =
+        fixture
+            .semantic_ir_db()
+            .read_txn(rg_semantic_ir::SemanticIrLoader::resident_only(
+                "hover fixture",
+            ));
+    let cancellation = CancellationToken::new();
+    let lookup = rg_semantic_ir::ItemLookupQuery::build_from(
+        &rg_semantic_ir::CrateItemQuery::new(&def_map, &semantic_ir, target),
+        &cancellation,
+    )
+    .unwrap();
+    let mut compared = 0;
+    for (id, body) in bodies.bodies().iter().enumerate() {
+        let Some((selected, binding)) = body.bindings().iter().enumerate().find(|(_, binding)| {
+            binding
+                .name
+                .as_ref()
+                .is_some_and(|name| name.as_str() == "selected")
+        }) else {
+            continue;
+        };
+        let infer = |offset| {
+            super::InferenceContext::new(
+                &def_map,
+                &semantic_ir,
+                &lookup,
+                BodyRef {
+                    crate_ref: target,
+                    body: BodyId(id),
+                },
+                body,
+                &cancellation,
+            )
+            .infer_body(offset)
+            .unwrap()
+        };
+        let full = infer(None);
+        let hovered = infer(Some(binding.name_span.unwrap().start));
+        let selected = BindingId(selected);
+        assert_eq!(hovered.bindings[selected], full.bindings[selected]);
+        assert!(
+            !hovered.bindings[selected].has_unknown(),
+            "full binding type: {:?}",
+            full.bindings[selected]
+        );
+        let unrelated = body.bindings().iter().enumerate().find(|(_, binding)| {
+            binding
+                .name
+                .as_ref()
+                .is_some_and(|name| name.as_str() == "unrelated")
+        });
+        if let Some((unrelated, _)) = unrelated {
+            let unrelated = BindingId(unrelated);
+            assert_ne!(full.bindings[unrelated], Ty::Unknown);
+            assert_eq!(
+                hovered.bindings[unrelated],
+                Ty::Unknown,
+                "unrelated work must not run after a concrete hover type settles"
+            );
+        } else {
+            // Numeric defaults and generic arguments must receive their later constraints.
+            assert_eq!(hovered, full);
+        }
+        compared += 1;
+    }
+    assert_eq!(compared, 8);
 }

@@ -11,8 +11,6 @@
 //! 2. Use known pattern input types to catch unit variants such as `None`.
 //! 3. Rewrite every binding reference from pending slot ids to final binding ids.
 
-use std::cell::OnceCell;
-
 use rg_def_map::{DefMapSource, NamespaceSet};
 use rg_ir_model::{
     BindingId, DefId, DefMapRef, ExprId, FieldKey, ModuleId, ModuleRef, Path, ScopeId,
@@ -21,7 +19,7 @@ use rg_ir_model::{
 use rg_item_tree::{FieldList, SelfParamKind, TypeRef};
 use rg_package_store::PackageStoreError;
 use rg_semantic_ir::{ItemLookupQuery, ItemStoreSource};
-use rg_ty::{ExpectedAdtTyExt, Ty, signature::CallableSignature};
+use rg_ty::{ExpectedAdtTyExt, Ty};
 
 use super::lower::{LoweredBodyData, PendingBindingResolution};
 use crate::{
@@ -35,7 +33,6 @@ use crate::{
 pub(crate) struct PatternBindingQuery<'query, D, I> {
     context: BodyResolutionContext<'query, &'query D, &'query I>,
     body: &'query LoweredBodyData,
-    signature: OnceCell<Option<CallableSignature>>,
 }
 
 impl<'query, D, I> PatternBindingQuery<'query, D, I>
@@ -61,7 +58,6 @@ where
                 cancellation.clone(),
             ),
             body,
-            signature: OnceCell::new(),
         }
     }
 
@@ -564,30 +560,8 @@ where
 
     fn binding_ty(&self, binding: BindingId) -> Result<Ty, PackageStoreError> {
         let binding_data = self.body.body().binding_unchecked(binding);
-        if matches!(
-            binding_data.kind,
-            BindingKind::Param | BindingKind::SelfParam(_)
-        ) && let Some(function) = self.body.body().owner().function()
-            && let Some(param_index) = self.body.body().function_param_index_for_binding(binding)
-            && self.body.body().function_params()[param_index]
-                .bindings
-                .len()
-                == 1
-            && let Some(signature) = {
-                // Several parameters can need the same interpreted signature. Load it only
-                // after a parameter needs it, and keep it within this immutable body query.
-                if self.signature.get().is_none() {
-                    let signature = self.context.signatures().function(function)?;
-                    let _ = self.signature.set(signature);
-                }
-                self.signature.get().and_then(Option::as_ref)
-            }
-            && let Some(param_ty) = signature.params.get(param_index)
-            && !matches!(param_ty, Ty::Unknown)
-        {
-            return Ok(param_ty.clone());
-        }
-
+        // Binding membership needs parameter types, not the function's return type. Resolve the
+        // written annotation in the body's owner context rather than loading the whole signature.
         if let Some(annotation) = &binding_data.annotation {
             return self
                 .context

@@ -31,6 +31,7 @@ impl CrateBodyBuildState<'_> {
         def_map: &DefMapReadTxn<'_>,
         semantic_ir: &SemanticIrReadTxn<'_>,
         item_lookup_query: &ItemLookupQuery<'_>,
+        hover_offset: Option<u32>,
         mut checkpoint: impl FnMut(BodySemanticStage) -> anyhow::Result<()>,
     ) -> anyhow::Result<BodySemanticTimings> {
         let started = Instant::now();
@@ -48,7 +49,7 @@ impl CrateBodyBuildState<'_> {
             .context("check body work after resolving pattern bindings")?;
 
         let started = Instant::now();
-        self.resolve_bodies(def_map, semantic_ir, item_lookup_query)?;
+        self.resolve_bodies(def_map, semantic_ir, item_lookup_query, hover_offset)?;
         let bodies = started.elapsed();
         Self::report_slow_semantic_stage("bodies", bodies, Some(self.crate_bodies.bodies().len()));
         checkpoint(BodySemanticStage::Bodies).context("check body work after body resolution")?;
@@ -212,6 +213,7 @@ impl CrateBodyBuildState<'_> {
         def_map: &DefMapReadTxn<'_>,
         semantic_ir: &SemanticIrReadTxn<'_>,
         item_lookup_query: &ItemLookupQuery<'_>,
+        hover_offset: Option<u32>,
     ) -> anyhow::Result<()> {
         // Make body inference aware of body-local items.
         let source = BodyBuildQuerySource::new(
@@ -237,7 +239,7 @@ impl CrateBodyBuildState<'_> {
                 body,
                 &self.cancellation,
             )
-            .infer_body()?;
+            .infer_body(hover_offset)?;
             let elapsed = started.elapsed();
             if elapsed >= SLOW_BODY_RESOLUTION {
                 tracing::debug!(

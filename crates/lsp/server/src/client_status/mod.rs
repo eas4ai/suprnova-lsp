@@ -130,6 +130,13 @@ impl ClientStatusPublisher {
                     }
                 };
                 state.deferred_indexing.insert(root.to_path_buf(), deferred);
+                if initialization.has_deferred_indexing {
+                    tracing::trace!(root = %root.display(), generation = initialization.generation,
+                            "deferred indexing lifecycle started");
+                } else {
+                    tracing::trace!(root = %root.display(), generation = initialization.generation,
+                            "deferred indexing lifecycle finished");
+                }
             }
         }
         self.workspace_ready(root).await;
@@ -182,6 +189,9 @@ impl ClientStatusPublisher {
                         },
                     );
 
+                    tracing::trace!(root = %root.display(), generation,
+                        "deferred indexing lifecycle started");
+
                     if self.capabilities.work_done_progress
                         && matches!(state.workspaces.get(root), Some(WorkspaceLifecycle::Ready))
                     {
@@ -222,6 +232,10 @@ impl ClientStatusPublisher {
             *active_progress = Some(progress);
         }
 
+        tracing::trace!(root = %root.display(), generation, stage = ?progress.stage,
+            completed_packages = progress.completed_packages, total_packages = progress.total_packages,
+            "deferred indexing progress");
+
         if self.capabilities.work_done_progress
             && matches!(state.workspaces.get(root), Some(WorkspaceLifecycle::Ready))
         {
@@ -247,6 +261,8 @@ impl ClientStatusPublisher {
                 )
             });
             if generation_is_active {
+                tracing::trace!(root = %root.display(), generation, outcome = ?outcome,
+                    "deferred indexing lifecycle finished");
                 let progress_message = match &outcome {
                     DeferredIndexingOutcome::Succeeded => {
                         // Retain the generation so a later initialization response cannot turn

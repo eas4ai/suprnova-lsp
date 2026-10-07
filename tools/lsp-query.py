@@ -39,7 +39,6 @@ TRACKED_NOTIFICATIONS = {ACTIVE_WORKSPACE_CHANGED, SERVER_STATUS}
 LIFECYCLE_NOTIFICATIONS = TRACKED_NOTIFICATIONS | {
     "suprnova-lsp/rustdocStatus",
     "suprnova-lsp/deferredIndexingStarted",
-    "suprnova-lsp/deferredIndexingProgress",
     "suprnova-lsp/deferredIndexingFinished",
 }
 
@@ -627,7 +626,7 @@ class TransportObservations:
         # Keep the event evidence first, retaining only bounded scalar metadata.
         params = {}
         for key, value in (message.get("params") or {}).items():
-            if key not in {"state", "workspaceRoot", "root", "generation", "health", "quiescent", "outcome", "message", "completedPackages", "totalPackages"}:
+            if key not in {"state", "workspaceRoot", "root", "generation", "health", "quiescent", "outcome", "message"}:
                 continue
             if isinstance(value, str) and len(value) > 4096:
                 raise LspQueryError("lifecycle observation field limit exceeded")
@@ -678,17 +677,17 @@ class TransportObservations:
         return True
 
     def deferred_active(self, root: Path) -> bool:
-        """Use the latest observed generation before sending, never the response speed."""
-        events = [event for event in self.events
-                  if event["method"] in {"suprnova-lsp/deferredIndexingStarted", "suprnova-lsp/deferredIndexingFinished"}
-                  and event["params"].get("workspaceRoot") in {str(root), root.as_uri()}]
+        """The server records only accepted generations, before any query is sent."""
+        events = [event for event in self.stages
+                  if event["message"] in {"deferred indexing lifecycle started", "deferred indexing lifecycle finished"}
+                  and event["fields"].get("root") == str(root)]
         if not events:
             return False
-        if any(type(event["params"].get("generation")) is not int for event in events):
+        if any(type(event["fields"].get("generation")) is not int or event["fields"]["generation"] < 0 for event in events):
             fail("deferred observation lacks a generation identity")
-        generation = max(event["params"]["generation"] for event in events)
-        latest = next(event for event in reversed(events) if event["params"]["generation"] == generation)
-        return latest["method"] == "suprnova-lsp/deferredIndexingStarted"
+        generation = max(event["fields"]["generation"] for event in events)
+        latest = next(event for event in reversed(events) if event["fields"]["generation"] == generation)
+        return latest["message"] == "deferred indexing lifecycle started"
 
     def failed(self, request_id: int, error: BaseException) -> None:
         row = self.requests[request_id]
@@ -718,7 +717,7 @@ class TransportObservations:
             if not isinstance(event, dict) or event.get("schema") != "suprnova-lsp-log/v1":
                 continue
             message = event.get("message", "")
-            if message not in {"editor document analysis route published", "analysis query started", "analysis query completed", "document analysis prepared", "document analysis phase", "memory report"}:
+            if message not in {"editor document analysis route published", "analysis query started", "analysis query completed", "document analysis prepared", "document analysis phase", "memory report", "deferred indexing lifecycle started", "deferred indexing lifecycle finished", "deferred indexing progress"}:
                 continue
             if len(self.stages) >= MAX_OBSERVED_EVENTS:
                 raise LspQueryError("stage observation limit exceeded")
