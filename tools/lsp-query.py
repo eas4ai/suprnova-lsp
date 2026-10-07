@@ -1566,8 +1566,8 @@ async def run(argv: Sequence[str]) -> None:
         "barriers": {
             "readiness": plan["readinessBarrier"],
             "deferred": plan["deferredBarrier"],
-            "rustdoc": plan["rustdocBarrier"],
-            "hoverCleanup": plan["hoverCleanupBarrier"],
+            "rustdoc": plan["rustdocBarrier"] if plan["rustdocBarrier"] != "none" else None,
+            "hoverCleanup": True if plan["hoverCleanupBarrier"] else None,
         },
         "results": results,
         "idleMemory": idle_memory,
