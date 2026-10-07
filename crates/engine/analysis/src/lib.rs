@@ -434,14 +434,22 @@ impl<'a> Analysis<'a> {
     }
 
     /// Returns best-effort hover information for the symbol under a source offset.
+    /// With `declarations_only`, resolve published declaration names without reading body facts.
+    /// An unsupported cursor returns `None`, so callers can prepare bodies and try the full query.
     pub fn hover(
         &self,
         crate_ref: CrateRef,
         file_id: FileId,
         offset: u32,
+        declarations_only: bool,
     ) -> anyhow::Result<Option<HoverInfo>> {
         self.run_query("hover", || {
-            query::hover::HoverResolver::new(self).hover(crate_ref, file_id, offset)
+            query::hover::HoverResolver::new(self).hover(
+                crate_ref,
+                file_id,
+                offset,
+                declarations_only,
+            )
         })
     }
 

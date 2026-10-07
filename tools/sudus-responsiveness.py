@@ -3,6 +3,7 @@
 
 import argparse
 import asyncio
+import gzip
 import hashlib
 import json
 import os
@@ -27,6 +28,7 @@ lsp = helpers.module("responsiveness_lsp", ROOT / "tools/lsp-query.py")
 class Diagnostic:
     purpose = "small diagnostic, not RSP acceptance"
     run_kind = "rsp-diagnostic"
+    log_filter = "rg_lsp_engine=trace,rg_lsp_server=debug"
 
     @staticmethod
     def percentile(values, percentile):
@@ -211,7 +213,7 @@ class Diagnostic:
             if original.count(signature) != 1:
                 raise ValueError("Devlist source method changed")
             plan["text"] = original.replace(signature, signature + "\n")
-        if workload == "generated-settled":
+        if workload in {"generated-settled", "generated-captured"}:
             original = (APP / plan["file"]).read_text()
             signature = "pub fn verify_password(&self, password: &str) -> Result<bool, FrameworkError> {"
             if original.count(signature) != 1:
@@ -220,7 +222,16 @@ class Diagnostic:
                 '        let rsp_query = User::query();\n        let rsp_without = User::without_global_scopes();\n'
                 '        let rsp_filter = User::filter("email", "member@example.test");\n')
             plan.update(rustdocBarrier="before-queries", rustdocTimeoutMs=900000, deferredBarrier="before-queries", idleMemory=True, hoverCleanupBarrier=True,
-                queries=[{"kind": "hover", "label": marker, "marker": marker} for marker in ("rsp_query", "rsp_without", "rsp_filter")])
+                  queries=[{"kind": "hover", "label": marker, "marker": marker} for marker in ("rsp_query", "rsp_without", "rsp_filter")])
+            if workload == "generated-captured":
+                plan["rustdocBarrier"] = "none"
+                plan["initializationOptions"]["rustdoc"].update(
+                    automatic={"enabled": False},
+                    inputs=[{"workspaceRoot": str(APP), "manifestPath": str(APP / "Cargo.toml"),
+                             "targetName": "directory", "targetKind": "lib",
+                             "exportPath": str(directory / "directory.json"),
+                             "itemPath": "directory::models::user::User"}],
+                )
         return plan
 
     @classmethod
@@ -267,18 +278,21 @@ class Diagnostic:
         plan_path.write_text(json.dumps(plan, indent=2) + "\n")
         runtime_minutes = 17 if workload == "generated-settled" else 5
         text = await command(label, "just", ["agent-debug", "--no-build", "--timeout", f"{runtime_minutes}m", "--measure",
-            "--log", "rg_lsp_engine=trace,rg_lsp_server=debug", "lsp-query", "--workspace-root", str(APP),
+              "--log", self.log_filter, "lsp-query", "--workspace-root", str(APP),
             "--query-file", str(plan_path), "--timeout-ms", "300000", "--json"], timeout=(runtime_minutes + 1) * 60_000)
         # The supervisor appends its own summary. The first JSON document is
         # the query result; preserve the entire stdout separately as evidence.
         start = text.index('{\n  "file"')
         report, _ = json.JSONDecoder().raw_decode(text[start:])
-        observe = {"source": self.source_observation, "source-only": self.source_only_observation,
-                   "source-current": self.source_only_observation,
-                   "generated-settled": self.generated_observation}[workload]
-        if session_number is not None:
+        if workload == "generated-captured":
+            summary = self.hover_observation(report, ["rsp_query", "rsp_without", "rsp_filter"], [("Builder<User>",)] * 3, "current")
+            summary["idleRssBytes"] = self.idle_observation(report)
+        elif session_number is not None:
             summary = self.source_observation(report, count=6)
         else:
+            observe = {"source": self.source_observation, "source-only": self.source_only_observation,
+                       "source-current": self.source_only_observation,
+                       "generated-settled": self.generated_observation}[workload]
             summary = observe(report, "current") if workload == "source-current" else observe(report)
         return {"raw": report, "summary": summary, "plan": plan}
 
@@ -329,6 +343,22 @@ class Diagnostic:
             identity["metadataSha256"] = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode()).hexdigest()
             identity["buildCompiler"] = await command("build-compiler", "rustc", ["-vV"], env=build_environment)
             identity["producerCompiler"] = await command("producer-compiler", "rustc", ["-vV"])
+            if workload == "generated-captured":
+                # Replay only a genuine compiler export whose complete producer
+                # inputs still match Devlist. It changes neither the application
+                # nor its dependency; the export is owned by this diagnostic.
+                user = helpers.module("rsp_captured_user", ROOT / "tools/sudus-suprnova-user.py")
+                cfg = await command("producer-cfg", "rustc", ["--print", "cfg", "--target", user.TARGET])
+                sysroot = Path((await command("producer-sysroot", "rustc", ["--print", "sysroot"])).strip()) / "lib/rustlib/src/rust/library"
+                producer = json.loads((user.CAPTURE / "producer.json").read_text())
+                with gzip.open(user.CAPTURE / "export.json.gz", "rb") as stream:
+                    export = stream.read(256 * 1024 * 1024 + 1)
+                if len(export) > 256 * 1024 * 1024:
+                    raise ValueError("captured export exceeds the reader bound")
+                user.validate_capture(producer, metadata, sysroot, identity["producerCompiler"], cfg, export)
+                (directory / "directory.json").write_bytes(export)
+                identity["capturedExportSha256"] = user.digest(export)
+                del export
             identity["commit"] = (await command("commit", "git", ["rev-parse", "HEAD"])).strip()
             runtime_diff = await command("runtime-inputs", "git", ["diff", "HEAD", "--",
                 "crates", "Cargo.lock", "Cargo.toml", "rust-toolchain.toml"])
@@ -466,7 +496,8 @@ if __name__ == "__main__":
                          help="20 fresh source sessions, five repeated requests each, all during observed worker activity")
     parser.add_argument("--mode", choices=MODES, action="append")
     parser.add_argument("--no-build", action="store_true", help="intentionally use an existing managed optimized binary")
-    parser.add_argument("--workload", choices=("source", "source-only", "source-current", "generated-settled"), default="source")
+    parser.add_argument("--workload", choices=("source", "source-only", "source-current", "generated-settled", "generated-captured"), default="source")
+    parser.add_argument("--inner-trace", action="store_true", help="disclose additional current-body stage tracing for diagnosis")
     parser.add_argument("--nofile-soft", type=int, help="explicit open-file limit for this diagnostic process and its children only")
     options = parser.parse_args()
     if options.mode and len(set(options.mode)) != len(options.mode):
@@ -475,6 +506,8 @@ if __name__ == "__main__":
         parser.error("--source-series requires the automatic-enabled source workload")
     try:
         observer = SourceSeries() if options.source_series else Diagnostic()
+        if options.inner_trace:
+            observer.log_filter += ",rg_body_ir::build::current=trace,rg_project::storage::loaders=trace"
         asyncio.run(observer.run(options.mode or MODES, options.no_build, options.nofile_soft, options.workload))
     except (ValueError, RuntimeError, OSError, KeyError) as error:
         print(f"responsiveness observation incomplete: {error}", file=sys.stderr)

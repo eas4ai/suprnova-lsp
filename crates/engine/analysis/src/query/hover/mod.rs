@@ -14,7 +14,7 @@ use crate::{
     Analysis, SymbolKind,
     documentation::{DocumentationLinkResolver, SourceDocumentationQuery},
     model::{HoverBlock, HoverInfo, SymbolAt},
-    source_symbol::{SourceSymbol, SourceSymbolResolver},
+    source_symbol::{SourceSymbol, SourceSymbolIndex, SourceSymbolResolver},
 };
 
 pub(crate) struct HoverResolver<'a, 'db>(&'a Analysis<'db>);
@@ -29,7 +29,33 @@ impl<'a, 'db> HoverResolver<'a, 'db> {
         crate_ref: CrateRef,
         file_id: FileId,
         offset: u32,
+        declarations_only: bool,
     ) -> anyhow::Result<Option<HoverInfo>> {
+        if declarations_only {
+            // Read only module declarations. Edited headers may borrow saved identity
+            // only when their header and enclosing declarations match uniquely.
+            // Body-local names, changed headers and expressions take the full path.
+            let symbol = match self
+                .0
+                .current_source_relationship(crate_ref.package, file_id)
+            {
+                Some(crate::SavedSourceRelationship::Different) => self
+                    .0
+                    .associated_header_source_symbol(crate_ref, file_id, offset)?,
+                Some(crate::SavedSourceRelationship::Exact) | None => {
+                    crate::Analysis::narrowest_source_symbol(
+                        SourceSymbolIndex::new(self.0.view_db())
+                            .saved_declaration_symbols_at(crate_ref, file_id, offset)?,
+                    )
+                }
+            };
+            return match symbol
+                .filter(|symbol| matches!(symbol.symbol(), SymbolAt::Declaration { .. }))
+            {
+                Some(symbol) => self.hover_for_source_symbol(crate_ref, symbol),
+                None => Ok(None),
+            };
+        }
         if let Some(link) = SourceDocumentationQuery::new(self.0)
             .link_at(crate_ref, file_id, offset)
             .context("find hovered documentation link")?
