@@ -256,7 +256,7 @@ impl<'a> QueryRunner<'a> {
                     .context("borrow saved project for current document")?;
                 let source = source_view.shared_source();
                 // Checkpoint intervals include work since the preceding boundary. The first
-                // interval includes opening the read view and preparing current declarations.
+                // interval includes opening the read view and reaching the first checkpoint.
                 let mut phase_started = Instant::now();
                 let (analysis, build_summary) = snapshot
                     .analysis_for_current_source(

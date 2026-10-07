@@ -159,3 +159,28 @@ existing post-release allocator report. Record monotonic sample timestamps and
 verify they follow that event. A later source-control replay overlapped another
 owned compiler and is observer verification only; do not pool it with the initial
 causal control or use the difference as a worker-cost estimate.
+
+## Preparation phase diagnostic
+
+The automatic-disabled saved control with explicit phase tracing measured 741 ms
+transport in faster-builds: 729 ms in saved file materialization, 1.8 ms in source
+selection and 1.4 ms in opening the saved view. Repeated hovers were 4.9–6.2 ms.
+Lower-memory hovers were 3.0–4.2 ms because bodies were complete before publication.
+Artifact: `20261007T001806089Z-rsp-diagnostic-2211541-e3bbe4`.
+
+A body-neutral newline in the same method forced the request-local current-source
+path without changing any application file. Its transports were 219–300 ms in
+faster-builds and 206–209 ms in lower-memory mode. Source/declaration associations
+took 2.7–3.8 ms. Checkpoint intervals showed 53–136 ms between owner association
+and body lowering, 48–53 ms in pattern binding preparation and 70–73 ms in body
+resolution. The owner-to-lowering interval also includes visible-item lookup and
+nested saved-body indexing; it does not establish mechanical lowering as the
+bottleneck. Inspect the existing inner body-stage logs before narrowing that work.
+Artifact: `20261007T001653560Z-rsp-diagnostic-2206949-13c730`.
+
+Both controls retained all three actual signatures per mode, independently waited
+for hover release before five RSS samples, preserved application Rust/Cargo inputs
+and verified all owned process groups empty. They use the same optimized instrumented
+binary and disclosed logging/process settings. They remain small diagnostics.
+Plan 02B has measured support; a saved-only change cannot by itself establish
+the generated unsaved-body target. Full cohorts and mechanism controls remain pending.
