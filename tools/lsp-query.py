@@ -501,6 +501,11 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
     document_barrier = plan.get("documentReadinessBarrier", False)
     if type(document_barrier) is not bool:
         fail("documentReadinessBarrier must be a boolean")
+    hover_cleanup_barrier = plan.get("hoverCleanupBarrier", False)
+    if type(hover_cleanup_barrier) is not bool:
+        fail("hoverCleanupBarrier must be a boolean")
+    if hover_cleanup_barrier and any(query["kind"] != "hover" for query in queries):
+        fail("hoverCleanupBarrier requires a hover-only workload")
     rustdoc_barrier = plan.get("rustdocBarrier", "none")
     if rustdoc_barrier not in {"none", "before-queries", "after-queries"}:
         fail("rustdocBarrier must be none, before-queries, or after-queries")
@@ -547,6 +552,7 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
         "initializationOptions": initialization_options,
         "readinessBarrier": readiness_barrier,
         "documentReadinessBarrier": document_barrier,
+        "hoverCleanupBarrier": hover_cleanup_barrier,
         "rustdocBarrier": rustdoc_barrier,
         "rustdocTimeoutMs": rustdoc_timeout,
         "deferredBarrier": deferred_barrier,
@@ -637,6 +643,23 @@ class TransportObservations:
             raise LspQueryError("worker failed before current: " + str(latest.get("message")))
         return latest.get("state") == "current"
 
+    def hover_cleanup_complete(self) -> bool:
+        """The serialized engine logs each purge after releasing that hover's loads."""
+        sent = [row for row in self.requests.values() if row["method"] == "textDocument/hover"]
+        if not sent or any(row["status"] != "success" for row in sent):
+            raise LspQueryError("hover cleanup requires a completed successful hover workload")
+        completed = [event for event in self.stages if event["message"] == "analysis query completed"
+                     and event["fields"].get("query") == "hover"]
+        released = [event for event in self.stages if event["message"] == "memory report"
+                    and event["fields"].get("label") == "hover"]
+        if len(completed) > len(sent) or len(released) > len(sent):
+            raise LspQueryError("hover cleanup observation contains duplicated stages")
+        if len(completed) != len(sent) or len(released) != len(sent):
+            return False
+        if any(release["observedNs"] < completion["observedNs"] for completion, release in zip(completed, released)):
+            raise LspQueryError("hover cleanup precedes its analysis completion")
+        return True
+
     def failed(self, request_id: int, error: BaseException) -> None:
         row = self.requests[request_id]
         if row["status"] != "pending":
@@ -665,7 +688,7 @@ class TransportObservations:
             if not isinstance(event, dict) or event.get("schema") != "suprnova-lsp-log/v1":
                 continue
             message = event.get("message", "")
-            if message not in {"editor document analysis route published", "analysis query started", "analysis query completed", "document analysis prepared"}:
+            if message not in {"editor document analysis route published", "analysis query started", "analysis query completed", "document analysis prepared", "memory report"}:
                 continue
             if len(self.stages) >= MAX_OBSERVED_EVENTS:
                 raise LspQueryError("stage observation limit exceeded")
@@ -788,7 +811,8 @@ class LspClient:
             if identity is not None and identity != current:
                 fail("idle RSS process membership changed between samples")
             identity = current
-            samples.append({"processRssBytes": processes, "aggregateRssBytes": sum(processes.values())})
+            samples.append({"observedNs": time.monotonic_ns(), "processRssBytes": processes,
+                            "aggregateRssBytes": sum(processes.values())})
             await asyncio.sleep(0.1)
         return {"indexingComplete": True, "metric": "sum-of-process-RSS", "samples": samples}
 
@@ -1507,6 +1531,9 @@ async def run(argv: Sequence[str]) -> None:
             if memory_task is not None:
                 indexing_finished.set()
                 indexing_memory = await memory_task
+        if plan["hoverCleanupBarrier"]:
+            await client.wait_for_observation(client.observation.hover_cleanup_complete,
+                "hover request release and allocator purge; enable rg_lsp_engine=debug logging")
         if plan["idleMemory"]:
             idle_memory = await client.idle_memory()
             idle_memory.update(indexing_memory)
@@ -1540,6 +1567,7 @@ async def run(argv: Sequence[str]) -> None:
             "readiness": plan["readinessBarrier"],
             "deferred": plan["deferredBarrier"],
             "rustdoc": plan["rustdocBarrier"],
+            "hoverCleanup": plan["hoverCleanupBarrier"],
         },
         "results": results,
         "idleMemory": idle_memory,
