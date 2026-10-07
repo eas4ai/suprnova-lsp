@@ -1622,7 +1622,7 @@ async def run(argv: Sequence[str]) -> None:
     output = {
         "file": os.path.relpath(str(file_path), str(root)),
         "binary": os.path.relpath(str(binary), str(TOOL_ROOT)),
-        "session": {"serverPid": client.process.pid} if plan["workerRunningBarrier"] or plan["recordSession"] else None,
+        "session": {"serverPid": client.process.pid} if plan["workerRunningBarrier"] or plan["workerReindexBarrier"] or plan["recordSession"] else None,
         "deferredWindow": {"closedBeforeNextSend": window_closed, "closedNs": window_closed_ns if window_closed else None,
                            "planned": len(plan["queries"]), "sent": len(results)} if plan["deferredWindow"] else None,
         "barriers": {

@@ -51,7 +51,7 @@ class ObservationIntegrity(unittest.TestCase):
                 suite = suites.setdefault(package, {"package-name": package, "kind": "lib", "binary-id": package, "testcases": {}})
                 suite["testcases"].update({case: {"ignored": False, "filter-match": {"status": "matches"}} for case in cases})
         value = {"rust-suites": suites}
-        self.assertEqual(len(editor.discover(json.dumps(value))), 8)
+        self.assertEqual(len(editor.discover(json.dumps(value), editor.CASES)), 8)
         for modification in [None, {"ignored": True, "filter-match": {"status": "matches"}},
                              {"ignored": False, "filter-match": {"status": "mismatch"}}]:
             invalid = copy.deepcopy(value)
@@ -62,7 +62,7 @@ class ObservationIntegrity(unittest.TestCase):
             else:
                 entries[case] = modification
             with self.assertRaises(ValueError):
-                editor.discover(json.dumps(invalid))
+                editor.discover(json.dumps(invalid), editor.CASES)
 
     def test_idle_samples_are_separate_positive_consistent_process_sums(self):
         memory = {"indexingComplete": True, "metric": "sum-of-process-RSS", "indexingPeakRssBytes": 100000, "indexingSamples": 10, "samplingIntervalMs": 100, "samples": [

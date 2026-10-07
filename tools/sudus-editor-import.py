@@ -56,10 +56,10 @@ def json_objects(text):
         yield value
 
 
-def discover(text):
+def discover(text, requirements):
     data = json.loads(text)
     wanted = {}
-    for packages in CASES.values():
+    for packages in requirements.values():
         for package, cases in packages.items():
             suites = [suite for suite in data["rust-suites"].values()
                       if suite["package-name"] == package and suite["kind"] == "lib"]
@@ -248,7 +248,7 @@ async def main():
         code, text = await run("discovery", "cargo", ["nextest", "list", *selection, "--message-format", "json"], env=build_env)
         if code != 0:
             raise ValueError("test discovery or compilation failed")
-        wanted = discover(text)
+        wanted = discover(text, CASES)
         code, text = await run("semantic", "cargo", ["nextest", "run", *selection, "--message-format", "libtest-json",
             "--no-fail-fast", "--retries", "0", "--no-tests", "fail", "--test-threads", "2", "--failure-output", "never", "--success-output", "never"], env=build_env)
         tests = outcomes(text, wanted, code)

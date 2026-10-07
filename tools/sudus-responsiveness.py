@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 
 from importlib.util import module_from_spec, spec_from_file_location
@@ -293,10 +294,11 @@ class Diagnostic:
         plan_path = directory / f"{label}-plan.json"
         plan_path.write_text(json.dumps(plan, indent=2) + "\n")
         binary_args = ["--binary", str(self.binary)] if getattr(self, "binary", None) else []
+        environment = {"env": self.compiler_environment} if getattr(self, "compiler_environment", None) else {}
         text = await command(label, "just", ["agent-debug", "--no-build", "--timeout", f"{runtime_minutes}m", "--measure",
-            "--log", self.log_filter, "lsp-query", "--workspace-root", str(APP),
-            "--query-file", str(plan_path), "--timeout-ms", "300000", "--json", *binary_args],
-            timeout=(runtime_minutes + 1) * 60_000)
+              "--log", self.log_filter, "lsp-query", "--workspace-root", str(APP),
+              "--query-file", str(plan_path), "--timeout-ms", "300000", "--json", *binary_args],
+              timeout=(runtime_minutes + 1) * 60_000, **environment)
         # Successful stdout contains the raw protocol observation followed by the supervisor summary.
         start = text.index('{\n  "file"')
         report, _ = json.JSONDecoder().raw_decode(text[start:])
@@ -375,6 +377,8 @@ class Diagnostic:
             binary = getattr(self, "binary", None) or runner.rust_glancer_binary("release")
             identity["binary"] = str(binary)
             identity["binarySha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
+            if getattr(self, "compiler_seed_manifest", None):
+                self.configure_compiler_cache(directory, environment, identity)
             for mode in modes:
                 reports[mode] = await self.observe_mode(mode, directory, workload, command)
             complete = True
@@ -383,11 +387,15 @@ class Diagnostic:
             binary_unchanged = None
             if "binary" in identity:
                 binary_unchanged = hashlib.sha256(Path(identity["binary"]).read_bytes()).hexdigest() == identity["binarySha256"]
+            cache_unchanged = None
+            if "compilerCache" in identity:
+                cache_unchanged = self.cache_module.CompilerCache.inventory(self.compiler_seed) == self.compiler_seed_inventory
             result = {"identity": identity, "reports": reports, "commands": commands,
                       "observationComplete": complete,
                         "applicationInputsUnchanged": original == after,
                         "binaryUnchanged": binary_unchanged,
-                        "runtimeSourcesUnchanged": original_runtime == self.runtime_fingerprint(),
+                          "runtimeSourcesUnchanged": original_runtime == self.runtime_fingerprint(),
+                        "compilerSeedUnchanged": cache_unchanged,
                       "processCleanup": runner.summarize_cleanup(commands),
                       "requirements": {f"RSP-{n:03}": "unverified" for n in range(1, 7)}}
             if not complete:
@@ -401,6 +409,8 @@ class Diagnostic:
                 raise ValueError("managed server binary changed during observation")
             if not result["runtimeSourcesUnchanged"]:
                 raise ValueError("native source changed during observation")
+            if cache_unchanged is False:
+                raise ValueError("compiler cache seed changed during observation")
         for mode, report in reports.items():
             if "summary" in report:
                 print(mode, json.dumps({key: value for key, value in report["summary"].items()
@@ -501,6 +511,41 @@ class AcceptanceMatrix(Diagnostic):
     run_kind = "rsp-matrix"
     symbols = ("source", "rsp_query", "rsp_without", "rsp_filter")
     windows = ("worker", "settled", "deferred")
+
+    def configure_compiler_cache(self, directory, environment, identity):
+        """Keep warm worker measurements separate from the original cold observation."""
+        manifest_path = self.compiler_seed_manifest.resolve(strict=True)
+        owned = ROOT / "target/agent-debug"
+        if not manifest_path.is_relative_to(owned) or manifest_path.stat().st_size > 4 * 1024 * 1024:
+            raise ValueError("compiler cache provenance escapes the owned root or exceeds its bound")
+        manifest = json.loads(manifest_path.read_text())
+        wanted = ["copy-owned-cache", "prime-lib", "prime-directory", "prime-console"]
+        commands = manifest.get("commands", [])
+        if (manifest.get("observationComplete") is not True or manifest.get("applicationInputsUnchanged") is not True
+            or manifest.get("sources") != self.inventory() or manifest.get("toolchain") != "nightly-2026-08-19"
+            or manifest.get("target") != "x86_64-unknown-linux-gnu"
+            or [item.get("phase") for item in commands] != wanted
+            or any(item.get("code") != 0 or item.get("cleanup", {}).get("verifiedEmpty") is not True for item in commands)):
+            raise ValueError("compiler cache lacks complete genuine pinned producer observations")
+        self.compiler_seed = Path(manifest["cache"]).resolve(strict=True)
+        if not self.compiler_seed.is_relative_to(manifest_path.parent) or not self.compiler_seed.is_relative_to(owned):
+            raise ValueError("compiler seed escapes its priming observation")
+        self.cache_module = helpers.module("rsp_compiler_cache", ROOT / "tools/responsiveness-cargo-cache.py")
+        self.compiler_seed_inventory = self.cache_module.CompilerCache.inventory(self.compiler_seed)
+        shim = directory / "compiler-tools"
+        shim.mkdir()
+        (shim / "cargo").symlink_to(ROOT / "tools/responsiveness-cargo-cache.py")
+        config = directory / "compiler-cache-config.json"
+        config.write_text(json.dumps({"seed": str(self.compiler_seed), "cargo": shutil.which("cargo"),
+                                      "events": str(directory / "compiler-cache-events.jsonl")}) + "\n")
+        self.compiler_environment = dict(environment, PATH=str(shim) + os.pathsep + environment["PATH"],
+                                         RSP_COMPILER_CACHE_CONFIG=str(config))
+        identity["compilerCache"] = {"state": "private copies of a disclosed owned warm cache",
+            "manifest": str(manifest_path), "manifestSha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+            "seed": str(self.compiler_seed),
+            "inventorySha256": hashlib.sha256(json.dumps(self.compiler_seed_inventory, sort_keys=True).encode()).hexdigest(),
+            "observerSha256": hashlib.sha256((ROOT / "tools/responsiveness-cargo-cache.py").read_bytes()).hexdigest()}
+        identity["cacheState"] = "existing LSP caches; private copied warm compiler caches; fresh exports regenerated by real worker"
 
     @classmethod
     def series_plan(cls, mode, directory, symbol, window):
@@ -815,6 +860,7 @@ if __name__ == "__main__":
     parser.add_argument("--workload", choices=("source", "source-only", "source-current", "generated-settled", "generated-captured"), default="source")
     parser.add_argument("--binary", type=Path, help="preserved native baseline binary; requires --no-build")
     parser.add_argument("--baseline-manifest", type=Path, help="preserved baseline provenance for --idle-pairs")
+    parser.add_argument("--compiler-seed-manifest", type=Path, help="disclosed owned genuine compiler priming report; --acceptance-matrix only")
     parser.add_argument("--inner-trace", action="store_true", help="disclose additional current-body stage tracing for diagnosis")
     parser.add_argument("--nofile-soft", type=int, help="explicit open-file limit for this diagnostic process and its children only")
     options = parser.parse_args()
@@ -828,6 +874,9 @@ if __name__ == "__main__":
         observer = IdlePairs() if options.idle_pairs else AcceptanceMatrix() if options.acceptance_matrix else SourceSeries() if options.source_series else Diagnostic()
         if options.acceptance_matrix and options.workload != "generated-captured":
             parser.error("--acceptance-matrix requires --workload generated-captured")
+        if options.compiler_seed_manifest and not options.acceptance_matrix:
+            parser.error("--compiler-seed-manifest requires --acceptance-matrix")
+        observer.compiler_seed_manifest = options.compiler_seed_manifest
         observer.binary = options.binary.resolve(strict=True) if options.binary else None
         if options.idle_pairs:
             if options.binary or not options.baseline_manifest or options.workload != "generated-captured":

@@ -735,22 +735,24 @@ class PipeTiming(unittest.IsolatedAsyncioTestCase):
 
 
 class FailedCliEvidence(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def normalize(value, root):
+        return lsp.load_query_plan(lsp.Options(query_json=json.dumps(value)), root)
+
     async def test_worker_reindex_requires_real_automatic_exports_without_explicit_imports(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "lib.rs").write_text("fn source() {}")
             plan = {"file": "lib.rs", "workerReindexBarrier": True,
                     "queries": [{"kind": "hover", "marker": "source"}]}
-            def normalize(value):
-                return lsp.load_query_plan(lsp.Options(query_json=json.dumps(value)), root)
-            self.assertTrue(normalize(plan)["workerReindexBarrier"])
+            self.assertTrue(self.normalize(plan, root)["workerReindexBarrier"])
             for field, value in (("workerRunningBarrier", True), ("rustdocBarrier", "before-queries"),
                                  ("deferredWindow", True), ("workerReindexBarrier", "yes")):
                 with self.subTest(field=field), self.assertRaises(lsp.LspQueryError):
-                    normalize(dict(plan, **{field: value}))
+                    self.normalize(dict(plan, **{field: value}), root)
             for rustdoc in ({"inputs": [{}]}, {"automatic": {"enabled": False}}, {"automatic": None}, None):
                 with self.subTest(rustdoc=rustdoc), self.assertRaises(lsp.LspQueryError):
-                    normalize(dict(plan, initializationOptions={"rustdoc": rustdoc}))
+                    self.normalize(dict(plan, initializationOptions={"rustdoc": rustdoc}), root)
 
     async def test_hover_control_plan_validates_delay_session_and_window(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -758,25 +760,23 @@ class FailedCliEvidence(unittest.IsolatedAsyncioTestCase):
             (root / "lib.rs").write_text("fn source() {}")
             plan = {"file": "lib.rs", "recordSession": True, "deferredWindow": True,
                     "queries": [{"kind": "hover", "marker": "source", "cancelAfterMs": 0}]}
-            def normalized(value):
-                return lsp.load_query_plan(lsp.Options(query_json=json.dumps(value)), root)
-            actual = normalized(plan)
+            actual = self.normalize(plan, root)
             self.assertTrue(actual["recordSession"])
             self.assertTrue(actual["deferredWindow"])
             self.assertEqual(actual["queries"][0]["cancelAfterMs"], 0)
             for field, value in (("recordSession", 1), ("deferredWindow", "yes"),
                                  ("deferredBarrier", "before-queries")):
                 with self.subTest(field=field), self.assertRaises(lsp.LspQueryError):
-                    normalized(dict(plan, **{field: value}))
+                    self.normalize(dict(plan, **{field: value}), root)
             for delay in (True, -1, lsp.DEFAULT_TIMEOUT_MS + 1):
                 broken = copy.deepcopy(plan)
                 broken["queries"][0]["cancelAfterMs"] = delay
                 with self.subTest(delay=delay), self.assertRaises(lsp.LspQueryError):
-                    normalized(broken)
+                    self.normalize(broken, root)
             broken = copy.deepcopy(plan)
             broken["queries"][0] = {"kind": "completion", "marker": "source"}
             with self.assertRaisesRegex(lsp.LspQueryError, "hover-only"):
-                normalized(broken)
+                self.normalize(broken, root)
 
     async def test_disappearing_proc_task_is_tolerated_only_for_peak_sampling(self):
         with tempfile.TemporaryDirectory() as directory:
