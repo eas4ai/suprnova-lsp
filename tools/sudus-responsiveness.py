@@ -493,13 +493,175 @@ class SourceSeries(Diagnostic):
         return {"sessions": sessions, "summary": self.assess(sessions, mode)}
 
 
+class AcceptanceMatrix(Diagnostic):
+    purpose = "complete latency matrix; semantics, races and memory remain separate gates"
+    run_kind = "rsp-matrix"
+    symbols = ("source", "rsp_query", "rsp_without", "rsp_filter")
+    windows = ("worker", "settled", "deferred")
+
+    @classmethod
+    def series_plan(cls, mode, directory, symbol, window):
+        if mode not in MODES or symbol not in cls.symbols or window not in cls.windows:
+            raise ValueError("unknown latency series")
+        if mode == "lower-peak-memory" and window == "deferred":
+            raise ValueError("lower-memory initial deferred window is structurally absent")
+        workload = "source" if symbol == "source" else "generated-captured"
+        plan = cls.workload_plan(mode, directory, workload)
+        plan.update(recordSession=True, idleMemory=False, hoverCleanupBarrier=False,
+                    deferredBarrier="before-queries" if window == "settled" else "after-queries")
+        plan["initializationOptions"]["rustdoc"]["automatic"] = {
+            "enabled": window == "worker", "artifactRoot": str(directory / mode / "compiler"),
+            "toolchain": "nightly-2026-08-19", "jobs": 2}
+        if window == "worker":
+            plan["workerRunningBarrier"] = True
+        if window == "deferred":
+            plan["deferredWindow"] = True
+        query = plan["queries"][0] if symbol == "source" else next(q for q in plan["queries"] if q["marker"] == symbol)
+        plan["queries"] = [dict(query, label=f"{symbol}-{n}") for n in range(6)]
+        return plan
+
+    @staticmethod
+    def configured_publication(raw, plan, written):
+        expected = plan["initializationOptions"]["rustdoc"]["inputs"][0]
+        fields = {"root": expected["workspaceRoot"], "manifest_path": expected["manifestPath"],
+                  "target_name": expected["targetName"], "target_kind": expected["targetKind"],
+                  "export_path": expected["exportPath"], "item_path": expected["itemPath"]}
+        events = [event for event in raw.get("stages", [])
+                  if event.get("message") == "configured rustdoc declarations published"
+                  and type(event.get("observedNs")) is int and event["observedNs"] <= written
+                  and all(event.get("fields", {}).get(key) == value for key, value in fields.items())]
+        if len(events) != 1 or type(events[0]["fields"].get("generation")) is not int:
+            raise ValueError("configured generated declarations lack independent publication evidence")
+        return events[0]["fields"]["generation"]
+
+    @staticmethod
+    def window_evidence(raw, window, sent):
+        if window == "worker":
+            return SourceSeries.worker_overlap(raw)
+        generations = []
+        for row in sent:
+            if window == "settled":
+                events = [event for event in raw.get("lifecycle", [])
+                          if event.get("method") == lsp.SERVER_STATUS
+                          and type(event.get("receivedNs")) is int and event["receivedNs"] <= row["writtenNs"]]
+                if not events or events[-1]["params"].get("health") != "ok" or events[-1]["params"].get("quiescent") is not True:
+                    raise ValueError("settled hover preceded independently observed completion")
+            events = [event for event in raw.get("stages", [])
+                      if event.get("message") in {"deferred indexing lifecycle started", "deferred indexing lifecycle finished"}
+                      and event.get("fields", {}).get("root") == str(APP)
+                      and type(event.get("observedNs")) is int and event["observedNs"] <= row["writtenNs"]]
+            if not events or any(type(event["fields"].get("generation")) is not int for event in events):
+                raise ValueError("hover lacks accepted deferred-generation evidence")
+            generation = max(event["fields"]["generation"] for event in events)
+            latest = next(event for event in reversed(events) if event["fields"]["generation"] == generation)
+            expected = "started" if window == "deferred" else "finished"
+            if latest["message"] != "deferred indexing lifecycle " + expected:
+                raise ValueError("hover was sent outside its required background window")
+            generations.append(generation)
+        return generations
+
+    @classmethod
+    def assess(cls, sessions, mode, directory, symbol, window, require_counts=True):
+        expected = cls.series_plan(mode, directory, symbol, window)
+        identities, first, repeated, evidence = set(), [], [], []
+        for session in sessions:
+            raw, plan = session["raw"], session["plan"]
+            actual = json.loads(json.dumps(plan))
+            actual["initializationOptions"]["rustdoc"]["automatic"]["artifactRoot"] = expected["initializationOptions"]["rustdoc"]["automatic"]["artifactRoot"]
+            if actual != expected:
+                raise ValueError("latency series mixes modes, symbols or configuration")
+            initialized = [row for row in raw["transport"] if row.get("method") == "initialize"]
+            pid = raw.get("session", {}).get("serverPid")
+            if len(initialized) != 1 or initialized[0].get("status") != "success" or type(pid) is not int or pid <= 0:
+                raise ValueError("latency series lacks fresh successful server initialization")
+            initialized_ns = initialized[0].get("receivedNs")
+            if type(initialized_ns) is not int or initialized_ns < 0 or (pid, initialized_ns) in identities:
+                raise ValueError("latency series reuses a session or lacks initialization timestamps")
+            identities.add((pid, initialized_ns))
+            sent = [row for row in raw["transport"] if row.get("method") == "textDocument/hover"]
+            count = len(sent)
+            if window == "deferred":
+                boundary = raw.get("deferredWindow", {})
+                if boundary.get("planned") != 6 or boundary.get("sent") != count or not 0 <= count <= 6:
+                    raise ValueError("deferred workload ledger contradicts its unsent remainder")
+                if count < 6 and boundary.get("closedBeforeNextSend") is not True:
+                    raise ValueError("deferred samples disappeared without an observed closed window")
+                if not count:
+                    if raw.get("results"):
+                        raise ValueError("unsent deferred session contains fabricated replies")
+                    continue
+            elif count != 6:
+                raise ValueError("latency series dropped a planned hover")
+            labels = [f"{symbol}-{n}" for n in range(count)]
+            signatures = [("verify_password", "Result<bool, FrameworkError>") if symbol == "source" else ("Builder<User>",)] * count
+            summary = cls.hover_observation(raw, labels, signatures, "saved_exact" if symbol == "source" else "current")
+            if initialized_ns >= sent[0]["writtenNs"]:
+                raise ValueError("hover preceded initialization")
+            if symbol != "source":
+                for row in sent:
+                    cls.configured_publication(raw, plan, row["writtenNs"])
+            evidence.append(cls.window_evidence(raw, window, sent))
+            first.append(summary["firstNs"])
+            repeated.extend(summary["repeatedNs"])
+        if require_counts and (len(first) < 20 or len(repeated) < 100):
+            raise ValueError("latency series is undersampled: at least 20 first sessions and 100 repeats are required")
+        result = {"mode": mode, "symbol": symbol, "window": window, "sessions": len(sessions),
+                  "backgroundGenerations": evidence, "completeCounts": len(first) >= 20 and len(repeated) >= 100}
+        for cohort, samples in (("first", first), ("repeated", repeated)):
+            result[cohort] = {"count": len(samples), "rawNs": samples, "failures": 0}
+            if samples:
+                result[cohort].update(firstResponseNs=samples[0], p50Ns=cls.percentile(samples, 50),
+                    p95Ns=cls.percentile(samples, 95), maxNs=max(samples), belowTarget=cls.percentile(samples, 95) < 200_000_000)
+        return result
+
+    @staticmethod
+    def read_sessions(references):
+        sessions = []
+        for reference in references:
+            path = Path(reference["path"]).resolve(strict=True)
+            if not path.is_relative_to(ROOT / "target/agent-debug"):
+                raise ValueError("session evidence escapes the owned artifact root")
+            data = path.read_bytes()
+            if len(data) > 4 * 1024 * 1024 or hashlib.sha256(data).hexdigest() != reference["sha256"]:
+                raise ValueError("session evidence changed or exceeds its size bound")
+            sessions.append(json.loads(data))
+        return sessions
+
+    async def observe_mode(self, mode, directory, workload, command):
+        series = {}
+        for symbol in self.symbols:
+            for window in self.windows:
+                if mode == "lower-peak-memory" and window == "deferred":
+                    continue
+                sessions, references = [], []
+                for number in range(120 if window == "deferred" else 20):
+                    label = f"matrix-{mode}-{symbol}-{window}-{number:03}"
+                    plan = self.series_plan(mode, directory, symbol, window)
+                    plan["initializationOptions"]["rustdoc"]["automatic"]["artifactRoot"] = str(directory / label / "compiler")
+                    raw = await self.observe_plan(label, plan, directory, command)
+                    session = {"raw": raw, "plan": plan}
+                    path = directory / f"{label}-session.json"
+                    data = (json.dumps(session, indent=2) + "\n").encode()
+                    path.write_bytes(data)
+                    sessions.append(session)
+                    references.append({"label": label, "path": str(path), "sha256": hashlib.sha256(data).hexdigest()})
+                    summary = self.assess(sessions, mode, directory, symbol, window, require_counts=False)
+                    series[symbol + "/" + window] = {"sessions": references.copy(), "summary": summary}
+                    (directory / f"{mode}-matrix.json").write_text(json.dumps(series, indent=2) + "\n")
+                    if summary["completeCounts"]:
+                        break
+                self.assess(sessions, mode, directory, symbol, window)
+        return {"series": series, "initialDeferredWindow": "structurally absent: lower-peak-memory finishes bodies before publication" if mode == "lower-peak-memory" else "observed per request"}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     purpose = parser.add_mutually_exclusive_group(required=True)
     purpose.add_argument("--diagnostic", action="store_true",
                           help="small source workload; emits no passing Sudus requirement verdicts")
     purpose.add_argument("--source-series", action="store_true",
-                         help="20 fresh source sessions, five repeated requests each, all during observed worker activity")
+                          help="20 fresh source sessions, five repeated requests each, all during observed worker activity")
+    purpose.add_argument("--acceptance-matrix", action="store_true", help="all required latency symbols/windows with separate first and repeated cohorts")
     parser.add_argument("--mode", choices=MODES, action="append")
     parser.add_argument("--no-build", action="store_true", help="intentionally use an existing managed optimized binary")
     parser.add_argument("--workload", choices=("source", "source-only", "source-current", "generated-settled", "generated-captured"), default="source")
@@ -514,7 +676,9 @@ if __name__ == "__main__":
     if options.binary and not options.no_build:
         parser.error("--binary requires --no-build")
     try:
-        observer = SourceSeries() if options.source_series else Diagnostic()
+        observer = AcceptanceMatrix() if options.acceptance_matrix else SourceSeries() if options.source_series else Diagnostic()
+        if options.acceptance_matrix and options.workload != "generated-captured":
+            parser.error("--acceptance-matrix requires --workload generated-captured")
         observer.binary = options.binary.resolve(strict=True) if options.binary else None
         if options.inner_trace:
             observer.log_filter += ",rg_body_ir::build::current=trace,rg_body_ir::resolution=trace,rg_project::storage::loaders=trace"

@@ -403,6 +403,8 @@ fn generic() { let selected = make(); let later: Builder<Model> = selected; }
 fn nested() { { let selected = Model::query(); let later = 1_u8; } }
 fn labelled() { 'done: { let selected = Model::query(); let later = 1_u8; } }
 fn closure() { let selected = || 1; let later: u64 = selected(); }
+fn closure_argument() { let selected = accepts_closure(|| 1_u8); let unrelated = 1_u8; }
+fn accepts_closure(value: fn() -> u8) -> Builder<Model> { loop {} }
 fn array() { let selected = [1_u8; 3]; let later = selected; }
 trait Source { type Value; }
 fn projection<T: Source>(value: T::Value) { let selected = value; let later = 1_u8; }
@@ -465,6 +467,15 @@ fn make<T>() -> Builder<T> { loop {} }
             "full binding type: {:?}",
             full.bindings[selected]
         );
+        for (expr, data) in body.exprs().iter().enumerate() {
+            if matches!(data.kind, crate::ExprKind::Closure { .. }) {
+                assert_eq!(
+                    hovered.exprs[ExprId(expr)],
+                    full.exprs[ExprId(expr)],
+                    "closure arguments must receive their complete signature and body inference"
+                );
+            }
+        }
         let unrelated = body.bindings().iter().enumerate().find(|(_, binding)| {
             binding
                 .name
@@ -485,7 +496,7 @@ fn make<T>() -> Builder<T> { loop {} }
         }
         compared += 1;
     }
-    assert_eq!(compared, 8);
+    assert_eq!(compared, 9);
 }
 
 #[test]
@@ -520,16 +531,28 @@ fn binding_hover_reuses_only_proven_parent_bounds_for_closed_zero_argument_calls
         r#"
 //- /Cargo.toml
 [workspace]
-members = ["app", "bounds"]
+members = ["app", "bounds", "implications"]
 resolver = "3"
 //- /bounds/Cargo.toml
 [package]
 name = "bounds"
 version = "0.1.0"
 edition = "2024"
+[dependencies]
+implications = { path = "../implications" }
 //- /bounds/src/lib.rs
 pub trait Deep {}
 pub trait Extra {}
+pub trait Bridge {}
+impl Bridge for &str where Self: implications::Marker {}
+//- /implications/Cargo.toml
+[package]
+name = "implications"
+version = "0.1.0"
+edition = "2024"
+//- /implications/src/lib.rs
+pub trait Marker {}
+impl Marker for &str {}
 //- /app/Cargo.toml
 [package]
 name = "app"
@@ -547,6 +570,7 @@ trait Model: bounds::Deep {
     fn generic<T>() -> Builder<T>;
     fn projection() -> Self::Value;
     fn argument(value: u8) -> Builder<Self>;
+    fn filter<T: bounds::Bridge>(value: T) -> Builder<Self>;
 }
 impl bounds::Deep for User {}
 impl bounds::Extra for User {}
@@ -556,6 +580,7 @@ fn own_bound() { let selected = User::own_bound(); let unrelated = 1_u8; }
 fn argument() { let selected = User::argument(1_u8); let unrelated = 1_u8; }
 fn generic() { let selected = User::generic(); let later: Builder<User> = selected; }
 fn projection() { let selected = User::projection(); let unrelated = 1_u8; }
+fn filter() { let selected = User::filter("member"); let unrelated = 1_u8; }
 "#,
     );
     let package = |name| {
@@ -593,11 +618,6 @@ fn projection() { let selected = User::projection(); let unrelated = 1_u8; }
     )
     .unwrap();
     let reads = Cell::new(0);
-    let observed = Observed {
-        source: &items,
-        bounds: package("bounds"),
-        reads: &reads,
-    };
     let mut compared = 0;
     for (id, body) in bodies.bodies().iter().enumerate() {
         let Some((binding, selected)) = body
@@ -607,6 +627,19 @@ fn projection() { let selected = User::projection(); let unrelated = 1_u8; }
             .find(|(_, b)| b.name.as_ref().is_some_and(|n| n.as_str() == "selected"))
         else {
             continue;
+        };
+        let is_filter = body.exprs().iter().any(|e| {
+            matches!(
+                &e.kind,
+                crate::ExprKind::Literal {
+                    kind: crate::LiteralKind::String
+                }
+            )
+        });
+        let observed = Observed {
+            source: &items,
+            bounds: package(if is_filter { "implications" } else { "bounds" }),
+            reads: &reads,
         };
         let infer = |offset| {
             super::InferenceContext::new(
@@ -655,7 +688,7 @@ fn projection() { let selected = User::projection(); let unrelated = 1_u8; }
             .unwrap()
             .unwrap()
             .name;
-        if name.as_str() == "query" {
+        if matches!(name.as_str(), "query" | "filter") {
             assert_eq!(
                 reads.get(),
                 0,
@@ -669,7 +702,7 @@ fn projection() { let selected = User::projection(); let unrelated = 1_u8; }
         }
         compared += 1;
     }
-    assert_eq!(compared, 5);
+    assert_eq!(compared, 6);
 }
 
 #[test]

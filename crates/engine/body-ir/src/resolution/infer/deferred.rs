@@ -469,7 +469,7 @@ where
                 else {
                     return Ok(false);
                 };
-                self.finish_call(prepared, args);
+                self.finish_call(prepared, args, true);
                 Ok(true)
             }
             DeferredKind::Pattern {

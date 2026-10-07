@@ -38,7 +38,7 @@ pub(crate) struct LiveCallTarget<'s> {
     pub first_written: usize,
     pub table: Option<InferenceTable<'s>>,
     // Lookup can retain a declaration for navigation even when its trial cannot supply types.
-    pub can_infer: bool,
+    pub outcome: Outcome,
     pub proven_parent: Option<TraitDefRef>,
 }
 
@@ -238,7 +238,7 @@ where
                                 receiver: None,
                                 first_written: 0,
                                 table: None,
-                                can_infer: true,
+                                outcome: Outcome::Proven,
                                 proven_parent: None,
                             });
                         }
@@ -271,7 +271,7 @@ where
                 table: Some(candidate.table),
                 // A possible proof can learn from call arguments later. Missing callback data
                 // still leaves a navigation candidate, but cannot supply inference evidence.
-                can_infer: matches!(candidate.outcome, Outcome::Proven | Outcome::Ambiguous),
+                outcome: candidate.outcome,
                 proven_parent: candidate
                     .trait_ref
                     .filter(|_| candidate.outcome == Outcome::Proven),
