@@ -4,6 +4,7 @@
 import asyncio
 import copy
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -252,6 +253,227 @@ class SourceSeriesIntegrity(unittest.TestCase):
                 plan["queries"][0]["marker"] = "other_symbol"
             with self.subTest(violation=violation), self.assertRaises(ValueError):
                 observation.SourceSeries.assess(sessions, "faster-builds")
+
+
+class AcceptanceMatrixIntegrity(unittest.TestCase):
+    def series(self, mode="faster-builds", symbol="source", window="worker", directory=None):
+        source = SourceSeriesIntegrity()
+        source.setUp()
+        directory = directory or ROOT / "target/agent-debug/matrix-test"
+        for session in source.sessions:
+            raw = session["raw"]
+            session["plan"] = observation.AcceptanceMatrix.series_plan(mode, directory, symbol, window)
+            start = raw["transport"][0]["writtenNs"]
+            state = "started" if window == "deferred" else "finished"
+            raw["stages"].append({"message": "deferred indexing lifecycle " + state,
+                "observedNs": start + 91, "fields": {"root": str(observation.APP), "generation": 1}})
+            raw["lifecycle"].append({"method": lsp.SERVER_STATUS, "receivedNs": start + 92,
+                "params": {"health": "ok", "quiescent": window == "settled"}})
+            if window != "worker":
+                raw["lifecycle"] = [event for event in raw["lifecycle"] if event["method"] != "suprnova-lsp/rustdocStatus"]
+            if window == "deferred":
+                raw["deferredWindow"] = {"planned": 6, "sent": 6, "closedBeforeNextSend": False}
+            if symbol != "source":
+                for result in raw["results"]:
+                    result["text"] = "let value: Builder<User>"
+                for event in raw["stages"]:
+                    if event["message"] == "document analysis prepared":
+                        event["fields"]["source"] = "current"
+                if window == "worker":
+                    worker = next(event for event in raw["lifecycle"] if event["method"] == "suprnova-lsp/rustdocStatus")
+                    worker["params"]["generation"] = 2
+                    raw["lifecycle"].insert(1, {"method": worker["method"], "receivedNs": start + 94,
+                        "params": {"workspaceRoot": str(observation.APP), "generation": 1, "state": "current"}})
+                    raw["transport"].insert(1, {"id": 100, "method": "workspace/executeCommand", "status": "success",
+                        "writtenNs": start + 95, "receivedNs": start + 96, "durationNs": 1})
+                else:
+                    expected = session["plan"]["initializationOptions"]["rustdoc"]["inputs"][0]
+                    raw["stages"].append({"message": "configured rustdoc declarations published", "observedNs": start + 94,
+                        "fields": {"root": expected["workspaceRoot"], "manifest_path": expected["manifestPath"],
+                            "target_name": expected["targetName"], "target_kind": expected["targetKind"],
+                            "export_path": expected["exportPath"], "item_path": expected["itemPath"], "generation": 1}})
+            for n, result in enumerate(raw["results"]):
+                result["label"] = f"{symbol}-{n}"
+        return source.sessions, directory
+
+    def test_every_required_cell_has_separate_first_and_repeat_counts(self):
+        for mode in observation.MODES:
+            for symbol in observation.AcceptanceMatrix.symbols:
+                for window in observation.AcceptanceMatrix.windows:
+                    with self.subTest(mode=mode, symbol=symbol, window=window):
+                        if mode == "lower-peak-memory" and window == "deferred":
+                            with self.assertRaisesRegex(ValueError, "structurally absent"):
+                                self.series(mode, symbol, window)
+                            continue
+                        sessions, directory = self.series(mode, symbol, window)
+                        result = observation.AcceptanceMatrix.assess(sessions, mode, directory, symbol, window)
+                        self.assertEqual(result["first"]["count"], 20)
+                        self.assertEqual(result["repeated"]["count"], 100)
+                        self.assertTrue(result["completeCounts"])
+
+    def test_threshold_includes_slow_first_response_and_rejects_removal(self):
+        sessions, directory = self.series()
+        for session in sessions:
+            row = session["raw"]["results"][0]["transport"]
+            row.update(durationNs=200_000_000, receivedNs=row["writtenNs"] + 200_000_000)
+            for result in session["raw"]["results"][1:]:
+                result["transport"]["writtenNs"] += 200_000_000
+                result["transport"]["receivedNs"] += 200_000_000
+        result = observation.AcceptanceMatrix.assess(sessions, "faster-builds", directory, "source", "worker")
+        self.assertFalse(result["first"]["belowTarget"])
+        self.assertTrue(result["repeated"]["belowTarget"])
+        sessions[0]["raw"]["results"].pop(0)
+        with self.assertRaises(ValueError):
+            observation.AcceptanceMatrix.assess(sessions, "faster-builds", directory, "source", "worker")
+
+    def test_rejects_absent_late_or_other_owner_publication(self):
+        for violation in ("absent", "late", "owner", "generation", "duplicate"):
+            sessions, directory = self.series(symbol="rsp_filter", window="settled")
+            stages = sessions[0]["raw"]["stages"]
+            event = stages[-1]
+            if violation == "absent":
+                stages.pop()
+            elif violation == "late":
+                event["observedNs"] = 1000
+            elif violation == "owner":
+                event["fields"]["item_path"] = "directory::Unrelated"
+            elif violation == "generation":
+                event["fields"]["generation"] = True
+            else:
+                stages.append(copy.deepcopy(event))
+            with self.subTest(violation=violation), self.assertRaisesRegex(ValueError, "publication"):
+                observation.AcceptanceMatrix.assess(sessions, "faster-builds", directory, "rsp_filter", "settled")
+
+    def test_rejects_wrong_window_missing_identity_and_mixed_configuration(self):
+        for violation in ("window", "identity", "mode", "symbol", "count"):
+            sessions, directory = self.series(window="settled")
+            if violation == "window":
+                sessions[0]["raw"]["stages"][-1]["message"] = "deferred indexing lifecycle started"
+            elif violation == "identity":
+                sessions[0]["raw"]["session"] = None
+            elif violation == "count":
+                sessions.pop()
+            else:
+                plan = sessions[0]["plan"]
+                if violation == "mode":
+                    plan["initializationOptions"]["indexing"]["performancePreference"] = "lower-peak-memory"
+                else:
+                    plan["queries"][0]["marker"] = "other"
+            with self.subTest(violation=violation), self.assertRaises(ValueError):
+                observation.AcceptanceMatrix.assess(sessions, "faster-builds", directory, "source", "settled")
+
+    def test_generated_worker_requires_publication_then_successful_reindex_and_new_generation(self):
+        for violation in ("missing", "late", "failed-reindex", "same-generation"):
+            sessions, directory = self.series(symbol="rsp_query")
+            raw = sessions[0]["raw"]
+            publication = next(event for event in raw["lifecycle"] if event.get("params", {}).get("state") == "current")
+            if violation == "missing":
+                raw["lifecycle"].remove(publication)
+            elif violation == "late":
+                publication["receivedNs"] = 99
+            elif violation == "failed-reindex":
+                raw["transport"][1]["status"] = "rpc-error"
+            else:
+                next(event for event in raw["lifecycle"] if event.get("params", {}).get("state") == "running")["params"]["generation"] = 1
+            with self.subTest(violation=violation), self.assertRaises(ValueError):
+                observation.AcceptanceMatrix.assess(sessions, "faster-builds", directory, "rsp_query", "worker")
+
+    def test_unsent_deferred_remainder_needs_observed_generation_completion(self):
+        sessions, directory = self.series(window="deferred")
+        raw = sessions[0]["raw"]
+        raw["transport"] = raw["transport"][:2]
+        raw["results"] = raw["results"][:1]
+        raw["stages"] = [raw["stages"][0], *raw["stages"][1:3], raw["stages"][-1]]
+        raw["stages"].append({"message": "deferred indexing lifecycle finished", "observedNs": 115,
+                             "fields": {"root": str(observation.APP), "generation": 1}})
+        raw["deferredWindow"].update(sent=1, closedBeforeNextSend=True, closedNs=116)
+        result = observation.AcceptanceMatrix.assess(sessions, "faster-builds", directory, "source", "deferred", require_counts=False)
+        self.assertEqual(result["first"]["count"], 20)
+        self.assertEqual(result["repeated"]["count"], 95)
+        for violation in ("counts", "completion", "timestamp"):
+            broken = copy.deepcopy(sessions)
+            if violation == "completion":
+                broken[0]["raw"]["stages"].pop()
+            elif violation == "timestamp":
+                broken[0]["raw"]["deferredWindow"]["closedNs"] = 105
+            with self.subTest(violation=violation), self.assertRaises(ValueError):
+                observation.AcceptanceMatrix.assess(broken, "faster-builds", directory, "source", "deferred",
+                                                  require_counts=violation == "counts")
+
+    def test_artifact_digest_and_supervised_command_ledger_prevent_dropped_sessions(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "target/agent-debug") as scratch:
+            directory = Path(scratch)
+            reports, commands = {}, []
+            serial = 0
+            for mode in observation.MODES:
+                reports[mode] = {"series": {}}
+                for symbol in observation.AcceptanceMatrix.symbols:
+                    for window in observation.AcceptanceMatrix.windows:
+                        if mode == "lower-peak-memory" and window == "deferred":
+                            continue
+                        sessions, _ = self.series(mode, symbol, window, directory)
+                        references = []
+                        for n, session in enumerate(sessions):
+                            serial += 1
+                            session["raw"]["session"]["serverPid"] = serial
+                            label = f"matrix-{mode}-{symbol}-{window}-{n:03}"
+                            path = directory / f"{label}-session.json"
+                            data = json.dumps(session).encode()
+                            path.write_bytes(data)
+                            references.append({"label": label, "path": str(path), "sha256": hashlib.sha256(data).hexdigest()})
+                            commands.append({"phase": label, "code": 0})
+                        reports[mode]["series"][symbol + "/" + window] = {"sessions": references}
+            self.assertEqual(len(observation.AcceptanceMatrix.validate_series(reports, commands, directory)), 20)
+            with self.assertRaisesRegex(ValueError, "supervised session"):
+                observation.AcceptanceMatrix.validate_series(reports, commands[:-1], directory)
+            first = reports["faster-builds"]["series"]["source/worker"]["sessions"][0]
+            Path(first["path"]).write_text('{}')
+            with self.assertRaisesRegex(ValueError, "changed"):
+                observation.AcceptanceMatrix.validate_series(reports, commands, directory)
+
+
+class IdlePairIntegrity(unittest.TestCase):
+    def setUp(self):
+        fixture = LedgerIntegrity()
+        fixture.setUp()
+        raw = fixture.report
+        for result, label in zip(raw["results"], ("rsp_query", "rsp_without", "rsp_filter")):
+            result.update(label=label, text="let value: Builder<User>")
+        for event in raw["stages"]:
+            if event["message"] == "document analysis prepared":
+                event["fields"]["source"] = "current"
+        raw["idleMemory"] = {"indexingComplete": True, "metric": "sum-of-process-RSS", "indexingPeakRssBytes": 1000,
+            "indexingSamples": 10, "samplingIntervalMs": 100, "samples": [
+                {"observedNs": 180 + n, "processRssBytes": {"1": 40, "2": 60}, "aggregateRssBytes": 100} for n in range(5)]}
+        self.directory = ROOT / "target/agent-debug/idle-test"
+        self.reports = {mode: {"pairs": [{kind: {"raw": copy.deepcopy(raw),
+            "plan": observation.IdlePairs.workload_plan(mode, self.directory, "generated-captured"),
+            "binarySha256": kind} for kind in ("baseline", "candidate")} for _ in range(3)]} for mode in observation.MODES}
+
+    def test_recomputes_all_pair_medians_and_separates_indexing_peaks(self):
+        summary = observation.IdlePairs.assess(self.reports, self.directory, "baseline", "candidate")
+        self.assertEqual(summary["faster-builds"]["pairMediansBytes"]["baseline"], [100] * 3)
+        self.assertEqual(summary["lower-peak-memory"]["indexingPeaksBytes"]["candidate"], [1000] * 3)
+        self.assertEqual(summary["faster-builds"]["medianDeltaBytes"], 0)
+
+    def test_rejects_missing_premature_unreleased_mismatched_or_wrong_binary_evidence(self):
+        for violation in ("pair", "sample", "premature", "purge", "configuration", "binary"):
+            reports = copy.deepcopy(self.reports)
+            session = reports["faster-builds"]["pairs"][0]["candidate"]
+            if violation == "pair":
+                reports["faster-builds"]["pairs"].pop()
+            elif violation == "sample":
+                session["raw"]["idleMemory"]["samples"].pop()
+            elif violation == "premature":
+                session["raw"]["idleMemory"]["samples"][0]["observedNs"] = 160
+            elif violation == "purge":
+                session["raw"]["stages"] = [e for e in session["raw"]["stages"] if e["message"] != "memory report"]
+            elif violation == "configuration":
+                session["plan"]["initializationOptions"]["cache"]["packageResidency"] = "all-resident"
+            else:
+                session["binarySha256"] = "baseline"
+            with self.subTest(violation=violation), self.assertRaises(ValueError):
+                observation.IdlePairs.assess(reports, self.directory, "baseline", "candidate")
 
 
 class PipeTiming(unittest.IsolatedAsyncioTestCase):
@@ -513,31 +735,48 @@ class PipeTiming(unittest.IsolatedAsyncioTestCase):
 
 
 class FailedCliEvidence(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def normalize(value, root):
+        return lsp.load_query_plan(lsp.Options(query_json=json.dumps(value)), root)
+
+    async def test_worker_reindex_requires_real_automatic_exports_without_explicit_imports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "lib.rs").write_text("fn source() {}")
+            plan = {"file": "lib.rs", "workerReindexBarrier": True,
+                    "queries": [{"kind": "hover", "marker": "source"}]}
+            self.assertTrue(self.normalize(plan, root)["workerReindexBarrier"])
+            for field, value in (("workerRunningBarrier", True), ("rustdocBarrier", "before-queries"),
+                                 ("deferredWindow", True), ("workerReindexBarrier", "yes")):
+                with self.subTest(field=field), self.assertRaises(lsp.LspQueryError):
+                    self.normalize(dict(plan, **{field: value}), root)
+            for rustdoc in ({"inputs": [{}]}, {"automatic": {"enabled": False}}, {"automatic": None}, None):
+                with self.subTest(rustdoc=rustdoc), self.assertRaises(lsp.LspQueryError):
+                    self.normalize(dict(plan, initializationOptions={"rustdoc": rustdoc}), root)
+
     async def test_hover_control_plan_validates_delay_session_and_window(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "lib.rs").write_text("fn source() {}")
             plan = {"file": "lib.rs", "recordSession": True, "deferredWindow": True,
                     "queries": [{"kind": "hover", "marker": "source", "cancelAfterMs": 0}]}
-            def normalized(value):
-                return lsp.load_query_plan(lsp.Options(query_json=json.dumps(value)), root)
-            actual = normalized(plan)
+            actual = self.normalize(plan, root)
             self.assertTrue(actual["recordSession"])
             self.assertTrue(actual["deferredWindow"])
             self.assertEqual(actual["queries"][0]["cancelAfterMs"], 0)
             for field, value in (("recordSession", 1), ("deferredWindow", "yes"),
                                  ("deferredBarrier", "before-queries")):
                 with self.subTest(field=field), self.assertRaises(lsp.LspQueryError):
-                    normalized(dict(plan, **{field: value}))
+                    self.normalize(dict(plan, **{field: value}), root)
             for delay in (True, -1, lsp.DEFAULT_TIMEOUT_MS + 1):
                 broken = copy.deepcopy(plan)
                 broken["queries"][0]["cancelAfterMs"] = delay
                 with self.subTest(delay=delay), self.assertRaises(lsp.LspQueryError):
-                    normalized(broken)
+                    self.normalize(broken, root)
             broken = copy.deepcopy(plan)
             broken["queries"][0] = {"kind": "completion", "marker": "source"}
             with self.assertRaisesRegex(lsp.LspQueryError, "hover-only"):
-                normalized(broken)
+                self.normalize(broken, root)
 
     async def test_disappearing_proc_task_is_tolerated_only_for_peak_sampling(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -504,6 +504,9 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
     worker_barrier = plan.get("workerRunningBarrier", False)
     if type(worker_barrier) is not bool:
         fail("workerRunningBarrier must be a boolean")
+    worker_reindex = plan.get("workerReindexBarrier", False)
+    if type(worker_reindex) is not bool:
+        fail("workerReindexBarrier must be a boolean")
     record_session = plan.get("recordSession", False)
     deferred_window = plan.get("deferredWindow", False)
     if type(record_session) is not bool or type(deferred_window) is not bool:
@@ -520,6 +523,8 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
         fail("rustdocBarrier must be none, before-queries, or after-queries")
     if worker_barrier and rustdoc_barrier == "before-queries":
         fail("workerRunningBarrier cannot also wait for current rustdoc before queries")
+    if worker_reindex and (worker_barrier or rustdoc_barrier != "none" or deferred_window):
+        fail("workerReindexBarrier owns initial export readiness and the subsequent worker barrier")
     rustdoc_timeout = plan.get("rustdocTimeoutMs", options.timeout_ms)
     if type(rustdoc_timeout) is not int or not 1 <= rustdoc_timeout <= 3_600_000:
         fail("rustdocTimeoutMs must be an integer from 1 to 3600000")
@@ -556,6 +561,11 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
     diagnostics = {"onStartup": False, "onSave": False}
     diagnostics.update(requested.get("diagnostics") or {})
     initialization_options.update({"cache": cache, "cfg": cfg, "diagnostics": diagnostics})
+    if worker_barrier or worker_reindex:
+        rustdoc = require_object(initialization_options.get("rustdoc", {}), "rustdoc worker configuration")
+        automatic = require_object(rustdoc.get("automatic", {}), "automatic worker configuration")
+        if rustdoc.get("inputs") or automatic.get("enabled") is False:
+            fail("worker barriers require automatic exports without configured inputs")
 
     return {
         "file": file_path,
@@ -566,6 +576,7 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
         "readinessBarrier": readiness_barrier,
         "documentReadinessBarrier": document_barrier,
         "workerRunningBarrier": worker_barrier,
+        "workerReindexBarrier": worker_reindex,
         "recordSession": record_session,
         "deferredWindow": deferred_window,
         "hoverCleanupBarrier": hover_cleanup_barrier,
@@ -717,7 +728,7 @@ class TransportObservations:
             if not isinstance(event, dict) or event.get("schema") != "suprnova-lsp-log/v1":
                 continue
             message = event.get("message", "")
-            if message not in {"editor document analysis route published", "analysis query started", "analysis query completed", "document analysis prepared", "document analysis phase", "memory report", "deferred indexing lifecycle started", "deferred indexing lifecycle finished", "deferred indexing progress"}:
+            if message not in {"editor document analysis route published", "configured rustdoc declarations published", "analysis query started", "analysis query completed", "document analysis prepared", "document analysis phase", "memory report", "deferred indexing lifecycle started", "deferred indexing lifecycle finished", "deferred indexing progress"}:
                 continue
             if len(self.stages) >= MAX_OBSERVED_EVENTS:
                 raise LspQueryError("stage observation limit exceeded")
@@ -1343,6 +1354,7 @@ async def run(argv: Sequence[str]) -> None:
     client.enable_observations()
     results = []
     window_closed = False
+    window_closed_ns = None
     idle_memory = None
     indexing_finished = asyncio.Event()
     memory_task = asyncio.create_task(client.indexing_memory(indexing_finished)) if plan["idleMemory"] else None
@@ -1408,6 +1420,13 @@ async def run(argv: Sequence[str]) -> None:
             await client.wait_for_document_ready(file_path)
         if plan["workerRunningBarrier"]:
             await client.wait_for_rustdoc_state(root, "running")
+        if plan["workerReindexBarrier"]:
+            # This is the editor's real reindex action, before the measured hover workload.
+            # Explicit imports suppress automatic exports, so they cannot prove worker overlap.
+            await client.wait_for_rustdoc_state(root, "current", plan["rustdocTimeoutMs"])
+            await client.request("workspace/executeCommand", {
+                "command": "suprnova-lsp.internal.reindexWorkspace", "arguments": []})
+            await client.wait_for_rustdoc_state(root, "running", plan["rustdocTimeoutMs"])
         if plan["rustdocBarrier"] == "before-queries":
             await client.wait_for_rustdoc_state(root, "current", plan["rustdocTimeoutMs"])
         if plan["deferredBarrier"] == "before-queries":
@@ -1421,6 +1440,7 @@ async def run(argv: Sequence[str]) -> None:
                 # A fresh session can have a short eligible window. Preserve all
                 # sent requests and report the unsent remainder separately.
                 window_closed = True
+                window_closed_ns = time.monotonic_ns()
                 break
             if query["kind"] == "hover":
                 position = query_position(query, plan["text"])
@@ -1602,13 +1622,15 @@ async def run(argv: Sequence[str]) -> None:
     output = {
         "file": os.path.relpath(str(file_path), str(root)),
         "binary": os.path.relpath(str(binary), str(TOOL_ROOT)),
-        "session": {"serverPid": client.process.pid} if plan["workerRunningBarrier"] or plan["recordSession"] else None,
-        "deferredWindow": {"closedBeforeNextSend": window_closed, "planned": len(plan["queries"]), "sent": len(results)} if plan["deferredWindow"] else None,
+        "session": {"serverPid": client.process.pid} if plan["workerRunningBarrier"] or plan["workerReindexBarrier"] or plan["recordSession"] else None,
+        "deferredWindow": {"closedBeforeNextSend": window_closed, "closedNs": window_closed_ns if window_closed else None,
+                           "planned": len(plan["queries"]), "sent": len(results)} if plan["deferredWindow"] else None,
         "barriers": {
             "readiness": plan["readinessBarrier"],
             "deferred": plan["deferredBarrier"],
             "rustdoc": plan["rustdocBarrier"] if plan["rustdocBarrier"] != "none" else None,
             "workerRunning": True if plan["workerRunningBarrier"] else None,
+            "workerReindex": True if plan["workerReindexBarrier"] else None,
             "hoverCleanup": True if plan["hoverCleanupBarrier"] else None,
         },
         "results": results,
