@@ -160,7 +160,10 @@ where
                     origin: function.origin,
                     id,
                 };
-                let Some(selection) = table.select_impl(impl_ref, receiver, None) else {
+                let selection_started = std::time::Instant::now();
+                let selection = table.select_impl(impl_ref, receiver, None);
+                tracing::trace!(elapsed_us = selection_started.elapsed().as_micros(), impl_ref = ?impl_ref, function = ?function, available = selection.is_some(), "inherent call candidate selected");
+                let Some(selection) = selection else {
                     continue;
                 };
                 candidates.push(MemberCandidate {
@@ -236,11 +239,13 @@ where
                 if callbacks.failure().is_some() {
                     continue;
                 }
+                let proof_started = std::time::Instant::now();
                 let outcome = trial.prove([TraitApplication {
                     def: trait_ref,
                     args,
                 }
                 .clause(cx)]);
+                tracing::trace!(elapsed_us = proof_started.elapsed().as_micros(), trait_ref = ?trait_ref, outcome = ?outcome, "trait call candidate proved");
                 if outcome == Outcome::NoSolution {
                     continue;
                 }

@@ -175,6 +175,7 @@ where
             _ => None,
         };
         let receiver = receiver.map(|receiver| self.inference.root_resolved_expr_ty(receiver));
+        let target_started = std::time::Instant::now();
         let mut targets = self
             .context
             .live()
@@ -187,7 +188,9 @@ where
         if targets.next().is_some() {
             return Ok(None);
         }
+        tracing::trace!(phase = "call target selection", elapsed_us = target_started.elapsed().as_micros(), function = ?target.function, "body inference phase");
         let function = target.function;
+        let signature_started = std::time::Instant::now();
         let table = target.table.as_ref().unwrap_or(self.inference.table());
         let prepared = table.commit_if_some(|table| {
             let generics = self
@@ -228,6 +231,7 @@ where
                 receiver_ty: target.receiver,
             }))
         })?;
+        tracing::trace!(phase = "call signature preparation", elapsed_us = signature_started.elapsed().as_micros(), function = ?function, "body inference phase");
         let Some(prepared) = prepared else {
             return Ok(None);
         };

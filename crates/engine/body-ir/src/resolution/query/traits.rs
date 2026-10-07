@@ -83,7 +83,10 @@ where
                 };
                 let mut traits = body_traits.iter().copied().collect::<UniqueVec<_>>();
                 traits.extend(saved_traits);
-                tracing::trace!(candidate_count = traits.len(), candidates = ?traits, "body trait surface discovered");
+                tracing::trace!(
+                    candidate_count = traits.len(),
+                    "body trait surface discovered"
+                );
 
                 // No visible declaration provides this name, so lexical scope cannot add a
                 // candidate. Avoid restoring scope graphs for an empty intersection.
@@ -158,20 +161,18 @@ where
         let mut traits = HashSet::new();
         // Candidate identities already came from trait declarations. Translate only that small
         // set, so scope visibility never has to classify every re-exported dependency item.
-        let candidate_defs = candidates
-            .map(|candidates| {
-                candidates
-                    .iter()
-                    .filter_map(|candidate| {
-                        self.context
-                            .item_query()
-                            .trait_data(*candidate)
-                            .transpose()
-                            .map(|data| data.map(|data| data.local_def))
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .transpose()?;
+        let candidate_defs = if let Some(candidates) = candidates {
+            let items = self.context.item_query();
+            let mut local_defs = Vec::with_capacity(candidates.len());
+            for candidate in candidates {
+                if let Some(data) = items.trait_data(*candidate)? {
+                    local_defs.push(data.local_def);
+                }
+            }
+            Some(local_defs)
+        } else {
+            None
+        };
         let candidate_defs = candidate_defs.as_deref();
 
         self.push_local_traits(
