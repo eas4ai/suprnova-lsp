@@ -78,6 +78,7 @@ where
         args: &[ExprId],
         receiver: Option<ExprId>,
         expected: &Ty<'s>,
+        prepared: Option<PreparedCall<'s>>,
     ) -> anyhow::Result<()> {
         for arg in args {
             self.prepare_closure(*arg);
@@ -87,9 +88,12 @@ where
                 .table()
                 .canonicalize(&self.inference.expr_ty(expr))
         });
-        let prepared = self
-            .prepare_call(call, receiver)
-            .context("select call signature")?;
+        let prepared = match prepared {
+            Some(prepared) => Some(prepared),
+            None => self
+                .prepare_call(call, receiver)
+                .context("select call signature")?,
+        };
         self.inference.expr_slot(call);
         // A selected generic signature can use the expectation to infer its type arguments.
         // An unresolved call or root projection may instead turn out to return `!`; its expected
