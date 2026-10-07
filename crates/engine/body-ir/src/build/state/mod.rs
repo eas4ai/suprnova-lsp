@@ -190,7 +190,7 @@ impl<'crate_data> CrateBodyBuildState<'crate_data> {
             );
         }
         let semantic_timings =
-            self.resolve_semantics(def_map, semantic_ir, &item_lookup_query, |_| Ok(()))?;
+            self.resolve_semantics(def_map, semantic_ir, &item_lookup_query, None, |_| Ok(()))?;
         let body_local_impl_headers_ms = semantic_timings.impl_headers.as_millis();
         let pattern_bindings_ms = semantic_timings.pattern_bindings.as_millis();
         let bodies_ms = semantic_timings.bodies.as_millis();

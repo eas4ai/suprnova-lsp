@@ -28,7 +28,7 @@ lsp = helpers.module("responsiveness_lsp", ROOT / "tools/lsp-query.py")
 class Diagnostic:
     purpose = "small diagnostic, not RSP acceptance"
     run_kind = "rsp-diagnostic"
-    log_filter = "rg_lsp_engine=trace,rg_lsp_server=debug"
+    log_filter = "rg_lsp_engine=trace,rg_lsp_server=debug,rg_lsp_server::client_status=trace"
 
     @staticmethod
     def percentile(values, percentile):
@@ -274,16 +274,8 @@ class Diagnostic:
             plan["queries"] = [dict(plan["queries"][0], label=f"source-{n}") for n in range(6)]
             plan["workerRunningBarrier"] = True
             plan["initializationOptions"]["rustdoc"]["automatic"]["artifactRoot"] = str(directory / label / "compiler")
-        plan_path = directory / f"{label}-plan.json"
-        plan_path.write_text(json.dumps(plan, indent=2) + "\n")
-        runtime_minutes = 17 if workload == "generated-settled" else 5
-        text = await command(label, "just", ["agent-debug", "--no-build", "--timeout", f"{runtime_minutes}m", "--measure",
-              "--log", self.log_filter, "lsp-query", "--workspace-root", str(APP),
-            "--query-file", str(plan_path), "--timeout-ms", "300000", "--json"], timeout=(runtime_minutes + 1) * 60_000)
-        # The supervisor appends its own summary. The first JSON document is
-        # the query result; preserve the entire stdout separately as evidence.
-        start = text.index('{\n  "file"')
-        report, _ = json.JSONDecoder().raw_decode(text[start:])
+        report = await self.observe_plan(label, plan, directory, command,
+            runtime_minutes=17 if workload == "generated-settled" else 5)
         if workload == "generated-captured":
             summary = self.hover_observation(report, ["rsp_query", "rsp_without", "rsp_filter"], [("Builder<User>",)] * 3, "current")
             summary["idleRssBytes"] = self.idle_observation(report)
@@ -295,6 +287,20 @@ class Diagnostic:
                        "generated-settled": self.generated_observation}[workload]
             summary = observe(report, "current") if workload == "source-current" else observe(report)
         return {"raw": report, "summary": summary, "plan": plan}
+
+    async def observe_plan(self, label, plan, directory, command, runtime_minutes=5):
+        """Keep all workloads on the existing supervised stdio transport."""
+        plan_path = directory / f"{label}-plan.json"
+        plan_path.write_text(json.dumps(plan, indent=2) + "\n")
+        binary_args = ["--binary", str(self.binary)] if getattr(self, "binary", None) else []
+        text = await command(label, "just", ["agent-debug", "--no-build", "--timeout", f"{runtime_minutes}m", "--measure",
+            "--log", self.log_filter, "lsp-query", "--workspace-root", str(APP),
+            "--query-file", str(plan_path), "--timeout-ms", "300000", "--json", *binary_args],
+            timeout=(runtime_minutes + 1) * 60_000)
+        # Successful stdout contains the raw protocol observation followed by the supervisor summary.
+        start = text.index('{\n  "file"')
+        report, _ = json.JSONDecoder().raw_decode(text[start:])
+        return report
 
     async def run(self, modes, no_build, nofile_soft=None, workload="source"):
         limits = self.configure_limits(nofile_soft)
@@ -366,7 +372,7 @@ class Diagnostic:
             if not no_build:
                 build = runner.build_spec(runner.RunnerOptions(build_profile="release"))
                 await command("build", build.command, [*build.args, "--locked", "--offline"], env=build_environment, timeout=20 * 60_000)
-            binary = runner.rust_glancer_binary("release")
+            binary = getattr(self, "binary", None) or runner.rust_glancer_binary("release")
             identity["binary"] = str(binary)
             identity["binarySha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
             for mode in modes:
@@ -497,6 +503,7 @@ if __name__ == "__main__":
     parser.add_argument("--mode", choices=MODES, action="append")
     parser.add_argument("--no-build", action="store_true", help="intentionally use an existing managed optimized binary")
     parser.add_argument("--workload", choices=("source", "source-only", "source-current", "generated-settled", "generated-captured"), default="source")
+    parser.add_argument("--binary", type=Path, help="preserved native baseline binary; requires --no-build")
     parser.add_argument("--inner-trace", action="store_true", help="disclose additional current-body stage tracing for diagnosis")
     parser.add_argument("--nofile-soft", type=int, help="explicit open-file limit for this diagnostic process and its children only")
     options = parser.parse_args()
@@ -504,10 +511,13 @@ if __name__ == "__main__":
         parser.error("--mode values must be distinct")
     if options.source_series and options.workload != "source":
         parser.error("--source-series requires the automatic-enabled source workload")
+    if options.binary and not options.no_build:
+        parser.error("--binary requires --no-build")
     try:
         observer = SourceSeries() if options.source_series else Diagnostic()
+        observer.binary = options.binary.resolve(strict=True) if options.binary else None
         if options.inner_trace:
-            observer.log_filter += ",rg_body_ir::build::current=trace,rg_project::storage::loaders=trace"
+            observer.log_filter += ",rg_body_ir::build::current=trace,rg_body_ir::resolution=trace,rg_project::storage::loaders=trace"
         asyncio.run(observer.run(options.mode or MODES, options.no_build, options.nofile_soft, options.workload))
     except (ValueError, RuntimeError, OSError, KeyError) as error:
         print(f"responsiveness observation incomplete: {error}", file=sys.stderr)

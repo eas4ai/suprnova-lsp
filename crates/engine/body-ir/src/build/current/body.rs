@@ -141,10 +141,13 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
         .context("select current body roots")?;
         let parse_us = parse_started.elapsed().as_micros();
         if current_owners.is_empty() {
-            let unavailable = matches!(self.selection, CurrentSourceSelection::AtOffset(_))
-                .then_some(CurrentSourceUnavailable::NoBodyAtPosition)
-                .into_iter()
-                .collect();
+            let unavailable = matches!(
+                self.selection,
+                CurrentSourceSelection::AtOffset(_) | CurrentSourceSelection::HoverAtOffset(_)
+            )
+            .then_some(CurrentSourceUnavailable::NoBodyAtPosition)
+            .into_iter()
+            .collect();
             return Ok(CurrentBodyBuildOutcome {
                 bodies: Vec::new(),
                 complete_impls: Vec::new(),
@@ -373,6 +376,10 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
             self.def_map,
             self.semantic_ir,
             &item_lookup_query,
+            match self.selection {
+                CurrentSourceSelection::HoverAtOffset(offset) => Some(offset),
+                _ => None,
+            },
             |stage| {
                 checkpoint(match stage {
                     BodySemanticStage::ImplHeaders => {

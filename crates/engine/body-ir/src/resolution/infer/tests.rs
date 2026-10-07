@@ -368,7 +368,7 @@ pub fn compute() -> u32 { let first = 1_u32; let second = first + 2; second + 3 
             body,
             &cancellation,
         )
-        .infer_body();
+        .infer_body(None);
         if cancel {
             let error = result.expect_err("unfinished inference must have no facts");
             let cancelled = error
@@ -381,5 +381,208 @@ pub fn compute() -> u32 { let first = 1_u32; let second = first + 2; second + 3 
             assert_eq!(facts.exprs.len(), body.exprs().len());
         }
         assert!(CANCEL_AFTER_EXPRESSIONS.with(|remaining| remaining.get().is_none()));
+    }
+}
+
+#[test]
+fn binding_hover_skips_unrelated_statements_only_after_its_type_settles() {
+    let fixture = crate::testonly::BodyIrFixture::build(
+        r#"
+//- /Cargo.toml
+[package]
+name = "binding_hover"
+version = "0.1.0"
+edition = "2024"
+//- /src/lib.rs
+struct Model;
+struct Builder<T>(T);
+impl Model { fn query() -> Builder<Model> { loop {} } }
+fn concrete() { let selected = Model::query(); let unrelated = 1_u8; }
+fn number() { let selected = 1; let later: u64 = selected; }
+fn generic() { let selected = make(); let later: Builder<Model> = selected; }
+fn nested() { { let selected = Model::query(); let later = 1_u8; } }
+fn labelled() { 'done: { let selected = Model::query(); let later = 1_u8; } }
+fn closure() { let selected = || 1; let later: u64 = selected(); }
+fn array() { let selected = [1_u8; 3]; let later = selected; }
+trait Source { type Value; }
+fn projection<T: Source>(value: T::Value) { let selected = value; let later = 1_u8; }
+fn make<T>() -> Builder<T> { loop {} }
+"#,
+    );
+    let target = body_ref().crate_ref;
+    let bodies = fixture
+        .body_ir_db()
+        .resident_package(target.package)
+        .unwrap()
+        .crate_bodies(target.crate_id)
+        .unwrap();
+    let def_map = fixture
+        .def_map_db()
+        .read_txn(rg_def_map::DefMapLoader::resident_only("hover fixture"));
+    let semantic_ir =
+        fixture
+            .semantic_ir_db()
+            .read_txn(rg_semantic_ir::SemanticIrLoader::resident_only(
+                "hover fixture",
+            ));
+    let cancellation = CancellationToken::new();
+    let lookup = rg_semantic_ir::ItemLookupQuery::build_from(
+        &rg_semantic_ir::CrateItemQuery::new(&def_map, &semantic_ir, target),
+        &cancellation,
+    )
+    .unwrap();
+    let mut compared = 0;
+    for (id, body) in bodies.bodies().iter().enumerate() {
+        let Some((selected, binding)) = body.bindings().iter().enumerate().find(|(_, binding)| {
+            binding
+                .name
+                .as_ref()
+                .is_some_and(|name| name.as_str() == "selected")
+        }) else {
+            continue;
+        };
+        let infer = |offset| {
+            super::InferenceContext::new(
+                &def_map,
+                &semantic_ir,
+                &lookup,
+                BodyRef {
+                    crate_ref: target,
+                    body: BodyId(id),
+                },
+                body,
+                &cancellation,
+            )
+            .infer_body(offset)
+            .unwrap()
+        };
+        let full = infer(None);
+        let hovered = infer(Some(binding.name_span.unwrap().start));
+        let selected = BindingId(selected);
+        assert_eq!(hovered.bindings[selected], full.bindings[selected]);
+        assert!(
+            !hovered.bindings[selected].has_unknown(),
+            "full binding type: {:?}",
+            full.bindings[selected]
+        );
+        let unrelated = body.bindings().iter().enumerate().find(|(_, binding)| {
+            binding
+                .name
+                .as_ref()
+                .is_some_and(|name| name.as_str() == "unrelated")
+        });
+        if let Some((unrelated, _)) = unrelated {
+            let unrelated = BindingId(unrelated);
+            assert_ne!(full.bindings[unrelated], Ty::Unknown);
+            assert_eq!(
+                hovered.bindings[unrelated],
+                Ty::Unknown,
+                "unrelated work must not run after a concrete hover type settles"
+            );
+        } else {
+            // Numeric defaults and generic arguments must receive their later constraints.
+            assert_eq!(hovered, full);
+        }
+        compared += 1;
+    }
+    assert_eq!(compared, 8);
+}
+
+#[test]
+fn absent_named_trait_surface_does_not_read_lexical_scopes() {
+    #[derive(Clone, Copy)]
+    struct ScopeTrap;
+
+    impl rg_def_map::DefMapSource for ScopeTrap {
+        type Error = rg_package_store::PackageStoreError;
+
+        fn def_map_for_origin(
+            &self,
+            _: DefMapRef,
+        ) -> Result<Option<&rg_def_map::DefMap>, Self::Error> {
+            panic!("an empty declaration surface must not restore scope graphs");
+        }
+
+        fn crate_is_proc_macro(&self, _: CrateRef) -> Result<bool, Self::Error> {
+            Ok(false)
+        }
+
+        fn extern_root(
+            &self,
+            _: CrateRef,
+            _: &str,
+        ) -> Result<Option<rg_ir_model::ModuleRef>, Self::Error> {
+            panic!("empty trait lookup must not read extern roots");
+        }
+
+        fn extern_roots(
+            &self,
+            _: CrateRef,
+        ) -> Result<Vec<(String, rg_ir_model::ModuleRef)>, Self::Error> {
+            panic!("empty trait lookup must not enumerate extern roots");
+        }
+
+        fn prelude_module(
+            &self,
+            _: CrateRef,
+        ) -> Result<Option<rg_ir_model::ModuleRef>, Self::Error> {
+            panic!("empty trait lookup must not read the prelude");
+        }
+
+        fn root_module(&self, _: CrateRef) -> Result<Option<rg_ir_model::ModuleRef>, Self::Error> {
+            panic!("empty trait lookup must not read root modules");
+        }
+    }
+
+    let fixture = crate::testonly::BodyIrFixture::build(
+        r#"
+//- /Cargo.toml
+[package]
+name = "empty_trait_surface"
+version = "0.1.0"
+edition = "2024"
+//- /src/lib.rs
+fn inspect() {}
+"#,
+    );
+    let target = body_ref().crate_ref;
+    let bodies = fixture
+        .body_ir_db()
+        .resident_package(target.package)
+        .unwrap();
+    let body = &bodies.crate_bodies(target.crate_id).unwrap().bodies()[0];
+    let def_map = fixture
+        .def_map_db()
+        .read_txn(rg_def_map::DefMapLoader::resident_only("trait fixture"));
+    let items = fixture
+        .semantic_ir_db()
+        .read_txn(rg_semantic_ir::SemanticIrLoader::resident_only(
+            "trait fixture",
+        ));
+    let cancellation = CancellationToken::new();
+    let lookup = rg_semantic_ir::ItemLookupQuery::build_from(
+        &rg_semantic_ir::CrateItemQuery::new(&def_map, &items, target),
+        &cancellation,
+    )
+    .unwrap();
+    let context = crate::resolution::BodyResolutionContext::new(
+        ScopeTrap,
+        &items,
+        body_ref(),
+        body,
+        &lookup,
+        cancellation,
+    );
+    for surface in [
+        crate::resolution::cache::BodyTraitSurface::FunctionNamed("query"),
+        crate::resolution::cache::BodyTraitSurface::ConstNamed("query"),
+    ] {
+        assert!(
+            context
+                .traits()
+                .refs_for_surface(rg_ir_model::ScopeId(0), surface)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

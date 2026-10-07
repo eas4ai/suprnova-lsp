@@ -46,6 +46,9 @@ pub enum CurrentSourceBuildCheckpoint {
 pub enum CurrentSourceSelection {
     /// Select the nearest body and enclosing impl, including recovery for an unfinished cursor site.
     AtOffset(u32),
+    /// Select the cursor's body for hover. A settled binding can omit unrelated later inference;
+    /// these facts belong to this request and must not be installed as a completed saved body.
+    HoverAtOffset(u32),
     /// Select every body whose source has a strict half-open overlap with the range.
     IntersectingRange(Span),
 }

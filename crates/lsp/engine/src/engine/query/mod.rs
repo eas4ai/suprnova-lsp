@@ -270,6 +270,12 @@ impl<'a> QueryRunner<'a> {
                         .analysis_for_crates(crates.as_slice(), cancellation.token())?
                         .with_current_source(source_view)
                 } else {
+                    let source_selection = match (query, source_selection) {
+                        ("hover", CurrentSourceSelection::AtOffset(offset)) => {
+                            CurrentSourceSelection::HoverAtOffset(offset)
+                        }
+                        (_, selection) => selection,
+                    };
                     let (analysis, build_summary) = snapshot
                         .analysis_for_current_source(
                             &source_targets,
@@ -958,7 +964,8 @@ struct DocumentAnalysis<'project> {
 impl DocumentAnalysis<'_> {
     fn offset(&self) -> u32 {
         match self.selection {
-            CurrentSourceSelection::AtOffset(offset) => offset,
+            CurrentSourceSelection::AtOffset(offset)
+            | CurrentSourceSelection::HoverAtOffset(offset) => offset,
             CurrentSourceSelection::IntersectingRange(_) => {
                 unreachable!("position query should retain a cursor selection")
             }
@@ -968,7 +975,7 @@ impl DocumentAnalysis<'_> {
     fn range(&self) -> Span {
         match self.selection {
             CurrentSourceSelection::IntersectingRange(range) => range,
-            CurrentSourceSelection::AtOffset(_) => {
+            CurrentSourceSelection::AtOffset(_) | CurrentSourceSelection::HoverAtOffset(_) => {
                 unreachable!("range query should retain a range selection")
             }
         }

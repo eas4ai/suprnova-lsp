@@ -43,7 +43,8 @@ impl SyntaxBodyOwner {
             }
         }
         Ok(match selection {
-            CurrentSourceSelection::AtOffset(offset) => {
+            CurrentSourceSelection::AtOffset(offset)
+            | CurrentSourceSelection::HoverAtOffset(offset) => {
                 Self::at_cursor(&owners, source, offset, errors)
                     .into_iter()
                     .collect()

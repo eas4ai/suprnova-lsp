@@ -154,7 +154,9 @@ impl<'request, 'db> CurrentSourceBuilder<'request, 'db> {
 
         // A cursor's impl is a separate query requirement from its nearest expression body.
         // Preparing it here lets completion and actions remain read-only even for new impls.
-        if let CurrentSourceSelection::AtOffset(offset) = selection {
+        if let CurrentSourceSelection::AtOffset(offset)
+        | CurrentSourceSelection::HoverAtOffset(offset) = selection
+        {
             let parse = self
                 .source
                 .parse(package.edition())

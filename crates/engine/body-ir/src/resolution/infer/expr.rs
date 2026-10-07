@@ -75,6 +75,7 @@ where
         let body = self.body;
         match body.expr_unchecked(expr).kind {
             ExprKind::Block {
+                ref kind,
                 ref label,
                 ref statements,
                 tail,
@@ -91,6 +92,35 @@ where
                 for statement in statements {
                     self.infer_statement(*statement)
                         .context("infer block statement")?;
+                    // A top-level binding hover can finish once its actual producer has supplied
+                    // a concrete type. Do not default numbers here: `let n = 1; use_u64(n);`
+                    // still needs the later statement. Nested blocks keep ordinary inference.
+                    if expr == body.root_expr()
+                        && *kind == ExprBlockKind::Plain
+                        && label.is_none()
+                        && let Some(binding) = self.hover_binding
+                        && let StmtKind::Let { bindings, .. } =
+                            &body.statement_unchecked(*statement).kind
+                        && bindings.contains(&binding)
+                    {
+                        self.fulfill_pending().context("settle hovered binding")?;
+                        let ty = self
+                            .inference
+                            .table()
+                            .resolve(self.inference.binding_ty(binding));
+                        if !ty.has_var()
+                            && !ty.has_unknown()
+                            && Self::settled_hover_type(&self.inference.table().finalize(ty))
+                        {
+                            rg_std::check_cancel!(self.context, "settled binding hover");
+                            self.hover_type_settled = true;
+                            tracing::trace!(body = ?self.context.body_ref(), binding = binding.0,
+                                "request-local binding hover settled before body tail");
+                        }
+                        // Stop the probe in either case. Unresolved types restart ordinary full
+                        // inference with return expectations; they never become partial answers.
+                        return Ok(());
+                    }
                 }
                 self.infer_optional(tail, expected)
                     .context("infer block tail")?;
@@ -123,8 +153,14 @@ where
                     .context("infer block result")?;
             }
             ExprKind::Call { callee, ref args } => {
+                let started = std::time::Instant::now();
                 self.infer_optional(callee, &self.cx.unknown())
                     .context("infer optional expression")?;
+                tracing::trace!(
+                    phase = "callee",
+                    elapsed_us = started.elapsed().as_micros(),
+                    "body inference phase"
+                );
                 if let Some(callee) = callee {
                     let callee_ty = self.inference.root_resolved_expr_ty(callee);
                     if matches!((callee_ty).shape(), TyShape::Adt(_)) {

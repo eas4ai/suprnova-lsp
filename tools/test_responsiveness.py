@@ -427,6 +427,27 @@ class PipeTiming(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(lsp.LspQueryError, "route publication"):
             await self.client.wait_for_document_ready(observation.APP / "src/models/user.rs")
 
+    async def test_deferred_window_uses_generation_fenced_server_events(self):
+        root = observation.APP
+        def event(message, generation, path=root):
+            return {"message": "deferred indexing lifecycle " + message,
+                    "observedNs": 100, "fields": {"root": str(path), "generation": generation}}
+        stages = self.client.observation.stages
+        self.assertFalse(self.client.observation.deferred_active(root))
+        stages.append(event("started", 1))
+        self.assertTrue(self.client.observation.deferred_active(root))
+        stages.append(event("finished", 1))
+        self.assertFalse(self.client.observation.deferred_active(root))
+        stages.append(event("started", 2))
+        stages.append(event("finished", 1))
+        stages.append(event("finished", 2, Path('/other')))
+        self.assertTrue(self.client.observation.deferred_active(root))
+        stages.append(event("finished", 2))
+        self.assertFalse(self.client.observation.deferred_active(root))
+        stages.append(event("started", True))
+        with self.assertRaisesRegex(lsp.LspQueryError, "generation"):
+            self.client.observation.deferred_active(root)
+
     async def test_rustdoc_barrier_rejects_old_success_and_other_workspace(self):
         def status(generation, state, root=observation.APP):
             return {"method": "suprnova-lsp/rustdocStatus", "params": {
@@ -492,6 +513,32 @@ class PipeTiming(unittest.IsolatedAsyncioTestCase):
 
 
 class FailedCliEvidence(unittest.IsolatedAsyncioTestCase):
+    async def test_hover_control_plan_validates_delay_session_and_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "lib.rs").write_text("fn source() {}")
+            plan = {"file": "lib.rs", "recordSession": True, "deferredWindow": True,
+                    "queries": [{"kind": "hover", "marker": "source", "cancelAfterMs": 0}]}
+            def normalized(value):
+                return lsp.load_query_plan(lsp.Options(query_json=json.dumps(value)), root)
+            actual = normalized(plan)
+            self.assertTrue(actual["recordSession"])
+            self.assertTrue(actual["deferredWindow"])
+            self.assertEqual(actual["queries"][0]["cancelAfterMs"], 0)
+            for field, value in (("recordSession", 1), ("deferredWindow", "yes"),
+                                 ("deferredBarrier", "before-queries")):
+                with self.subTest(field=field), self.assertRaises(lsp.LspQueryError):
+                    normalized(dict(plan, **{field: value}))
+            for delay in (True, -1, lsp.DEFAULT_TIMEOUT_MS + 1):
+                broken = copy.deepcopy(plan)
+                broken["queries"][0]["cancelAfterMs"] = delay
+                with self.subTest(delay=delay), self.assertRaises(lsp.LspQueryError):
+                    normalized(broken)
+            broken = copy.deepcopy(plan)
+            broken["queries"][0] = {"kind": "completion", "marker": "source"}
+            with self.assertRaisesRegex(lsp.LspQueryError, "hover-only"):
+                normalized(broken)
+
     async def test_disappearing_proc_task_is_tolerated_only_for_peak_sampling(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

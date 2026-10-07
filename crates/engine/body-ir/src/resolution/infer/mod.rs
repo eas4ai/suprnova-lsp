@@ -12,7 +12,7 @@ use std::collections::VecDeque;
 
 use anyhow::Context as _;
 use rg_def_map::DefMapSource;
-use rg_ir_model::{BodyRef, ExprId, identity::DeclarationRef};
+use rg_ir_model::{BindingId, BodyRef, ExprId, identity::DeclarationRef};
 use rg_package_store::PackageStoreError;
 use rg_semantic_ir::{ItemLookupQuery, ItemStoreSource};
 use rg_std::OperationError;
@@ -64,13 +64,50 @@ where
         Self { context, body }
     }
 
-    pub(crate) fn infer_body(self) -> anyhow::Result<BodyFacts> {
+    // A hover may need just one binding. Saved builds and queries that consume several facts
+    // always pass None; only request-local hover preparation can stop before the body's tail.
+    pub(crate) fn infer_body(self, hover_offset: Option<u32>) -> anyhow::Result<BodyFacts> {
+        let hover_binding = hover_offset.and_then(|offset| {
+            let mut matches = self
+                .body
+                .bindings()
+                .iter()
+                .enumerate()
+                .filter(|(_, binding)| binding.name_span.is_some_and(|span| span.touches(offset)));
+            let (id, _) = matches.next()?;
+            let binding = BindingId(id);
+            if matches.next().is_some() {
+                return None;
+            }
+            let ExprKind::Block {
+                kind: crate::ExprBlockKind::Plain,
+                label: None,
+                statements,
+                ..
+            } = &self.body.expr_unchecked(self.body.root_expr()).kind
+            else {
+                return None;
+            };
+            statements
+                .iter()
+                .any(|statement| {
+                    matches!(&self.body.statement_unchecked(*statement).kind,
+                crate::StmtKind::Let { bindings, .. } if bindings.contains(&binding))
+                })
+                .then_some(binding)
+        });
         let ty_context = self.context.ty_context();
         let declarations = SemanticDeclarations::new(&ty_context, &self.context);
-        declarations
+        let facts = declarations
             .with_solver(|solver| {
                 let cx = solver.interner();
+                let started = std::time::Instant::now();
                 let env = cx.parameter_environment(self.body.owner().generic_def().into());
+                tracing::trace!(
+                    phase = "parameter environment",
+                    elapsed_us = started.elapsed().as_micros(),
+                    "body inference phase"
+                );
                 BodyInference {
                     context: self.context.clone(),
                     body: self.body,
@@ -86,10 +123,18 @@ where
                     return_ty: cx.unknown(),
                     inference_exhausted: false,
                     depth: 0,
+                    hover_binding,
+                    hover_type_settled: false,
                 }
                 .infer_body()
             })
-            .context("read solver declarations")?
+            .context("read solver declarations")??;
+        match facts {
+            Some(facts) => Ok(facts),
+            // A numeric variable, projection or generic argument still needs later constraints.
+            // Rebuild with the full signature so return expectations flow from the start.
+            None => self.infer_body(None),
+        }
     }
 }
 
@@ -107,6 +152,8 @@ struct BodyInference<'s, 'query, D, I> {
     return_ty: Ty<'s>,
     inference_exhausted: bool,
     depth: usize,
+    hover_binding: Option<BindingId>,
+    hover_type_settled: bool,
 }
 
 impl<'s, 'query, D, I> BodyInference<'s, 'query, D, I>
@@ -120,14 +167,44 @@ where
             .lower(ty, self.body.owner().generic_def().into())
     }
 
+    // Be conservative about types with projections, closures, or unevaluated constants. Their
+    // spelling can look complete while later work still supplies part of their meaning.
+    fn settled_hover_type(ty: &rg_ty::Ty) -> bool {
+        match ty {
+            rg_ty::Ty::Adt(adt) => adt.args.iter().all(|arg| match arg {
+                rg_ty::GenericArg::Type(ty) => Self::settled_hover_type(ty),
+                rg_ty::GenericArg::Lifetime(_) => true,
+                rg_ty::GenericArg::Const(value) => !matches!(value, rg_ty::ConstValue::Unknown),
+            }),
+            rg_ty::Ty::Unit | rg_ty::Ty::Primitive(_) | rg_ty::Ty::Param(_) => true,
+            _ => false,
+        }
+    }
+
     /// Infer the body once, finish pending semantic work, then publish durable facts.
     #[rg_std::cancelable("start body inference", token = self.context)]
-    pub(crate) fn infer_body(mut self) -> anyhow::Result<BodyFacts> {
+    pub(crate) fn infer_body(mut self) -> anyhow::Result<Option<BodyFacts>> {
+        let started = std::time::Instant::now();
         // Make declaration types available before visiting any parameter uses or return values.
-        self.infer_parameters()
+        self.infer_parameters(self.hover_binding.is_none())
             .context("infer function parameters")?;
+        tracing::trace!(
+            phase = "function parameters",
+            elapsed_us = started.elapsed().as_micros(),
+            "body inference phase"
+        );
+        let started = std::time::Instant::now();
         self.infer_expr(self.body.root_expr(), &self.return_ty.clone())
             .context("infer root expression")?;
+        tracing::trace!(
+            phase = "root expression",
+            elapsed_us = started.elapsed().as_micros(),
+            "body inference phase"
+        );
+        if self.hover_binding.is_some() && !self.hover_type_settled {
+            rg_std::check_cancel!(self.context, "unfinished binding hover");
+            return Ok(None);
+        }
         // The last subtree may have supplied evidence for earlier operations. Complete those
         // before choosing the declarations that editor queries will see.
         self.fulfill_pending().context("complete body inference")?;
@@ -146,7 +223,7 @@ where
         // A cancelled solver may return a conservative answer. Do not publish that answer as a
         // completed body.
         rg_std::check_cancel!(self.context, "finalize body facts");
-        Ok(self.finish_coercions().finish())
+        Ok(Some(self.finish_coercions().finish()))
     }
 
     /// Populate editor-facing declarations after inference settles. A uniquely selected call

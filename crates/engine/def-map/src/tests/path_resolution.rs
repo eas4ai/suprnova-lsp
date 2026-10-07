@@ -3,6 +3,124 @@ use expect_test::expect;
 use super::utils::{self, PathResolutionQuery};
 
 #[test]
+fn named_trait_scope_keeps_aliases_and_underscore_imports_without_reading_unrelated_graphs() {
+    use rg_ir_model::{CrateRef, DefMapRef, ModuleRef};
+
+    // A named lookup may read the containing scope and the selected traits. Reading the
+    // unrelated crate would restore declarations that cannot provide the requested method.
+    struct Guarded<'a, S> {
+        source: &'a S,
+        unrelated: DefMapRef,
+    }
+    impl<S: crate::DefMapSource> crate::DefMapSource for Guarded<'_, S> {
+        type Error = S::Error;
+
+        fn def_map_for_origin(
+            &self,
+            origin: DefMapRef,
+        ) -> Result<Option<&crate::DefMap>, S::Error> {
+            assert_ne!(origin, self.unrelated, "unrelated scope graph was read");
+            self.source.def_map_for_origin(origin)
+        }
+        fn crate_is_proc_macro(&self, krate: CrateRef) -> Result<bool, S::Error> {
+            self.source.crate_is_proc_macro(krate)
+        }
+        fn extern_root(&self, krate: CrateRef, name: &str) -> Result<Option<ModuleRef>, S::Error> {
+            self.source.extern_root(krate, name)
+        }
+        fn extern_roots(&self, krate: CrateRef) -> Result<Vec<(String, ModuleRef)>, S::Error> {
+            self.source.extern_roots(krate)
+        }
+        fn prelude_module(&self, krate: CrateRef) -> Result<Option<ModuleRef>, S::Error> {
+            self.source.prelude_module(krate)
+        }
+        fn root_module(&self, krate: CrateRef) -> Result<Option<ModuleRef>, S::Error> {
+            self.source.root_module(krate)
+        }
+    }
+
+    let fixture = crate::testonly::DefMapFixture::build(
+        r#"
+//- /Cargo.toml
+[workspace]
+members = ["api", "unrelated", "app"]
+resolver = "3"
+//- /api/Cargo.toml
+[package]
+name = "api"
+version = "0.1.0"
+edition = "2024"
+//- /api/src/lib.rs
+pub trait Wanted { fn query(); }
+pub trait Unnamed { fn query(); }
+pub trait Missing { fn query(); }
+//- /unrelated/Cargo.toml
+[package]
+name = "unrelated"
+version = "0.1.0"
+edition = "2024"
+//- /unrelated/src/lib.rs
+pub struct Noise;
+pub trait NoiseTrait { fn other(); }
+//- /app/Cargo.toml
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+api = { path = "../api" }
+unrelated = { path = "../unrelated" }
+//- /app/src/lib.rs
+use api::Wanted as Alias;
+use api::Unnamed as _;
+use unrelated::{Noise, NoiseTrait};
+"#,
+    );
+    let app = fixture.crate_ref("app", rg_workspace::TargetKind::Lib);
+    let api = fixture.crate_ref("api", rg_workspace::TargetKind::Lib);
+    let unrelated = fixture.crate_ref("unrelated", rg_workspace::TargetKind::Lib);
+    let declarations = fixture.resident_def_map(api).unwrap();
+    let selected = declarations
+        .local_def_refs()
+        .filter(|reference| {
+            declarations.local_def(reference.local_def).unwrap().kind == crate::LocalDefKind::Trait
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(selected.len(), 3);
+    let txn = fixture
+        .def_map_db()
+        .read_txn(crate::DefMapLoader::resident_only("named trait scope"));
+    let root = crate::DefMapSource::root_module(&txn, app)
+        .unwrap()
+        .unwrap();
+    let query = crate::DefMapQuery::new(Guarded {
+        source: &txn,
+        unrelated: DefMapRef::Crate(unrelated),
+    });
+    for traits in [
+        query
+            .traits_in_lexical_scope(root, Some(&selected))
+            .unwrap(),
+        query
+            .traits_in_unqualified_scope(root, Some(&selected))
+            .unwrap(),
+    ] {
+        let mut names = traits
+            .iter()
+            .map(|reference| {
+                declarations
+                    .local_def(reference.local_def)
+                    .unwrap()
+                    .name
+                    .as_str()
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(names, ["Unnamed", "Wanted"]);
+    }
+}
+
+#[test]
 fn compiler_definition_paths_resolve_private_ancestors_without_source_imports() {
     use rg_ir_model::{Path, PathRoot};
     use rg_text::Name;

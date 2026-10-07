@@ -488,8 +488,8 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
                 fail("query context is only supported for completion and code-action")
         if "cancelAfterMs" in query:
             delay = query["cancelAfterMs"]
-            if query["kind"] != "semantic-tokens" or type(delay) is not int or not 0 <= delay <= options.timeout_ms:
-                fail("cancelAfterMs requires a semantic-tokens query and a delay within its timeout")
+            if query["kind"] not in {"semantic-tokens", "hover"} or type(delay) is not int or not 0 <= delay <= options.timeout_ms:
+                fail("cancelAfterMs requires a hover or semantic-tokens query and a delay within its timeout")
         queries.append(query)
 
     output_format = plan.get("format", "text")
@@ -504,6 +504,12 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
     worker_barrier = plan.get("workerRunningBarrier", False)
     if type(worker_barrier) is not bool:
         fail("workerRunningBarrier must be a boolean")
+    record_session = plan.get("recordSession", False)
+    deferred_window = plan.get("deferredWindow", False)
+    if type(record_session) is not bool or type(deferred_window) is not bool:
+        fail("recordSession and deferredWindow must be booleans")
+    if deferred_window and any(query["kind"] != "hover" for query in queries):
+        fail("deferredWindow requires a hover-only workload")
     hover_cleanup_barrier = plan.get("hoverCleanupBarrier", False)
     if type(hover_cleanup_barrier) is not bool:
         fail("hoverCleanupBarrier must be a boolean")
@@ -520,6 +526,8 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
     deferred_barrier = plan.get("deferredBarrier", "none")
     if deferred_barrier not in {"none", "before-queries", "after-queries"}:
         fail("deferredBarrier must be none, before-queries, or after-queries")
+    if deferred_window and deferred_barrier == "before-queries":
+        fail("deferredWindow cannot wait for indexing completion before queries")
     idle_memory = plan.get("idleMemory", False)
     if type(idle_memory) is not bool:
         fail("idleMemory must be a boolean")
@@ -558,6 +566,8 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
         "readinessBarrier": readiness_barrier,
         "documentReadinessBarrier": document_barrier,
         "workerRunningBarrier": worker_barrier,
+        "recordSession": record_session,
+        "deferredWindow": deferred_window,
         "hoverCleanupBarrier": hover_cleanup_barrier,
         "rustdocBarrier": rustdoc_barrier,
         "rustdocTimeoutMs": rustdoc_timeout,
@@ -666,6 +676,19 @@ class TransportObservations:
             raise LspQueryError("hover cleanup precedes its analysis completion")
         return True
 
+    def deferred_active(self, root: Path) -> bool:
+        """The server records only accepted generations, before any query is sent."""
+        events = [event for event in self.stages
+                  if event["message"] in {"deferred indexing lifecycle started", "deferred indexing lifecycle finished"}
+                  and event["fields"].get("root") == str(root)]
+        if not events:
+            return False
+        if any(type(event["fields"].get("generation")) is not int or event["fields"]["generation"] < 0 for event in events):
+            fail("deferred observation lacks a generation identity")
+        generation = max(event["fields"]["generation"] for event in events)
+        latest = next(event for event in reversed(events) if event["fields"]["generation"] == generation)
+        return latest["message"] == "deferred indexing lifecycle started"
+
     def failed(self, request_id: int, error: BaseException) -> None:
         row = self.requests[request_id]
         if row["status"] != "pending":
@@ -694,7 +717,7 @@ class TransportObservations:
             if not isinstance(event, dict) or event.get("schema") != "suprnova-lsp-log/v1":
                 continue
             message = event.get("message", "")
-            if message not in {"editor document analysis route published", "analysis query started", "analysis query completed", "document analysis prepared", "document analysis phase", "memory report"}:
+            if message not in {"editor document analysis route published", "analysis query started", "analysis query completed", "document analysis prepared", "document analysis phase", "memory report", "deferred indexing lifecycle started", "deferred indexing lifecycle finished", "deferred indexing progress"}:
                 continue
             if len(self.stages) >= MAX_OBSERVED_EVENTS:
                 raise LspQueryError("stage observation limit exceeded")
@@ -1319,6 +1342,7 @@ async def run(argv: Sequence[str]) -> None:
     client = await LspClient.start(binary, root, options.timeout_ms, options.show_logs)
     client.enable_observations()
     results = []
+    window_closed = False
     idle_memory = None
     indexing_finished = asyncio.Event()
     memory_task = asyncio.create_task(client.indexing_memory(indexing_finished)) if plan["idleMemory"] else None
@@ -1393,11 +1417,17 @@ async def run(argv: Sequence[str]) -> None:
                 indexing_memory = await memory_task
 
         for query in plan["queries"]:
+            if plan["deferredWindow"] and not client.observation.deferred_active(root):
+                # A fresh session can have a short eligible window. Preserve all
+                # sent requests and report the unsent remainder separately.
+                window_closed = True
+                break
             if query["kind"] == "hover":
                 position = query_position(query, plan["text"])
                 request_started = time.perf_counter_ns()
                 response = await client.request(
-                    "textDocument/hover", {"textDocument": {"uri": uri}, "position": position}
+                    "textDocument/hover", {"textDocument": {"uri": uri}, "position": position},
+                    cancel_after_ms=query.get("cancelAfterMs"),
                 )
                 elapsed_ms = (time.perf_counter_ns() - request_started) / 1_000_000
                 results.append(
@@ -1413,7 +1443,8 @@ async def run(argv: Sequence[str]) -> None:
                         "elapsedMs": round(elapsed_ms, 3),
                         "transport": client.request_observations[response["id"]],
                         "text": hover_text(response.get("result")),
-                        "raw": response.get("result"),
+                          "raw": response.get("result"),
+                          "cancelled": response.get("error", {}).get("code") == -32800 if "cancelAfterMs" in query else None,
                     }
                 )
             elif query["kind"] == "completion":
@@ -1571,7 +1602,8 @@ async def run(argv: Sequence[str]) -> None:
     output = {
         "file": os.path.relpath(str(file_path), str(root)),
         "binary": os.path.relpath(str(binary), str(TOOL_ROOT)),
-        "session": {"serverPid": client.process.pid} if plan["workerRunningBarrier"] else None,
+        "session": {"serverPid": client.process.pid} if plan["workerRunningBarrier"] or plan["recordSession"] else None,
+        "deferredWindow": {"closedBeforeNextSend": window_closed, "planned": len(plan["queries"]), "sent": len(results)} if plan["deferredWindow"] else None,
         "barriers": {
             "readiness": plan["readinessBarrier"],
             "deferred": plan["deferredBarrier"],
