@@ -526,7 +526,7 @@ fn current_declaration_headers_use_request_local_semantics() {
         .expect("current impl header should build");
     for (crate_ref, file) in targets {
         let hover = analysis
-            .hover(crate_ref, file, offset)
+            .hover(crate_ref, file, offset, false)
             .expect("current impl header hover should resolve")
             .expect("Saved should have hover information");
         assert!(

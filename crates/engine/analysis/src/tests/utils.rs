@@ -862,7 +862,7 @@ impl<'a> AnalysisQuerySnapshot<'a> {
                 self.render_hover(
                     self.db
                         .analysis()
-                        .hover(target, file_id, offset)
+                        .hover(target, file_id, offset, false)
                         .expect("fixture hover query should resolve"),
                     target.package,
                     file_id,

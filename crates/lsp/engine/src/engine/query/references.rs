@@ -383,6 +383,7 @@ impl QueryRunner<'_> {
                 "document_highlight",
                 &document,
                 DocumentSelection::Position(position),
+                false,
                 cancellation,
             )
             .context("prepare document highlights")?

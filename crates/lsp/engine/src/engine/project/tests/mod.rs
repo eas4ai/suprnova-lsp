@@ -1,3 +1,5 @@
+mod hover;
+
 use std::{
     sync::{
         Arc, Mutex,

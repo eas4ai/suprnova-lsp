@@ -211,11 +211,21 @@ impl LoadDefMap for DefMapPackageLoader {
         package: PackageSlot,
         crate_id: CrateId,
     ) -> Result<Arc<CrateData>, PackageStoreError> {
-        self.artifacts
+        let started = std::time::Instant::now();
+        let result = self
+            .artifacts
             .reader(package)?
             .read_def_map_crate(crate_id)
             .map(Arc::new)
-            .map_err(|error| error.into_package_store_error(package))
+            .map_err(|error| error.into_package_store_error(package));
+        tracing::trace!(
+            package = package.0,
+            crate_id = crate_id.0,
+            elapsed_us = started.elapsed().as_micros(),
+            section = "def_map.crate",
+            "query artifact loaded"
+        );
+        result
     }
 }
 
@@ -241,11 +251,21 @@ impl LoadSemanticIr for SemanticIrPackageLoader {
         package: PackageSlot,
         crate_id: CrateId,
     ) -> Result<Arc<ItemStore>, PackageStoreError> {
-        self.artifacts
+        let started = std::time::Instant::now();
+        let result = self
+            .artifacts
             .reader(package)?
             .read_semantic_ir_items(crate_id)
             .map(Arc::new)
-            .map_err(|error| error.into_package_store_error(package))
+            .map_err(|error| error.into_package_store_error(package));
+        tracing::trace!(
+            package = package.0,
+            crate_id = crate_id.0,
+            elapsed_us = started.elapsed().as_micros(),
+            section = "semantic_ir.items",
+            "query artifact loaded"
+        );
+        result
     }
 
     fn load_lookup_index(
@@ -253,11 +273,21 @@ impl LoadSemanticIr for SemanticIrPackageLoader {
         package: PackageSlot,
         crate_id: CrateId,
     ) -> Result<Arc<ItemLookupIndex>, PackageStoreError> {
-        self.artifacts
+        let started = std::time::Instant::now();
+        let result = self
+            .artifacts
             .reader(package)?
             .read_semantic_ir_lookup_index(crate_id)
             .map(Arc::new)
-            .map_err(|error| error.into_package_store_error(package))
+            .map_err(|error| error.into_package_store_error(package));
+        tracing::trace!(
+            package = package.0,
+            crate_id = crate_id.0,
+            elapsed_us = started.elapsed().as_micros(),
+            section = "semantic_ir.lookup_index",
+            "query artifact loaded"
+        );
+        result
     }
 }
 

@@ -267,6 +267,7 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
         // functions and initializers declared inside these roots. The nested-body index lets an
         // unchanged declaration keep its saved `BodyRef`; crate lookup continues to come from the
         // saved project rather than publishing request-local items globally.
+        let nested_bodies_started = Instant::now();
         let saved_nested_bodies = SavedNestedBodyIndex::new(
             self.saved_body_ir,
             self.crate_ref,
@@ -274,11 +275,20 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
             &saved_bodies,
             roots.iter().map(|root| root.body_ref),
         )?;
+        tracing::trace!(
+            elapsed_us = nested_bodies_started.elapsed().as_micros(),
+            "current body saved nested identities prepared"
+        );
 
         let crate_items = CrateItemQuery::new(self.def_map, self.semantic_ir, self.crate_ref);
+        let lookup_started = Instant::now();
         let item_lookup_query =
             ItemLookupQuery::build_with_cache(&crate_items, &self.item_lookup_cache, &cancellation)
                 .context("build the current body's visible item lookup query")?;
+        tracing::trace!(
+            elapsed_us = lookup_started.elapsed().as_micros(),
+            "current body visible item lookup prepared"
+        );
 
         let mut interner = NameInterner::new();
         let task_source = BodyTaskSource::Current {

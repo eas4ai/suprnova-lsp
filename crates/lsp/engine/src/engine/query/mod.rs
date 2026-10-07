@@ -150,6 +150,7 @@ impl<'a> QueryRunner<'a> {
         query: &'static str,
         document: &EditorDocumentSnapshot,
         selection: DocumentSelection,
+        declarations_only: bool,
         cancellation: &QueryCancellation<'_>,
     ) -> anyhow::Result<Option<DocumentAnalysis<'project>>> {
         let started = Instant::now();
@@ -208,12 +209,14 @@ impl<'a> QueryRunner<'a> {
                     .map(|target| (target.crate_ref, target.context.file))
                     .collect::<UniqueVec<_>>();
                 let materialization_started = Instant::now();
-                self.project
-                    .materialize_saved_project(
-                        AnalysisSurface::Files(files.as_slice()),
-                        &cancellation.token(),
-                    )
-                    .context("prepare exact saved document analysis")?;
+                if !declarations_only {
+                    self.project
+                        .materialize_saved_project(
+                            AnalysisSurface::Files(files.as_slice()),
+                            &cancellation.token(),
+                        )
+                        .context("prepare exact saved document analysis")?;
+                }
                 tracing::trace!(
                     query,
                     phase = "saved file materialization",
@@ -258,33 +261,44 @@ impl<'a> QueryRunner<'a> {
                 // Checkpoint intervals include work since the preceding boundary. The first
                 // interval includes opening the read view and reaching the first checkpoint.
                 let mut phase_started = Instant::now();
-                let (analysis, build_summary) = snapshot
-                    .analysis_for_current_source(
-                        &source_targets,
-                        source_view,
-                        source_selection,
-                        cancellation.token(),
-                        |checkpoint| {
-                            tracing::trace!(
-                                query,
-                                phase = Self::current_source_checkpoint(checkpoint),
-                                elapsed_us = phase_started.elapsed().as_micros(),
-                                "document analysis phase"
-                            );
-                            phase_started = Instant::now();
-                            rg_std::check_cancel!(
-                                cancellation,
-                                Self::current_source_checkpoint(checkpoint)
-                            );
-                            Ok(())
-                        },
-                    )
-                    .context("prepare current document analysis")?;
-                tracing::trace!(
-                    query,
-                    complete_current_source_build = build_summary.is_complete(),
-                    "current document bodies prepared"
-                );
+                let analysis = if declarations_only {
+                    let crates = targets
+                        .iter()
+                        .map(|target| target.crate_ref)
+                        .collect::<UniqueVec<_>>();
+                    snapshot
+                        .analysis_for_crates(crates.as_slice(), cancellation.token())?
+                        .with_current_source(source_view)
+                } else {
+                    let (analysis, build_summary) = snapshot
+                        .analysis_for_current_source(
+                            &source_targets,
+                            source_view,
+                            source_selection,
+                            cancellation.token(),
+                            |checkpoint| {
+                                tracing::trace!(
+                                    query,
+                                    phase = Self::current_source_checkpoint(checkpoint),
+                                    elapsed_us = phase_started.elapsed().as_micros(),
+                                    "document analysis phase"
+                                );
+                                phase_started = Instant::now();
+                                rg_std::check_cancel!(
+                                    cancellation,
+                                    Self::current_source_checkpoint(checkpoint)
+                                );
+                                Ok(())
+                            },
+                        )
+                        .context("prepare current document analysis")?;
+                    tracing::trace!(
+                        query,
+                        complete_current_source_build = build_summary.is_complete(),
+                        "current document bodies prepared"
+                    );
+                    analysis
+                };
                 DocumentAnalysis {
                     snapshot,
                     analysis,
@@ -295,14 +309,16 @@ impl<'a> QueryRunner<'a> {
             }
         };
 
-        tracing::trace!(
-            query,
-            source = prepared.source.name(),
-            selection = ?prepared.selection,
-            target_count = prepared.targets.len(),
-            elapsed_us = started.elapsed().as_micros(),
-            "document analysis prepared"
-        );
+        if query != "hover" {
+            tracing::trace!(
+                query,
+                source = prepared.source.name(),
+                selection = ?prepared.selection,
+                target_count = prepared.targets.len(),
+                elapsed_us = started.elapsed().as_micros(),
+                "document analysis prepared"
+            );
+        }
         Ok(Some(prepared))
     }
 
@@ -367,6 +383,7 @@ impl<'a> QueryRunner<'a> {
                 "completion",
                 document,
                 DocumentSelection::Position(position),
+                false,
                 cancellation,
             )
             .context("prepare completion analysis")?
@@ -473,6 +490,7 @@ impl<'a> QueryRunner<'a> {
                 "code_action",
                 &document,
                 DocumentSelection::Position(range.start),
+                false,
                 cancellation,
             )
             .context("prepare code action analysis")?
@@ -563,69 +581,100 @@ impl<'a> QueryRunner<'a> {
             .context("target document is absent from hover input")?;
         let path = document.source_path().to_path_buf();
         let started = Instant::now();
-        let Some(current) = self
-            .document_analysis(
-                "hover",
-                document,
-                DocumentSelection::Position(position),
-                cancellation,
-            )
-            .context("prepare hover analysis")?
-        else {
-            return Ok(None);
-        };
-
-        let mut hover = None;
-        // Destination source is prepared only when a link points to that file. Keep this
-        // conversion shared with goto requests so both features use the same editor positions.
-        let mut destinations =
-            CapturedNavigationDocuments::new(current.snapshot, &documents, cancellation.token());
-        let offset = current.offset();
-        for target in &current.targets {
-            let info = current
-                .analysis
-                .hover(target.crate_ref, target.context.file, offset)
-                .context("compute hover")?;
-            let Some(info) = info else {
-                continue;
-            };
-            let Some(value) = hover::hover(info, current.source.line_index(), |destination| {
-                Ok(
-                    match destinations
-                        .location_for_target(
-                            destination,
-                            (target.context.package, target.context.file),
-                            document,
-                            current.source.line_index(),
-                            current.analysis.current_source_view(),
-                        )
-                        .context("convert hover link destination")?
-                    {
-                        CapturedTargetLocation::Ready(location) => Some(location),
-                        CapturedTargetLocation::Unsafe | CapturedTargetLocation::Unavailable => {
-                            None
-                        }
-                    },
+        // Try published declaration names first. A local or expression cursor
+        // needs body facts, so release the probe's view before preparing them.
+        let mut declarations_only = true;
+        let mut preparation_us = 0;
+        loop {
+            rg_std::check_cancel!(cancellation, "before hover preparation");
+            let preparation_started = Instant::now();
+            let Some(current) = self
+                .document_analysis(
+                    "hover",
+                    document,
+                    DocumentSelection::Position(position),
+                    declarations_only,
+                    cancellation,
                 )
-            })
-            .context("render hover documentation")?
+                .context("prepare hover analysis")?
             else {
-                continue;
+                return Ok(None);
             };
-            hover = Some(value);
-            break;
-        }
+            preparation_us += preparation_started.elapsed().as_micros();
 
-        tracing::trace!(
-            path = %path.display(),
-            line = position.line,
-            character = position.character,
-            has_hover = hover.is_some(),
-            source = current.source.name(),
-            elapsed_ms = started.elapsed().as_millis(),
-            "hover query finished"
-        );
-        Ok(hover)
+            let mut hover = None;
+            // Destination source is prepared only when a link points to that file. Keep this
+            // conversion shared with goto requests so both features use the same editor positions.
+            let mut destinations = CapturedNavigationDocuments::new(
+                current.snapshot,
+                &documents,
+                cancellation.token(),
+            );
+            let offset = current.offset();
+            for target in &current.targets {
+                rg_std::check_cancel!(cancellation, "before hover crate interpretation");
+                let info = current
+                    .analysis
+                    .hover(
+                        target.crate_ref,
+                        target.context.file,
+                        offset,
+                        declarations_only,
+                    )
+                    .context("compute hover")?;
+                rg_std::check_cancel!(cancellation, "after hover crate interpretation");
+                let Some(info) = info else {
+                    continue;
+                };
+                let Some(value) = hover::hover(info, current.source.line_index(), |destination| {
+                    Ok(
+                        match destinations
+                            .location_for_target(
+                                destination,
+                                (target.context.package, target.context.file),
+                                document,
+                                current.source.line_index(),
+                                current.analysis.current_source_view(),
+                            )
+                            .context("convert hover link destination")?
+                        {
+                            CapturedTargetLocation::Ready(location) => Some(location),
+                            CapturedTargetLocation::Unsafe
+                            | CapturedTargetLocation::Unavailable => None,
+                        },
+                    )
+                })
+                .context("render hover documentation")?
+                else {
+                    continue;
+                };
+                hover = Some(value);
+                break;
+            }
+
+            if declarations_only && hover.is_none() {
+                declarations_only = false;
+                continue;
+            }
+            tracing::trace!(
+                query = "hover",
+                source = current.source.name(),
+                selection = ?current.selection,
+                target_count = current.targets.len(),
+                elapsed_us = preparation_us,
+                "document analysis prepared"
+            );
+            tracing::trace!(
+                path = %path.display(),
+                line = position.line,
+                character = position.character,
+                has_hover = hover.is_some(),
+                source = current.source.name(),
+                elapsed_ms = started.elapsed().as_millis(),
+                "hover query finished"
+            );
+            return Ok(hover);
+        }
     }
 
     /// Build the document outline directly from the syntax shown by the editor.
@@ -745,6 +794,7 @@ impl<'a> QueryRunner<'a> {
                 "inlay_hint",
                 &document,
                 DocumentSelection::Range(range),
+                false,
                 cancellation,
             )
             .context("prepare inlay hint analysis")?

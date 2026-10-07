@@ -139,7 +139,7 @@ fn current_impl_queries_share_context_across_targets_and_residency() {
                 if matches!(marker, "header" | "signature" | "receiver") {
                     assert!(
                         analysis
-                            .hover(crate_ref, file, offset)
+                            .hover(crate_ref, file, offset, false)
                             .expect("hover should resolve")
                             .is_some()
                     );
