@@ -4,7 +4,10 @@
 //! Exact accessors preserve the artifact boundaries between declarations and lookup indexes;
 //! [`SemanticIrReadTxn::package`] is the explicit path that reconstructs the broad package value.
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use anyhow::Context as _;
 use rg_ir_model::{CrateRef, DefMapRef, PackageSlot};
@@ -104,18 +107,27 @@ impl<'db> SemanticIrReadTxn<'db> {
             return Ok(());
         }
 
+        let next = AtomicUsize::new(0);
         std::thread::scope(|scope| {
             let mut readers = Vec::new();
-            for chunk in crates.chunks(crates.len().div_ceil(4)) {
+            for _ in 0..crates.len().min(4) {
+                let next = &next;
                 readers.push(
                     std::thread::Builder::new()
                         .name("lookup-artifacts".to_owned())
                         .spawn_scoped(scope, move || {
-                            for crate_ref in chunk {
+                            loop {
                                 rg_std::check_cancel!(
                                     cancellation,
                                     "prefetch visible lookup index"
                                 );
+                                // An unusually large artifact must not strand later reads behind it.
+                                // This counter only assigns work; transaction cells own the results.
+                                let Some(crate_ref) =
+                                    crates.get(next.fetch_add(1, Ordering::Relaxed))
+                                else {
+                                    break;
+                                };
                                 self.item_lookup_index(*crate_ref)?;
                             }
                             Ok::<_, anyhow::Error>(())
