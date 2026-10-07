@@ -668,7 +668,8 @@
               {
                 "message": "analysis query started",
                 "fields": {
-                  "label": "hover"
+                  "label": "hover",
+                  "queued_ms": "0"
                 },
                 "observedNs": 1060359173595678
               },
@@ -715,6 +716,7 @@
                 "fields": {
                   "elapsed_ms": "827",
                   "query": "hover",
+                  "queued_ms": "0",
                   "status": "ok"
                 },
                 "observedNs": 1060360043190849
@@ -733,7 +735,8 @@
               {
                 "message": "analysis query started",
                 "fields": {
-                  "label": "hover"
+                  "label": "hover",
+                  "queued_ms": "0"
                 },
                 "observedNs": 1060360044074197
               },
@@ -780,6 +783,7 @@
                 "fields": {
                   "elapsed_ms": "4",
                   "query": "hover",
+                  "queued_ms": "0",
                   "status": "ok"
                 },
                 "observedNs": 1060360048301688
@@ -798,7 +802,8 @@
               {
                 "message": "analysis query started",
                 "fields": {
-                  "label": "hover"
+                  "label": "hover",
+                  "queued_ms": "0"
                 },
                 "observedNs": 1060360049345357
               },
@@ -845,6 +850,7 @@
                 "fields": {
                   "elapsed_ms": "3",
                   "query": "hover",
+                  "queued_ms": "0",
                   "status": "ok"
                 },
                 "observedNs": 1060360052593280
@@ -863,7 +869,8 @@
               {
                 "message": "analysis query started",
                 "fields": {
-                  "label": "hover"
+                  "label": "hover",
+                  "queued_ms": "0"
                 },
                 "observedNs": 1060360053384283
               },
@@ -910,6 +917,7 @@
                 "fields": {
                   "elapsed_ms": "5",
                   "query": "hover",
+                  "queued_ms": "0",
                   "status": "ok"
                 },
                 "observedNs": 1060360058857388
@@ -928,7 +936,8 @@
               {
                 "message": "analysis query started",
                 "fields": {
-                  "label": "hover"
+                  "label": "hover",
+                  "queued_ms": "0"
                 },
                 "observedNs": 1060360060300105
               },
@@ -975,6 +984,7 @@
                 "fields": {
                   "elapsed_ms": "3",
                   "query": "hover",
+                  "queued_ms": "0",
                   "status": "ok"
                 },
                 "observedNs": 1060360063649471
@@ -993,7 +1003,8 @@
               {
                 "message": "analysis query started",
                 "fields": {
-                  "label": "hover"
+                  "label": "hover",
+                  "queued_ms": "0"
                 },
                 "observedNs": 1060360064350640
               },
@@ -1040,6 +1051,7 @@
                 "fields": {
                   "elapsed_ms": "3",
                   "query": "hover",
+                  "queued_ms": "0",
                   "status": "ok"
                 },
                 "observedNs": 1060360067884179
