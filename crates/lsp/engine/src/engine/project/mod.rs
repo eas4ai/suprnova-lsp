@@ -222,6 +222,20 @@ impl ProjectCoordinator {
         self.workspace_root = Some(workspace_root.clone());
         self.configuration = Some(configuration.clone());
         self.project.replace_saved(project);
+        // Configured exports were validated and merged before the saved project became visible.
+        // This publication event lets diagnostics establish availability before sending a query.
+        for input in &configuration.rustdoc_inputs {
+            tracing::trace!(
+                root = %workspace_root.display(),
+                generation = self.project.generation(),
+                manifest_path = %input.manifest_path.display(),
+                target_name = %input.target_name,
+                target_kind = %input.target_kind,
+                export_path = %input.export_path.display(),
+                item_path = %input.item_path,
+                "configured rustdoc declarations published"
+            );
+        }
         self.stale_source = None;
         let snapshot = self
             .project
