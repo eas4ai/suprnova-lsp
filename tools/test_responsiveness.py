@@ -150,6 +150,110 @@ class LedgerIntegrity(unittest.TestCase):
             observation.Diagnostic.source_only_observation(report)
 
 
+class SourceSeriesIntegrity(unittest.TestCase):
+    def setUp(self):
+        self.sessions = []
+        for session in range(20):
+            start = 1_000_000_000 * session
+            sent = [{"id": n + 2, "method": "textDocument/hover", "status": "success",
+                     "writtenNs": start + 100 + 20 * n, "receivedNs": start + 110 + 20 * n,
+                     "durationNs": 10} for n in range(6)]
+            raw = {"session": {"serverPid": session + 1000},
+                   "transport": [{"id": 1, "method": "initialize", "status": "success",
+                                  "writtenNs": start, "receivedNs": start + 10}, *sent],
+                   "results": [{"kind": "hover", "label": f"source-{n}", "transport": row,
+                                "text": "fn verify_password(&self, password: &str) -> Result<bool, FrameworkError>"}
+                               for n, row in enumerate(sent)],
+                   "lifecycle": [
+                       {"method": lsp.ACTIVE_WORKSPACE_CHANGED, "receivedNs": start + 90,
+                        "params": {"root": str(observation.APP), "state": "ready"}},
+                       {"method": "suprnova-lsp/rustdocStatus", "receivedNs": start + 99,
+                        "params": {"workspaceRoot": str(observation.APP), "generation": 1, "state": "running"}}],
+                   "stages": [{"message": "editor document analysis route published", "observedNs": start + 95,
+                               "fields": {"path": str(observation.APP / "src/models/user.rs"), "ready": True}}]}
+            for _ in sent:
+                raw["stages"].extend([
+                    {"message": "analysis query completed", "fields": {
+                        "query": "hover", "status": "ok", "queued_ms": "0", "elapsed_ms": "0"}},
+                    {"message": "document analysis prepared", "fields": {
+                        "query": "hover", "source": "saved_exact", "elapsed_us": "0"}},
+                ])
+            plan = observation.Diagnostic.workload_plan("faster-builds", Path("/tmp/owned"), "source")
+            plan["queries"] = [{"kind": "hover", "label": f"source-{n}", "marker": "pub fn verify_password", "delta": 7}
+                               for n in range(6)]
+            plan["workerRunningBarrier"] = True
+            self.sessions.append({"raw": raw, "plan": plan})
+
+    def test_first_and_repeated_cohorts_are_separate_and_preserve_raw_counts(self):
+        for session in self.sessions:
+            row = session["raw"]["results"][0]["transport"]
+            row.update(durationNs=200_000_000, receivedNs=row["writtenNs"] + 200_000_000)
+            # Keep subsequent requests sequential after that slow first result.
+            for result in session["raw"]["results"][1:]:
+                later = result["transport"]
+                later["writtenNs"] += 200_000_000
+                later["receivedNs"] += 200_000_000
+        summary = observation.SourceSeries.assess(self.sessions, "faster-builds")
+        self.assertEqual(summary["first"]["count"], 20)
+        self.assertEqual(summary["repeated"]["count"], 100)
+        self.assertEqual(summary["first"]["p95Ns"], 200_000_000)
+        self.assertFalse(summary["first"]["belowTarget"])
+        self.assertTrue(summary["repeated"]["belowTarget"])
+        self.assertEqual(summary["first"]["rawNs"], [200_000_000] * 20)
+        self.assertIn("unverified", summary["acceptance"])
+
+    def test_rejects_missing_duplicate_or_reused_sessions_and_dropped_replies(self):
+        for violation in ("missing-session", "duplicate-session", "missing-initialize", "dropped-reply"):
+            sessions = copy.deepcopy(self.sessions)
+            if violation == "missing-session":
+                sessions.pop()
+            elif violation == "duplicate-session":
+                sessions[-1] = copy.deepcopy(sessions[0])
+            elif violation == "missing-initialize":
+                sessions[0]["raw"]["transport"].pop(0)
+            else:
+                sessions[0]["raw"]["results"].pop(0)
+            with self.subTest(violation=violation), self.assertRaises(ValueError):
+                observation.SourceSeries.assess(sessions, "faster-builds")
+
+    def test_requires_running_worker_for_each_entire_response(self):
+        for violation in ("other-root", "late-start", "settled", "newer-pending", "finished-during-response"):
+            sessions = copy.deepcopy(self.sessions)
+            events = sessions[0]["raw"]["lifecycle"]
+            worker = events[-1]
+            if violation == "other-root":
+                worker["params"]["workspaceRoot"] = "/other"
+            elif violation == "late-start":
+                worker["receivedNs"] = 101
+            elif violation == "settled":
+                worker["params"]["state"] = "current"
+            else:
+                newer = copy.deepcopy(worker)
+                newer["receivedNs"] = 99 if violation == "newer-pending" else 105
+                newer["params"].update(generation=2, state="pending")
+                events.append(newer)
+            with self.subTest(violation=violation), self.assertRaisesRegex(ValueError, "worker"):
+                observation.SourceSeries.assess(sessions, "faster-builds")
+
+    def test_rejects_mixed_mode_and_configuration(self):
+        for violation in ("mode", "automatic-disabled", "body-overlay", "warm-up", "changed-symbol"):
+            sessions = copy.deepcopy(self.sessions)
+            plan = sessions[0]["plan"]
+            if violation == "mode":
+                plan["initializationOptions"]["indexing"]["performancePreference"] = "lower-peak-memory"
+            elif violation == "automatic-disabled":
+                plan["initializationOptions"]["rustdoc"]["automatic"]["enabled"] = False
+            elif violation == "body-overlay":
+                plan["text"] = "changed body"
+            elif violation == "warm-up":
+                sessions[0]["raw"]["transport"].insert(1, {
+                    "id": 50, "method": "textDocument/hover", "status": "success"})
+            else:
+                plan["queries"][0]["marker"] = "other_symbol"
+            with self.subTest(violation=violation), self.assertRaises(ValueError):
+                observation.SourceSeries.assess(sessions, "faster-builds")
+
+
 class PipeTiming(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.clock = 100
@@ -330,7 +434,7 @@ class PipeTiming(unittest.IsolatedAsyncioTestCase):
 
         self.client.observation.notification(status(1, "current"), 100)
         self.client.observation.notification(status(2, "pending"), 100)
-        waiter = asyncio.create_task(self.client.wait_for_rustdoc_current(observation.APP))
+        waiter = asyncio.create_task(self.client.wait_for_rustdoc_state(observation.APP, "current"))
         self.requests.append(waiter)
         await asyncio.sleep(0)
         self.client.observation.notification(status(1, "current"), 110)
@@ -346,7 +450,21 @@ class PipeTiming(unittest.IsolatedAsyncioTestCase):
             "workspaceRoot": str(observation.APP), "generation": 3, "state": "failed",
             "message": "export rejected"}}, 100)
         with self.assertRaisesRegex(lsp.LspQueryError, "export rejected"):
-            await self.client.wait_for_rustdoc_current(observation.APP)
+            await self.client.wait_for_rustdoc_state(observation.APP, "current")
+
+    async def test_running_worker_barrier_waits_for_latest_generation_without_hover(self):
+        self.client.observation.notification({"method": "suprnova-lsp/rustdocStatus", "params": {
+            "workspaceRoot": str(observation.APP), "generation": 1, "state": "running"}}, 100)
+        self.client.observation.notification({"method": "suprnova-lsp/rustdocStatus", "params": {
+            "workspaceRoot": str(observation.APP), "generation": 2, "state": "pending"}}, 100)
+        waiter = asyncio.create_task(self.client.wait_for_rustdoc_state(observation.APP, "running"))
+        self.requests.append(waiter)
+        await asyncio.sleep(0)
+        self.assertFalse(waiter.done())
+        self.client.observation.notification({"method": "suprnova-lsp/rustdocStatus", "params": {
+            "workspaceRoot": str(observation.APP), "generation": 2, "state": "running"}}, 120)
+        await asyncio.wait_for(waiter, 1)
+        self.assertFalse(self.messages, "worker overlap cannot use a hover warm-up")
 
     async def test_idle_barrier_waits_for_purge_after_successful_reply(self):
         self.drained.set()

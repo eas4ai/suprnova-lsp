@@ -501,6 +501,9 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
     document_barrier = plan.get("documentReadinessBarrier", False)
     if type(document_barrier) is not bool:
         fail("documentReadinessBarrier must be a boolean")
+    worker_barrier = plan.get("workerRunningBarrier", False)
+    if type(worker_barrier) is not bool:
+        fail("workerRunningBarrier must be a boolean")
     hover_cleanup_barrier = plan.get("hoverCleanupBarrier", False)
     if type(hover_cleanup_barrier) is not bool:
         fail("hoverCleanupBarrier must be a boolean")
@@ -509,6 +512,8 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
     rustdoc_barrier = plan.get("rustdocBarrier", "none")
     if rustdoc_barrier not in {"none", "before-queries", "after-queries"}:
         fail("rustdocBarrier must be none, before-queries, or after-queries")
+    if worker_barrier and rustdoc_barrier == "before-queries":
+        fail("workerRunningBarrier cannot also wait for current rustdoc before queries")
     rustdoc_timeout = plan.get("rustdocTimeoutMs", options.timeout_ms)
     if type(rustdoc_timeout) is not int or not 1 <= rustdoc_timeout <= 3_600_000:
         fail("rustdocTimeoutMs must be an integer from 1 to 3600000")
@@ -552,6 +557,7 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
         "initializationOptions": initialization_options,
         "readinessBarrier": readiness_barrier,
         "documentReadinessBarrier": document_barrier,
+        "workerRunningBarrier": worker_barrier,
         "hoverCleanupBarrier": hover_cleanup_barrier,
         "rustdocBarrier": rustdoc_barrier,
         "rustdocTimeoutMs": rustdoc_timeout,
@@ -629,19 +635,19 @@ class TransportObservations:
             raise LspQueryError("document analysis route is unavailable")
         return True
 
-    def rustdoc_current(self, root: Path) -> bool:
+    def rustdoc_state(self, root: Path, state: str) -> bool:
         events = [event["params"] for event in self.events
                   if event["method"] == "suprnova-lsp/rustdocStatus"
                   and event["params"].get("workspaceRoot") in {str(root), root.as_uri()}]
         if not events:
             return False
-        if any(type(event.get("generation")) is not int for event in events):
+        if any(type(event.get("generation")) is not int or event["generation"] < 0 for event in events):
             raise LspQueryError("worker readiness lacks a generation identity")
         generation = max(event["generation"] for event in events)
         latest = next(event for event in reversed(events) if event["generation"] == generation)
         if latest.get("state") == "failed":
-            raise LspQueryError("worker failed before current: " + str(latest.get("message")))
-        return latest.get("state") == "current"
+            raise LspQueryError("worker failed before " + state + ": " + str(latest.get("message")))
+        return latest.get("state") == state
 
     def hover_cleanup_complete(self) -> bool:
         """The serialized engine logs each purge after releasing that hover's loads."""
@@ -1045,9 +1051,9 @@ class LspClient:
         await self.wait_for_observation(lambda: self.observation.document_ready(path),
             "document route publication; enable rg_lsp_server=debug logging")
 
-    async def wait_for_rustdoc_current(self, root: Path, timeout_ms: Optional[int] = None) -> None:
-        await self.wait_for_observation(lambda: self.observation.rustdoc_current(root),
-            "current rustdoc publication", timeout_ms)
+    async def wait_for_rustdoc_state(self, root: Path, state: str, timeout_ms: Optional[int] = None) -> None:
+        await self.wait_for_observation(lambda: self.observation.rustdoc_state(root, state),
+            state + " rustdoc worker", timeout_ms)
 
     async def wait_for_notification(
         self,
@@ -1376,8 +1382,10 @@ async def run(argv: Sequence[str]) -> None:
             await wait_until_ready(client, options.timeout_ms)
         if plan["documentReadinessBarrier"]:
             await client.wait_for_document_ready(file_path)
+        if plan["workerRunningBarrier"]:
+            await client.wait_for_rustdoc_state(root, "running")
         if plan["rustdocBarrier"] == "before-queries":
-            await client.wait_for_rustdoc_current(root, plan["rustdocTimeoutMs"])
+            await client.wait_for_rustdoc_state(root, "current", plan["rustdocTimeoutMs"])
         if plan["deferredBarrier"] == "before-queries":
             await wait_until_indexing_settled(client, options.timeout_ms)
             if memory_task is not None:
@@ -1525,7 +1533,7 @@ async def run(argv: Sequence[str]) -> None:
                     }
                 )
         if plan["rustdocBarrier"] == "after-queries":
-            await client.wait_for_rustdoc_current(root, plan["rustdocTimeoutMs"])
+            await client.wait_for_rustdoc_state(root, "current", plan["rustdocTimeoutMs"])
         if plan["deferredBarrier"] == "after-queries":
             await wait_until_indexing_settled(client, options.timeout_ms)
             if memory_task is not None:
@@ -1563,10 +1571,12 @@ async def run(argv: Sequence[str]) -> None:
     output = {
         "file": os.path.relpath(str(file_path), str(root)),
         "binary": os.path.relpath(str(binary), str(TOOL_ROOT)),
+        "session": {"serverPid": client.process.pid} if plan["workerRunningBarrier"] else None,
         "barriers": {
             "readiness": plan["readinessBarrier"],
             "deferred": plan["deferredBarrier"],
             "rustdoc": plan["rustdocBarrier"] if plan["rustdocBarrier"] != "none" else None,
+            "workerRunning": True if plan["workerRunningBarrier"] else None,
             "hoverCleanup": True if plan["hoverCleanupBarrier"] else None,
         },
         "results": results,
