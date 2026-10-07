@@ -175,15 +175,17 @@ fn lookup_prefetch_overlaps_bounded_reads_and_releases_them_with_the_transaction
         let request = scope.spawn(|| txn.prefetch_lookup_indexes(&crates, &cancellation));
         // Each reader blocks inside its first load. Observe the overlap before releasing any read;
         // the deadline only bounds a broken implementation, not a performance assertion.
-        let overlap = LookupLoader::started_reads(&started, 4);
+        let overlap = LookupLoader::started_reads(&started, 8);
         loader.release();
         request.join().unwrap().unwrap();
         assert_eq!(
-            overlap.expect("four artifact readers should overlap").len(),
-            4
+            overlap
+                .expect("eight artifact readers should overlap")
+                .len(),
+            8
         );
     });
-    assert_eq!(loader.state.peak.load(Ordering::SeqCst), 4);
+    assert_eq!(loader.state.peak.load(Ordering::SeqCst), 8);
     assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
     assert_eq!(loader.state.reads.lock().unwrap().len(), 12);
     for crate_ref in crates {
@@ -219,7 +221,7 @@ fn lookup_prefetch_cancellation_stops_each_readers_next_load() {
     let cancellation = CancellationToken::new();
     std::thread::scope(|scope| {
         let request = scope.spawn(|| txn.prefetch_lookup_indexes(&crates, &cancellation));
-        let overlap = LookupLoader::started_reads(&started, 4);
+        let overlap = LookupLoader::started_reads(&started, 8);
         cancellation.cancel();
         loader.release();
         let error = request
@@ -229,7 +231,7 @@ fn lookup_prefetch_cancellation_stops_each_readers_next_load() {
         assert!(error.downcast_ref::<rg_std::Cancelled>().is_some());
         overlap.expect("each reader reaches the controlled first load");
     });
-    assert_eq!(loader.state.reads.lock().unwrap().len(), 4);
+    assert_eq!(loader.state.reads.lock().unwrap().len(), 8);
     assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
 }
 
