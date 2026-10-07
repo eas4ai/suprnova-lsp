@@ -44,12 +44,12 @@ class Diagnostic:
         return int(value) * unit_ns
 
     @staticmethod
-    def inventory():
+    def inventory(root=APP):
         """Hash application Rust/Cargo inputs without reading secrets or changing Git state."""
-        if APP.resolve() == PROTECTED or PROTECTED in APP.resolve().parents:
+        if root.resolve() == PROTECTED or PROTECTED in root.resolve().parents:
             raise ValueError("application points at the protected framework checkout")
         files = {}
-        for directory, children, names in os.walk(APP, followlinks=False):
+        for directory, children, names in os.walk(root, followlinks=False):
             children[:] = sorted(name for name in children if name not in {".git", "target", "node_modules"})
             for name in sorted(names):
                 path = Path(directory) / name
@@ -57,14 +57,22 @@ class Diagnostic:
                     resolved = path.resolve()
                     if resolved == PROTECTED or PROTECTED in resolved.parents:
                         raise ValueError("application source points at the protected checkout")
-                    files[str(path.relative_to(APP))] = hashlib.sha256(path.read_bytes()).hexdigest()
+                    files[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
         for name in (".cargo/config.toml", ".cargo/config"):
-            path = APP / name
+            path = root / name
             if path.exists():
-                if not path.resolve().is_relative_to(APP.resolve()):
+                if not path.resolve().is_relative_to(root.resolve()):
                     raise ValueError("application Cargo configuration escapes its checkout")
                 files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
         return files
+
+    @classmethod
+    def runtime_fingerprint(cls):
+        """Fingerprint native source independently of commits that also change observers."""
+        sources = cls.inventory(ROOT / "crates")
+        for name in ("Cargo.lock", "Cargo.toml", "rust-toolchain.toml"):
+            sources[name] = hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+        return hashlib.sha256(json.dumps(sources, sort_keys=True).encode()).hexdigest()
 
     @classmethod
     def source_observation(cls, report, source="saved_exact", count=3):
@@ -281,6 +289,7 @@ class Diagnostic:
         directory = runner.create_run_directory(self.run_kind)
         commands, reports = [], {}
         original = self.inventory()
+        original_runtime = self.runtime_fingerprint()
         build_environment = dict(os.environ, RUSTUP_TOOLCHAIN="1.98.1", CARGO_BUILD_JOBS="2",
                                  CARGO_NET_OFFLINE="true", CARGO_TARGET_DIR=str(runner.BUILD_ROOT),
                                  CARGO_BUILD_BUILD_DIR=str(ROOT / "target/agent-debug/build-intermediates"))
@@ -301,6 +310,7 @@ class Diagnostic:
         identity = {"purpose": self.purpose, "workload": workload, "application": str(APP),
                     "openFileLimits": limits,
                     "sources": original, "frameworkRevision": REVISION, "buildProfile": "release",
+                    "runtimeSourcesSha256": original_runtime,
                     "producerToolchain": "nightly-2026-08-19",
                     "cacheState": "existing LSP/compiler caches; fresh owned export artifact root",
                     "observers": {name: hashlib.sha256((ROOT / "tools" / name).read_bytes()).hexdigest()
@@ -320,8 +330,9 @@ class Diagnostic:
             identity["buildCompiler"] = await command("build-compiler", "rustc", ["-vV"], env=build_environment)
             identity["producerCompiler"] = await command("producer-compiler", "rustc", ["-vV"])
             identity["commit"] = (await command("commit", "git", ["rev-parse", "HEAD"])).strip()
-            await command("runtime-inputs", "git", ["diff", "--exit-code", "HEAD", "--",
+            runtime_diff = await command("runtime-inputs", "git", ["diff", "HEAD", "--",
                 "crates", "Cargo.lock", "Cargo.toml", "rust-toolchain.toml"])
+            identity["runtimeDiffSha256"] = hashlib.sha256(runtime_diff.encode()).hexdigest()
             if not no_build:
                 build = runner.build_spec(runner.RunnerOptions(build_profile="release"))
                 await command("build", build.command, [*build.args, "--locked", "--offline"], env=build_environment, timeout=20 * 60_000)
@@ -340,6 +351,7 @@ class Diagnostic:
                       "observationComplete": complete,
                         "applicationInputsUnchanged": original == after,
                         "binaryUnchanged": binary_unchanged,
+                        "runtimeSourcesUnchanged": original_runtime == self.runtime_fingerprint(),
                       "processCleanup": runner.summarize_cleanup(commands),
                       "requirements": {f"RSP-{n:03}": "unverified" for n in range(1, 7)}}
             if not complete:
@@ -351,8 +363,12 @@ class Diagnostic:
                 raise ValueError("application Rust/Cargo inputs changed during observation")
             if binary_unchanged is False:
                 raise ValueError("managed server binary changed during observation")
+            if not result["runtimeSourcesUnchanged"]:
+                raise ValueError("native source changed during observation")
         for mode, report in reports.items():
-            print(mode, json.dumps(report["summary"]))
+            print(mode, json.dumps({key: value for key, value in report["summary"].items()
+                                   if key not in {"stages", "workerGenerations"}}))
+        return directory / "report.json"
 
 
 class SourceSeries(Diagnostic):
