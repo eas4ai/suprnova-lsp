@@ -487,3 +487,102 @@ fn make<T>() -> Builder<T> { loop {} }
     }
     assert_eq!(compared, 8);
 }
+
+#[test]
+fn absent_named_trait_surface_does_not_read_lexical_scopes() {
+    #[derive(Clone, Copy)]
+    struct ScopeTrap;
+
+    impl rg_def_map::DefMapSource for ScopeTrap {
+        type Error = rg_package_store::PackageStoreError;
+
+        fn def_map_for_origin(
+            &self,
+            _: DefMapRef,
+        ) -> Result<Option<&rg_def_map::DefMap>, Self::Error> {
+            panic!("an empty declaration surface must not restore scope graphs");
+        }
+
+        fn crate_is_proc_macro(&self, _: CrateRef) -> Result<bool, Self::Error> {
+            Ok(false)
+        }
+
+        fn extern_root(
+            &self,
+            _: CrateRef,
+            _: &str,
+        ) -> Result<Option<rg_ir_model::ModuleRef>, Self::Error> {
+            panic!("empty trait lookup must not read extern roots");
+        }
+
+        fn extern_roots(
+            &self,
+            _: CrateRef,
+        ) -> Result<Vec<(String, rg_ir_model::ModuleRef)>, Self::Error> {
+            panic!("empty trait lookup must not enumerate extern roots");
+        }
+
+        fn prelude_module(
+            &self,
+            _: CrateRef,
+        ) -> Result<Option<rg_ir_model::ModuleRef>, Self::Error> {
+            panic!("empty trait lookup must not read the prelude");
+        }
+
+        fn root_module(&self, _: CrateRef) -> Result<Option<rg_ir_model::ModuleRef>, Self::Error> {
+            panic!("empty trait lookup must not read root modules");
+        }
+    }
+
+    let fixture = crate::testonly::BodyIrFixture::build(
+        r#"
+//- /Cargo.toml
+[package]
+name = "empty_trait_surface"
+version = "0.1.0"
+edition = "2024"
+//- /src/lib.rs
+fn inspect() {}
+"#,
+    );
+    let target = body_ref().crate_ref;
+    let bodies = fixture
+        .body_ir_db()
+        .resident_package(target.package)
+        .unwrap();
+    let body = &bodies.crate_bodies(target.crate_id).unwrap().bodies()[0];
+    let def_map = fixture
+        .def_map_db()
+        .read_txn(rg_def_map::DefMapLoader::resident_only("trait fixture"));
+    let items = fixture
+        .semantic_ir_db()
+        .read_txn(rg_semantic_ir::SemanticIrLoader::resident_only(
+            "trait fixture",
+        ));
+    let cancellation = CancellationToken::new();
+    let lookup = rg_semantic_ir::ItemLookupQuery::build_from(
+        &rg_semantic_ir::CrateItemQuery::new(&def_map, &items, target),
+        &cancellation,
+    )
+    .unwrap();
+    let context = crate::resolution::BodyResolutionContext::new(
+        ScopeTrap,
+        &items,
+        body_ref(),
+        body,
+        &lookup,
+        cancellation,
+    );
+    for surface in [
+        crate::resolution::cache::BodyTraitSurface::FunctionNamed("query"),
+        crate::resolution::cache::BodyTraitSurface::ConstNamed("query"),
+    ] {
+        assert!(
+            context
+                .traits()
+                .refs_for_surface(rg_ir_model::ScopeId(0), surface)
+                .unwrap()
+                .is_empty()
+        );
+    }
+}

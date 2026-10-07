@@ -153,8 +153,14 @@ where
                     .context("infer block result")?;
             }
             ExprKind::Call { callee, ref args } => {
+                let started = std::time::Instant::now();
                 self.infer_optional(callee, &self.cx.unknown())
                     .context("infer optional expression")?;
+                tracing::trace!(
+                    phase = "callee",
+                    elapsed_us = started.elapsed().as_micros(),
+                    "body inference phase"
+                );
                 if let Some(callee) = callee {
                     let callee_ty = self.inference.root_resolved_expr_ty(callee);
                     if matches!((callee_ty).shape(), TyShape::Adt(_)) {

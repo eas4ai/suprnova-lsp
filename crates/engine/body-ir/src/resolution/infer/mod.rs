@@ -101,7 +101,13 @@ where
         let facts = declarations
             .with_solver(|solver| {
                 let cx = solver.interner();
+                let started = std::time::Instant::now();
                 let env = cx.parameter_environment(self.body.owner().generic_def().into());
+                tracing::trace!(
+                    phase = "parameter environment",
+                    elapsed_us = started.elapsed().as_micros(),
+                    "body inference phase"
+                );
                 BodyInference {
                     context: self.context.clone(),
                     body: self.body,
@@ -178,11 +184,23 @@ where
     /// Infer the body once, finish pending semantic work, then publish durable facts.
     #[rg_std::cancelable("start body inference", token = self.context)]
     pub(crate) fn infer_body(mut self) -> anyhow::Result<Option<BodyFacts>> {
+        let started = std::time::Instant::now();
         // Make declaration types available before visiting any parameter uses or return values.
         self.infer_parameters(self.hover_binding.is_none())
             .context("infer function parameters")?;
+        tracing::trace!(
+            phase = "function parameters",
+            elapsed_us = started.elapsed().as_micros(),
+            "body inference phase"
+        );
+        let started = std::time::Instant::now();
         self.infer_expr(self.body.root_expr(), &self.return_ty.clone())
             .context("infer root expression")?;
+        tracing::trace!(
+            phase = "root expression",
+            elapsed_us = started.elapsed().as_micros(),
+            "body inference phase"
+        );
         if self.hover_binding.is_some() && !self.hover_type_settled {
             rg_std::check_cancel!(self.context, "unfinished binding hover");
             return Ok(None);

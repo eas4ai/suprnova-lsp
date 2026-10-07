@@ -83,14 +83,30 @@ where
                 };
                 let mut traits = body_traits.iter().copied().collect::<UniqueVec<_>>();
                 traits.extend(saved_traits);
+                tracing::trace!(candidate_count = traits.len(), candidates = ?traits, "body trait surface discovered");
+
+                // No visible declaration provides this name, so lexical scope cannot add a
+                // candidate. Avoid restoring scope graphs for an empty intersection.
+                if traits.is_empty() {
+                    rg_std::check_cancel!(self.context, "empty body trait surface");
+                    return Ok(traits);
+                }
 
                 // Declaration indexes answer which traits *could* provide this item. Rust's
                 // implicit lookup then asks the independent lexical question: which of those
                 // traits are in method scope at this use site? Both facts are stable for one
                 // immutable body, so deferred lookups reuse this filtered result.
-                let traits_in_scope = self
-                    .traits_in_scope(scope)
-                    .map_err(OperationError::Source)?;
+                let traits_in_scope = match surface {
+                    BodyTraitSurface::FunctionNamed(_) | BodyTraitSurface::ConstNamed(_) => {
+                        Arc::new(
+                            self.collect_traits_in_scope(scope, Some(&traits))
+                                .map_err(OperationError::Source)?,
+                        )
+                    }
+                    _ => self
+                        .traits_in_scope(scope)
+                        .map_err(OperationError::Source)?,
+                };
                 rg_std::check_cancel!(self.context, "body trait surface");
                 Ok(traits
                     .into_iter()
@@ -126,12 +142,13 @@ where
     ) -> Result<Arc<HashSet<TraitDefRef>>, PackageStoreError> {
         self.context
             .trait_cache()
-            .scope_or_try_init(scope, || self.collect_traits_in_scope(scope))
+            .scope_or_try_init(scope, || self.collect_traits_in_scope(scope, None))
     }
 
     fn collect_traits_in_scope(
         &self,
         scope: ScopeId,
+        candidates: Option<&UniqueVec<TraitDefRef>>,
     ) -> Result<HashSet<TraitDefRef>, PackageStoreError> {
         let def_maps = self.context.def_map_query();
         let body_scope = ModuleRef {
@@ -139,8 +156,39 @@ where
             module: ModuleId(scope.0),
         };
         let mut traits = HashSet::new();
+        // Candidate identities already came from trait declarations. Translate only that small
+        // set, so scope visibility never has to classify every re-exported dependency item.
+        let candidate_defs = candidates
+            .map(|candidates| {
+                candidates
+                    .iter()
+                    .filter_map(|candidate| {
+                        self.context
+                            .item_query()
+                            .trait_data(*candidate)
+                            .transpose()
+                            .map(|data| data.map(|data| data.local_def))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?;
+        let candidate_defs = candidate_defs.as_deref();
 
-        self.push_local_traits(&mut traits, def_maps.traits_in_lexical_scope(body_scope)?)?;
+        self.push_local_traits(
+            &mut traits,
+            def_maps.traits_in_lexical_scope(body_scope, candidate_defs)?,
+        )?;
+
+        // If every declaration for this name is already imported in the body, outer modules and
+        // the prelude cannot change the intersection. The named-surface cache owns this narrower
+        // result; it must not replace the complete scope cache used by completion.
+        if candidates.is_some_and(|candidates| {
+            candidates
+                .iter()
+                .all(|candidate| traits.contains(candidate))
+        }) {
+            return Ok(traits);
+        }
 
         // Saved source overlays can resolve first through a body-owned module and then through
         // the original crate module. Both modules may contribute trait candidates even when they
@@ -148,14 +196,14 @@ where
         let owner_module = self.context.body().owner_module();
         self.push_local_traits(
             &mut traits,
-            def_maps.traits_in_unqualified_scope(owner_module)?,
+            def_maps.traits_in_unqualified_scope(owner_module, candidate_defs)?,
         )?;
 
         let fallback_module = self.context.body().fallback_module();
         if fallback_module != owner_module {
             self.push_local_traits(
                 &mut traits,
-                def_maps.traits_in_unqualified_scope(fallback_module)?,
+                def_maps.traits_in_unqualified_scope(fallback_module, candidate_defs)?,
             )?;
         }
 

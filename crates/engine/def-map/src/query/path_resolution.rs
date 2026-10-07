@@ -650,12 +650,17 @@ impl<E: CrateResolutionEnv + ?Sized> ScopeResolver<'_, E> {
         &self,
         importing_module: ModuleRef,
         source_module: ModuleRef,
+        accept: impl Fn(Namespace, DefId) -> bool,
     ) -> Result<ModuleScopeBuilder, E::Error> {
         let mut visible_scope = ModuleScopeBuilder::default();
         for (name, entry) in self.env.module_scope_entries(source_module)? {
             for namespace in Namespace::ALL {
                 for binding in entry.bindings(namespace) {
-                    if self.binding_is_visible(importing_module, binding)? {
+                    // A named lookup can reject unrelated identities before visibility follows
+                    // their routes into dependency scope graphs.
+                    if accept(namespace, binding.def)
+                        && self.binding_is_visible(importing_module, binding)?
+                    {
                         visible_scope.insert_binding(name, namespace, binding.clone());
                     }
                 }

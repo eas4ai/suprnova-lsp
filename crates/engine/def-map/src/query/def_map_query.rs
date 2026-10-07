@@ -243,9 +243,9 @@ where
         importing_module: ModuleRef,
         source_module: ModuleRef,
     ) -> Result<VisibleScopeDefs, S::Error> {
-        let scope = self
-            .scope_resolver()
-            .visible_scope(importing_module, source_module)?;
+        let scope =
+            self.scope_resolver()
+                .visible_scope(importing_module, source_module, |_, _| true)?;
         let mut defs = VisibleScopeDefs::new(&scope, VisibleScopeOrigin::ModuleScope, false);
         defs.sort();
         Ok(defs)
@@ -269,6 +269,7 @@ where
     pub fn traits_in_lexical_scope(
         &self,
         importing_module: ModuleRef,
+        candidates: Option<&[LocalDefRef]>,
     ) -> Result<UniqueVec<LocalDefRef>, S::Error> {
         let resolver = self.scope_resolver();
         let mut traits = UniqueVec::new();
@@ -276,13 +277,17 @@ where
         let no_shadowed_names = FxHashSet::default();
 
         while let Some(module_ref) = current {
-            let scope = resolver.visible_scope(importing_module, module_ref)?;
-            self.push_named_traits(&mut traits, &scope, &no_shadowed_names)?;
+            let scope =
+                resolver.visible_scope(importing_module, module_ref, |namespace, def| {
+                    namespace == Namespace::Types && candidates.is_none_or(|candidates|
+                    matches!(def, DefId::Local(local_def) if candidates.contains(&local_def)))
+                })?;
+            self.push_named_traits(&mut traits, &scope, &no_shadowed_names, candidates)?;
 
             let Some(module) = self.source.module_data(module_ref)? else {
                 break;
             };
-            self.push_unnamed_traits(&mut traits, &resolver, importing_module, module)?;
+            self.push_unnamed_traits(&mut traits, &resolver, importing_module, module, candidates)?;
 
             if !matches!(module.origin, ModuleOrigin::Synthetic { .. }) {
                 break;
@@ -305,26 +310,53 @@ where
     pub fn traits_in_unqualified_scope(
         &self,
         importing_module: ModuleRef,
+        candidates: Option<&[LocalDefRef]>,
     ) -> Result<UniqueVec<LocalDefRef>, S::Error> {
         let resolver = self.scope_resolver();
-        let current_scope = resolver.visible_scope(importing_module, importing_module)?;
+        let accept = |namespace, def| {
+            namespace == Namespace::Types && candidates.is_none_or(|candidates|
+            matches!(def, DefId::Local(local_def) if candidates.contains(&local_def)))
+        };
+        let current_scope = resolver.visible_scope(importing_module, importing_module, accept)?;
         let no_shadowed_names = FxHashSet::default();
-        let occupied_type_names = current_scope
+        let mut occupied_type_names = current_scope
             .entries()
             .filter(|(_, entry)| !entry.bindings(Namespace::Types).is_empty())
             .map(|(name, _)| name.clone())
             .collect::<FxHashSet<_>>();
 
         let mut traits = UniqueVec::new();
-        self.push_named_traits(&mut traits, &current_scope, &no_shadowed_names)?;
+        self.push_named_traits(&mut traits, &current_scope, &no_shadowed_names, candidates)?;
         if let Some(module) = self.source.module_data(importing_module)? {
-            self.push_unnamed_traits(&mut traits, &resolver, importing_module, module)?;
+            self.push_unnamed_traits(&mut traits, &resolver, importing_module, module, candidates)?;
         }
 
         let crate_ref = importing_module.origin.origin_crate();
         if let Some(prelude) = self.source.prelude_module(crate_ref)? {
-            let prelude_scope = resolver.visible_scope(importing_module, prelude)?;
-            self.push_named_traits(&mut traits, &prelude_scope, &occupied_type_names)?;
+            let prelude_scope = resolver.visible_scope(importing_module, prelude, accept)?;
+            if candidates.is_some() {
+                // The filtered current scope omits unrelated types. A same-named type still
+                // shadows a prelude trait, so check those few spellings through normal resolution.
+                for (name, _) in prelude_scope.entries() {
+                    if !resolver
+                        .resolve_lexical_name_in_module(
+                            importing_module,
+                            importing_module,
+                            name.as_str(),
+                            crate::NamespaceSet::TYPES,
+                        )?
+                        .is_empty()
+                    {
+                        occupied_type_names.insert(name.clone());
+                    }
+                }
+            }
+            self.push_named_traits(
+                &mut traits,
+                &prelude_scope,
+                &occupied_type_names,
+                candidates,
+            )?;
         }
 
         Ok(traits)
@@ -336,6 +368,7 @@ where
         traits: &mut UniqueVec<LocalDefRef>,
         scope: &ModuleScopeBuilder,
         shadowed_names: &FxHashSet<Name>,
+        candidates: Option<&[LocalDefRef]>,
     ) -> Result<(), S::Error> {
         for (name, entry) in scope.entries() {
             if shadowed_names.contains(name) {
@@ -345,8 +378,10 @@ where
                 let DefId::Local(local_def) = binding.def else {
                     continue;
                 };
-                if self.source.local_def_data(local_def)?.map(|data| data.kind)
-                    == Some(LocalDefKind::Trait)
+                if candidates.is_some_and(|candidates| candidates.contains(&local_def))
+                    || candidates.is_none()
+                        && self.source.local_def_data(local_def)?.map(|data| data.kind)
+                            == Some(LocalDefKind::Trait)
                 {
                     traits.push(local_def);
                 }
@@ -362,10 +397,12 @@ where
         resolver: &ScopeResolver<'_, Self>,
         importing_module: ModuleRef,
         module: &ModuleData,
+        candidates: Option<&[LocalDefRef]>,
     ) -> Result<(), S::Error> {
         for binding in module.scope.unnamed_trait_bindings() {
-            if resolver.binding_is_visible(importing_module, binding)?
-                && let DefId::Local(local_def) = binding.def
+            if let DefId::Local(local_def) = binding.def
+                && candidates.is_none_or(|candidates| candidates.contains(&local_def))
+                && resolver.binding_is_visible(importing_module, binding)?
             {
                 traits.push(local_def);
             }
@@ -382,7 +419,8 @@ where
 
         // First-segment resolution checks the current module scope before extern roots and the
         // standard prelude. Completion follows the same namespace-specific shadowing order.
-        let current_scope = resolver.visible_scope(importing_module, importing_module)?;
+        let current_scope =
+            resolver.visible_scope(importing_module, importing_module, |_, _| true)?;
         let mut defs =
             VisibleScopeDefs::new(&current_scope, VisibleScopeOrigin::ModuleScope, false);
 
@@ -392,7 +430,7 @@ where
         }
 
         if let Some(prelude) = self.source.prelude_module(crate_ref)? {
-            let prelude_scope = resolver.visible_scope(importing_module, prelude)?;
+            let prelude_scope = resolver.visible_scope(importing_module, prelude, |_, _| true)?;
             defs.extend(&prelude_scope, VisibleScopeOrigin::Prelude, true);
         }
 
