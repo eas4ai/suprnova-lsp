@@ -10,6 +10,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parent.parent
+EVIDENCE = ROOT / "tools/fixtures/responsiveness/candidate-evidence.json"
 spec = importlib.util.spec_from_file_location("rsp_observer", ROOT / "tools/sudus-responsiveness.py")
 observer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(observer)
@@ -76,6 +77,71 @@ class ResponsivenessCheck:
         return source_identity
 
     @classmethod
+    def matrix(cls, candidate_identity):
+        """Recheck raw measurements selected by a declared, committed input."""
+        manifest = cls.read_report(EVIDENCE)
+        selection = manifest.get("matrix")
+        if manifest.get("schema") != 1 or not isinstance(selection, dict):
+            raise ValueError("complete latency matrix evidence has not been selected")
+        owned = (ROOT / "target/agent-debug").resolve()
+        path = (ROOT / selection["path"]).resolve(strict=True)
+        if not path.is_relative_to(owned) or path.name != "report.json":
+            raise ValueError("matrix report escapes the owned artifact root")
+        if path.stat().st_size > 4 * 1024 * 1024:
+            raise ValueError("matrix report exceeds its size bound")
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != selection["sha256"]:
+            raise ValueError("selected latency matrix report changed")
+        report = json.loads(data)
+        identity = cls.report_identity(report)
+        if (report.get("binaryUnchanged") is not True or report.get("runtimeSourcesUnchanged") is not True
+            or identity.get("runtimeSourcesSha256") != observer.Diagnostic.runtime_fingerprint()
+            or identity.get("purpose") != observer.AcceptanceMatrix.purpose
+            or identity.get("workload") != "generated-captured"):
+            raise ValueError("latency matrix does not describe the complete current native workload")
+        for field in ("sources", "metadataSha256", "buildCompiler", "producerCompiler", "binarySha256", "runtimeSourcesSha256"):
+            if identity[field] != candidate_identity[field]:
+                raise ValueError("latency matrix/current candidate identities differ: " + field)
+        if identity["openFileLimits"]["effective"] != candidate_identity["openFileLimits"]["effective"]:
+            raise ValueError("latency matrix/current candidate effective open-file limits differ")
+        binary = Path(identity["binary"]).resolve(strict=True)
+        if (not binary.is_relative_to(owned) or binary != Path(candidate_identity["binary"]).resolve(strict=True)
+            or hashlib.sha256(binary.read_bytes()).hexdigest() != identity["binarySha256"]):
+            raise ValueError("latency matrix native binary changed or escaped the owned root")
+        observers = {name: hashlib.sha256((ROOT / "tools" / name).read_bytes()).hexdigest()
+                     for name in ("lsp-query.py", "sudus-responsiveness.py", "agent-debug.py")}
+        if identity.get("observers") != observers:
+            raise ValueError("latency matrix observer implementation changed")
+        export = (path.parent / "directory.json").resolve(strict=True)
+        if not export.is_relative_to(path.parent) or hashlib.sha256(export.read_bytes()).hexdigest() != identity["capturedExportSha256"]:
+            raise ValueError("latency matrix captured declaration export changed")
+        cache = identity.get("compilerCache")
+        if cache is not None:
+            provenance = Path(cache["manifest"]).resolve(strict=True)
+            if not provenance.is_relative_to(owned) or provenance.stat().st_size > 4 * 1024 * 1024:
+                raise ValueError("compiler cache provenance escapes the owned root")
+            prime = cls.read_report(provenance)
+            if (hashlib.sha256(provenance.read_bytes()).hexdigest() != cache["manifestSha256"]
+                or cache["observerSha256"] != hashlib.sha256((ROOT / "tools/responsiveness-cargo-cache.py").read_bytes()).hexdigest()
+                or report.get("compilerSeedUnchanged") is not True
+                or prime.get("observationComplete") is not True or prime.get("applicationInputsUnchanged") is not True
+                or prime.get("sources") != identity["sources"] or prime.get("toolchain") != identity["producerToolchain"]
+                or prime.get("target") != "x86_64-unknown-linux-gnu"
+                or [command.get("phase") for command in prime.get("commands", [])] != ["copy-owned-cache", "prime-lib", "prime-directory", "prime-console"]
+                or any(command.get("code") != 0 or command.get("cleanup", {}).get("verifiedEmpty") is not True for command in prime["commands"])):
+                raise ValueError("latency matrix compiler cache provenance changed or is incomplete")
+        commands = report["commands"]
+        cleanup = report["processCleanup"]
+        if (cleanup.get("runs") != len(commands) or not commands
+            or any(command.get("code") != 0 or command.get("timedOut") is not False
+                   or command.get("cleanup", {}).get("verifiedEmpty") is not True
+                   or command.get("cleanup", {}).get("remainingPids") != [] for command in commands)):
+            raise ValueError("latency matrix command cleanup or completion is incomplete")
+        # Stored summaries are convenient progress reports. Acceptance always
+        # recomputes counts, signatures, readiness, windows and p95 from sessions.
+        return observer.AcceptanceMatrix.validate_series(report["reports"], commands, path.parent)
+
+    @classmethod
     async def run(cls):
         runner = observer.helpers.module("rsp_check_runner", ROOT / "tools/agent-debug.py")
         directory = runner.create_run_directory("rsp-check")
@@ -108,9 +174,15 @@ class ResponsivenessCheck:
             slow = [f"{mode}/{cohort}: {series[cohort]['p95Ns']} ns"
                     for mode, series in source.items() for cohort in ("first", "repeated")
                     if not series[cohort]["belowTarget"]]
-            results["RSP-002"] = {"passed": False, "sourceCohorts": source,
-                "reason": "source cohort exceeds 200 ms: " + ", ".join(slow) if slow else
-                    "generated, deferred-body and settled cohorts remain unverified"}
+            try:
+                matrix = cls.matrix(identity)
+                slow.extend(f"{cell}/{cohort}: {summary[cohort]['p95Ns']} ns"
+                            for cell, summary in matrix.items() for cohort in ("first", "repeated")
+                            if not summary[cohort]["belowTarget"])
+                results["RSP-002"] = {"passed": not slow, "sourceCohorts": source, "matrix": matrix,
+                    "reason": "cohort exceeds 200 ms: " + ", ".join(slow) if slow else "all separate latency cohorts pass"}
+            except (ValueError, KeyError, OSError, TypeError) as error:
+                results["RSP-002"] = {"passed": False, "sourceCohorts": source, "reason": str(error)}
         except (ValueError, KeyError, OSError) as error:
             results["RSP-001"] = {"passed": False, "reason": str(error)}
         (directory / "observations.json").write_text(json.dumps(results, indent=2) + "\n")
