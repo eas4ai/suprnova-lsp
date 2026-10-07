@@ -731,6 +731,34 @@ class IdlePairs(Diagnostic):
     purpose = "three matched settled idle-memory pairs; latency acceptance is separate"
     run_kind = "rsp-idle-pairs"
 
+    @classmethod
+    def assess(cls, reports, directory, baseline_digest, candidate_digest):
+        directory = directory.resolve()
+        if set(reports) != set(MODES) or baseline_digest == candidate_digest:
+            raise ValueError("idle comparison requires two indexing modes and distinct binary identities")
+        summaries = {}
+        for mode in MODES:
+            pairs = reports[mode]["pairs"]
+            if len(pairs) != 3:
+                raise ValueError("idle comparison requires three matched pairs per indexing mode")
+            medians, peaks = {"baseline": [], "candidate": []}, {"baseline": [], "candidate": []}
+            expected = cls.workload_plan(mode, directory, "generated-captured")
+            for pair in pairs:
+                if set(pair) != {"baseline", "candidate"}:
+                    raise ValueError("idle comparison is missing one member of a pair")
+                for kind, digest in (("baseline", baseline_digest), ("candidate", candidate_digest)):
+                    session = pair[kind]
+                    if session["plan"] != expected or session["binarySha256"] != digest:
+                        raise ValueError("idle comparison mixes configurations, workloads or binaries")
+                    raw = session["raw"]
+                    cls.hover_observation(raw, ["rsp_query", "rsp_without", "rsp_filter"], [("Builder<User>",)] * 3, "current")
+                    samples = cls.idle_observation(raw)
+                    medians[kind].append(cls.percentile(samples, 50))
+                    peaks[kind].append(raw["idleMemory"]["indexingPeakRssBytes"])
+            summaries[mode] = {"pairMediansBytes": medians, "indexingPeaksBytes": peaks,
+                "medianDeltaBytes": cls.percentile(medians["candidate"], 50) - cls.percentile(medians["baseline"], 50)}
+        return summaries
+
     async def observe_mode(self, mode, directory, workload, command):
         manifest = json.loads(self.baseline_manifest.read_text())
         baseline = Path(manifest["retainedBinary"])
@@ -738,7 +766,7 @@ class IdlePairs(Diagnostic):
         digest = hashlib.sha256(baseline.read_bytes()).hexdigest()
         if digest != original["binarySha256"] or original["sources"] != self.inventory():
             raise ValueError("preserved baseline binary or application identity changed")
-        candidate = self.helpers_binary
+        candidate = self.candidate_binary
         candidate_digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
         pairs = []
         for number in range(3):
@@ -806,7 +834,7 @@ if __name__ == "__main__":
                 parser.error("--idle-pairs requires --baseline-manifest and --workload generated-captured, using the managed candidate binary")
             observer.baseline_manifest = options.baseline_manifest.resolve(strict=True)
             runner = helpers.module("idle_pair_runner", ROOT / "tools/agent-debug.py")
-            observer.helpers_binary = runner.rust_glancer_binary("release")
+            observer.candidate_binary = runner.rust_glancer_binary("release")
         if options.inner_trace:
             observer.log_filter += ",rg_body_ir::build::current=trace,rg_body_ir::resolution=trace,rg_project::storage::loaders=trace"
         asyncio.run(observer.run(options.mode or MODES, options.no_build, options.nofile_soft, options.workload))

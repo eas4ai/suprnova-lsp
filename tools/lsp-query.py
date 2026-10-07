@@ -562,8 +562,9 @@ def normalize_plan(plan_value: Any, root: Path, options: Options) -> Dict[str, A
     diagnostics.update(requested.get("diagnostics") or {})
     initialization_options.update({"cache": cache, "cfg": cfg, "diagnostics": diagnostics})
     if worker_barrier or worker_reindex:
-        rustdoc = initialization_options.get("rustdoc", {})
-        if rustdoc.get("inputs") or rustdoc.get("automatic", {}).get("enabled") is False:
+        rustdoc = require_object(initialization_options.get("rustdoc", {}), "rustdoc worker configuration")
+        automatic = require_object(rustdoc.get("automatic", {}), "automatic worker configuration")
+        if rustdoc.get("inputs") or automatic.get("enabled") is False:
             fail("worker barriers require automatic exports without configured inputs")
 
     return {

@@ -432,6 +432,50 @@ class AcceptanceMatrixIntegrity(unittest.TestCase):
                 observation.AcceptanceMatrix.validate_series(reports, commands, directory)
 
 
+class IdlePairIntegrity(unittest.TestCase):
+    def setUp(self):
+        fixture = LedgerIntegrity()
+        fixture.setUp()
+        raw = fixture.report
+        for result, label in zip(raw["results"], ("rsp_query", "rsp_without", "rsp_filter")):
+            result.update(label=label, text="let value: Builder<User>")
+        for event in raw["stages"]:
+            if event["message"] == "document analysis prepared":
+                event["fields"]["source"] = "current"
+        raw["idleMemory"] = {"indexingComplete": True, "metric": "sum-of-process-RSS", "indexingPeakRssBytes": 1000,
+            "indexingSamples": 10, "samplingIntervalMs": 100, "samples": [
+                {"observedNs": 180 + n, "processRssBytes": {"1": 40, "2": 60}, "aggregateRssBytes": 100} for n in range(5)]}
+        self.directory = ROOT / "target/agent-debug/idle-test"
+        self.reports = {mode: {"pairs": [{kind: {"raw": copy.deepcopy(raw),
+            "plan": observation.IdlePairs.workload_plan(mode, self.directory, "generated-captured"),
+            "binarySha256": kind} for kind in ("baseline", "candidate")} for _ in range(3)]} for mode in observation.MODES}
+
+    def test_recomputes_all_pair_medians_and_separates_indexing_peaks(self):
+        summary = observation.IdlePairs.assess(self.reports, self.directory, "baseline", "candidate")
+        self.assertEqual(summary["faster-builds"]["pairMediansBytes"]["baseline"], [100] * 3)
+        self.assertEqual(summary["lower-peak-memory"]["indexingPeaksBytes"]["candidate"], [1000] * 3)
+        self.assertEqual(summary["faster-builds"]["medianDeltaBytes"], 0)
+
+    def test_rejects_missing_premature_unreleased_mismatched_or_wrong_binary_evidence(self):
+        for violation in ("pair", "sample", "premature", "purge", "configuration", "binary"):
+            reports = copy.deepcopy(self.reports)
+            session = reports["faster-builds"]["pairs"][0]["candidate"]
+            if violation == "pair":
+                reports["faster-builds"]["pairs"].pop()
+            elif violation == "sample":
+                session["raw"]["idleMemory"]["samples"].pop()
+            elif violation == "premature":
+                session["raw"]["idleMemory"]["samples"][0]["observedNs"] = 160
+            elif violation == "purge":
+                session["raw"]["stages"] = [e for e in session["raw"]["stages"] if e["message"] != "memory report"]
+            elif violation == "configuration":
+                session["plan"]["initializationOptions"]["cache"]["packageResidency"] = "all-resident"
+            else:
+                session["binarySha256"] = "baseline"
+            with self.subTest(violation=violation), self.assertRaises(ValueError):
+                observation.IdlePairs.assess(reports, self.directory, "baseline", "candidate")
+
+
 class PipeTiming(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.clock = 100
@@ -691,6 +735,23 @@ class PipeTiming(unittest.IsolatedAsyncioTestCase):
 
 
 class FailedCliEvidence(unittest.IsolatedAsyncioTestCase):
+    async def test_worker_reindex_requires_real_automatic_exports_without_explicit_imports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "lib.rs").write_text("fn source() {}")
+            plan = {"file": "lib.rs", "workerReindexBarrier": True,
+                    "queries": [{"kind": "hover", "marker": "source"}]}
+            def normalize(value):
+                return lsp.load_query_plan(lsp.Options(query_json=json.dumps(value)), root)
+            self.assertTrue(normalize(plan)["workerReindexBarrier"])
+            for field, value in (("workerRunningBarrier", True), ("rustdocBarrier", "before-queries"),
+                                 ("deferredWindow", True), ("workerReindexBarrier", "yes")):
+                with self.subTest(field=field), self.assertRaises(lsp.LspQueryError):
+                    normalize(dict(plan, **{field: value}))
+            for rustdoc in ({"inputs": [{}]}, {"automatic": {"enabled": False}}, {"automatic": None}, None):
+                with self.subTest(rustdoc=rustdoc), self.assertRaises(lsp.LspQueryError):
+                    normalize(dict(plan, initializationOptions={"rustdoc": rustdoc}))
+
     async def test_hover_control_plan_validates_delay_session_and_window(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
