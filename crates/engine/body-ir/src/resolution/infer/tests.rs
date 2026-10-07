@@ -416,6 +416,18 @@ fn array() { let selected = [1_u8; 3]; let later = selected; }
 trait Source { type Value; }
 fn projection<T: Source>(value: T::Value) { let selected = value; let later = 1_u8; }
 fn make<T>() -> Builder<T> { loop {} }
+struct Generic;
+impl Generic { fn make<T>() -> Builder<T> { loop {} } }
+fn associated_generic() { let selected = Generic::make(); let later: Builder<Model> = selected; }
+impl Generic { fn apply<T>(callback: fn() -> T) -> Builder<T> { loop {} } }
+fn associated_closure() { let selected = Generic::apply::<Model>(|| Model); let unrelated = 1_u8; }
+impl Model { fn accepts(callback: fn() -> u8) -> Builder<Model> { loop {} } }
+fn associated_concrete_closure() { let selected = Model::accepts(|| 1_u8); let unrelated = 1_u8; }
+trait Factory { fn create() -> Builder<Self>; }
+impl Factory for Model {}
+fn qualified() { let selected = <Model as Factory>::create(); let unrelated = 1_u8; }
+enum Choice { Made(Model) }
+fn variant() { let selected = Choice::Made(Model); let unrelated = 1_u8; }
 "#,
     );
     let target = body_ref().crate_ref;
@@ -503,7 +515,7 @@ fn make<T>() -> Builder<T> { loop {} }
         }
         compared += 1;
     }
-    assert_eq!(compared, 13);
+    assert_eq!(compared, 18);
 }
 
 #[test]
@@ -582,6 +594,10 @@ trait Model: bounds::Deep {
 impl bounds::Deep for User {}
 impl bounds::Extra for User {}
 impl Model for User { type Value = Builder<User>; }
+trait Noisy { fn own_query() -> Builder<Self>; }
+impl Noisy for User where User: bounds::Extra {}
+impl User { fn own_query() -> Builder<User> { loop {} } }
+fn inherent() { let selected = User::own_query(); let unrelated = 1_u8; }
 fn closed() { let selected = User::query(); let unrelated = 1_u8; }
 fn own_bound() { let selected = User::own_bound(); let unrelated = 1_u8; }
 fn argument() { let selected = User::argument(1_u8); let unrelated = 1_u8; }
@@ -680,7 +696,8 @@ fn filter() { let selected = User::filter("member"); let unrelated = 1_u8; }
             }
         }
         // query() reuses its proven parent. filter() infers its written argument before omitting
-        // obligations that cannot change its closed return or inferred argument types.
+        // obligations that cannot change its closed return or inferred argument types. An inherent
+        // call must not prove an unrelated trait method before selecting its actual declaration.
         let query = full
             .call(
                 body.exprs()
@@ -696,11 +713,11 @@ fn filter() { let selected = User::filter("member"); let unrelated = 1_u8; }
             .unwrap()
             .unwrap()
             .name;
-        if matches!(name.as_str(), "query" | "filter") {
+        if matches!(name.as_str(), "query" | "filter" | "own_query") {
             assert_eq!(
                 reads.get(),
                 0,
-                "the proven parent must not load its bounds again"
+                "closed call preparation must not load irrelevant bounds"
             );
         } else {
             assert!(
@@ -710,7 +727,7 @@ fn filter() { let selected = User::filter("member"); let unrelated = 1_u8; }
         }
         compared += 1;
     }
-    assert_eq!(compared, 6);
+    assert_eq!(compared, 7);
 }
 
 #[test]

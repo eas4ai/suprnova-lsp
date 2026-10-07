@@ -163,8 +163,24 @@ where
             }
             ExprKind::Call { callee, ref args } => {
                 let started = std::time::Instant::now();
-                self.infer_optional(callee, &self.cx.unknown())
-                    .context("infer optional expression")?;
+                // A binding probe needs the selected call, not a second declaration-only search
+                // for the same associated path. Live lookup preserves inherent precedence and
+                // supplies the signature and substitution used below. Constructors and paths
+                // without a selected function keep their ordinary callee inference.
+                let prepared = if self.hover_binding.is_some()
+                    && callee.is_some_and(|callee| {
+                        matches!(&body.expr_unchecked(callee).kind, ExprKind::Path { path }
+                            if path.split_associated_item_prefix_name().is_some())
+                    }) {
+                    self.prepare_call(expr, None)
+                        .context("prepare associated binding call")?
+                } else {
+                    None
+                };
+                if prepared.is_none() {
+                    self.infer_optional(callee, &self.cx.unknown())
+                        .context("infer optional expression")?;
+                }
                 tracing::trace!(
                     phase = "callee",
                     elapsed_us = started.elapsed().as_micros(),
@@ -211,7 +227,7 @@ where
                             .context("infer variant argument")?;
                     }
                 } else {
-                    self.infer_call(expr, args, None, expected)
+                    self.infer_call(expr, args, None, expected, prepared)
                         .context("infer call")?;
                 }
             }
@@ -221,7 +237,7 @@ where
                 self.infer_optional(receiver, &self.cx.unknown())
                     .context("infer optional expression")?;
                 self.method_calls.push(expr);
-                self.infer_call(expr, args, receiver, expected)
+                self.infer_call(expr, args, receiver, expected, None)
                     .context("infer call")?;
             }
             ExprKind::Tuple { ref fields } => {
