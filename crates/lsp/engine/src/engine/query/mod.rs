@@ -587,6 +587,8 @@ impl<'a> QueryRunner<'a> {
             .context("target document is absent from hover input")?;
         let path = document.source_path().to_path_buf();
         let started = Instant::now();
+        // Deliberately violate the transport target for the acceptance control.
+        std::thread::sleep(std::time::Duration::from_millis(250));
         // Try published declaration names first. A local or expression cursor
         // needs body facts, so release the probe's view before preparing them.
         let mut declarations_only = true;
