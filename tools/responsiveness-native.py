@@ -23,17 +23,11 @@ class NativeEvidence:
         "RSP-002": {"rg_body_ir": [
             "resolution::infer::tests::binding_hover_skips_unrelated_statements_only_after_its_type_settles",
             "resolution::infer::tests::binding_hover_omits_only_irrelevant_obligations_for_closed_calls"],
-            "rg_ty": [
-                "trait_selection::tests::rigid_impls::rigid_parameter_discovery_excludes_direct_impls_but_keeps_fallbacks"],
             "rg_lsp_engine": [
                 "engine::queue::tests::hover_bypasses_queued_analysis_but_the_oldest_query_gets_the_next_turn",
                 "engine::queue::tests::completion_receives_the_same_bounded_preference_as_hover",
                 "engine::queue::tests::finite_lookahead_does_not_drain_an_unbounded_query_prefix"]},
         "RSP-003": {
-            "rg_ty": [
-                "trait_selection::tests::rigid_impls::live_variables_and_aliases_keep_concrete_impl_discovery",
-                "trait_selection::tests::rigid_impls::rigid_supertrait_bound_and_blanket_projection_preserve_pending_obligations",
-                "trait_selection::tests::rigid_impls::rigid_goal_keeps_incomplete_environment_and_cancellation_unavailable"],
             "rg_project": [
                 "tests::body_products::saved_generation_rejects_old_products_before_touching_its_artifact",
                 "tests::failed_saved_candidate_preserves_published_generation",
