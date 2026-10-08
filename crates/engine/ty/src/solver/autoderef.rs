@@ -36,77 +36,22 @@ impl<'s> Iterator for Autoderef<'_, 's> {
                 TyShape::Reference { inner, .. } => inner,
                 TyShape::Adt(_) | TyShape::Param(_) | TyShape::Alias(_) => {
                     let callbacks = cx.track_callbacks();
-                    let mut started =
-                        tracing::enabled!(tracing::Level::TRACE).then(std::time::Instant::now);
-                    let deref = cx.lang_item(LangItem::Deref);
-                    if let Some(started) = started {
-                        tracing::trace!(
-                            elapsed_us = started.elapsed().as_micros(),
-                            thread_id = ?std::thread::current().id(),
-                            ?ty,
-                            phase = "deref language item",
-                            "autoderef phase"
-                        );
-                    }
-                    let DefId::Trait(deref) = deref? else {
+                    let DefId::Trait(deref) = cx.lang_item(LangItem::Deref)? else {
                         return None;
                     };
-                    started = started.map(|_| std::time::Instant::now());
-                    let alias = cx.lang_item(LangItem::DerefTarget);
-                    if let Some(started) = started {
-                        tracing::trace!(
-                            elapsed_us = started.elapsed().as_micros(),
-                            thread_id = ?std::thread::current().id(),
-                            ?ty,
-                            phase = "target language item",
-                            "autoderef phase"
-                        );
-                    }
-                    let DefId::TypeAlias(alias) = alias? else {
+                    let DefId::TypeAlias(alias) = cx.lang_item(LangItem::DerefTarget)? else {
                         return None;
                     };
                     // These language items are indexed independently. An unrelated alias
                     // with the target attribute must not supply this trait's projection.
-                    started = started.map(|_| std::time::Instant::now());
-                    let parent = cx.metadata(DefId::TypeAlias(alias)).parent;
-                    if let Some(started) = started {
-                        tracing::trace!(
-                            elapsed_us = started.elapsed().as_micros(),
-                            thread_id = ?std::thread::current().id(),
-                            ?ty,
-                            phase = "target parent metadata",
-                            "autoderef phase"
-                        );
-                    }
-                    if parent != Some(DefId::Trait(deref)) {
+                    if cx.metadata(DefId::TypeAlias(alias)).parent != Some(DefId::Trait(deref)) {
                         return None;
                     }
-                    started = started.map(|_| std::time::Instant::now());
                     let target = table.normalize(cx.projection(ProjectionTy {
                         associated_ty: alias,
                         args: List::new(cx, &[ty.into()]),
                     }));
-                    if let Some(started) = started {
-                        tracing::trace!(
-                            elapsed_us = started.elapsed().as_micros(),
-                            thread_id = ?std::thread::current().id(),
-                            ?ty,
-                            phase = "normalize target",
-                            "autoderef phase"
-                        );
-                    }
-                    started = started.map(|_| std::time::Instant::now());
-                    let outcome = table.fulfill();
-                    if let Some(started) = started {
-                        tracing::trace!(
-                            elapsed_us = started.elapsed().as_micros(),
-                            thread_id = ?std::thread::current().id(),
-                            ?ty,
-                            ?outcome,
-                            phase = "fulfill target",
-                            "autoderef phase"
-                        );
-                    }
+                    let _ = table.fulfill();
                     let target = table.resolve_root_var(target);
                     if callbacks.failure().is_some() || target.is_var() || target.has_unknown() {
                         return None;

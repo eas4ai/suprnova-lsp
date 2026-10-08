@@ -810,16 +810,10 @@ impl<'s> ir::Interner for SolverInterner<'s> {
             self.unavailable("trait identity");
             return R::output();
         };
-        let filter = TraitImplFilter::from(ty);
-        let Some(impls) = self.0.provider.impls(id, filter) else {
+        let Some(impls) = self.0.provider.impls(id, TraitImplFilter::from(ty)) else {
             self.unavailable("impl enumeration");
             return R::output();
         };
-        tracing::trace!(
-            thread_id = ?std::thread::current().id(),
-            ?id, self_kind = ?ty.kind(), ?filter, candidate_count = impls.len(),
-            "relevant impl candidates"
-        );
         for id in impls {
             if self.has_unavailable() {
                 break;
@@ -855,11 +849,6 @@ impl<'s> ir::Interner for SolverInterner<'s> {
             self.unavailable("impl enumeration");
             return R::output();
         };
-        tracing::trace!(
-            thread_id = ?std::thread::current().id(),
-            ?id, candidate_count = impls.len(),
-            "blanket impl candidates"
-        );
         for id in impls {
             if self.has_unavailable() {
                 break;
