@@ -3,6 +3,7 @@
 use rg_ir_model::{TraitDefRef, TraitImplRef};
 use rg_semantic_ir::TraitImplSelfHead;
 use rg_std::UniqueVec;
+use rustc_type_ir::inherent::IntoKind as _;
 
 use crate::{
     Ty, TyContext,
@@ -17,7 +18,7 @@ pub(crate) enum TraitImplFilter {
     All,
     /// Include this concrete family and the blanket/unresolved-header fallbacks.
     Head(TraitImplSelfHead),
-    /// A closure or function item cannot be named by a concrete source impl.
+    /// A rigid placeholder, closure or function item cannot match a concrete source impl.
     Fallbacks,
     /// An unknown owned type supplies no evidence; do not guess its type from visible impls.
     NoEvidence,
@@ -75,6 +76,11 @@ impl From<solver::Ty<'_>> for TraitImplFilter {
     /// and every nested argument. Unresolved solver types keep the conservative all-impl search;
     /// an owned `Ty::Unknown` instead has no inference state to support that search.
     fn from(receiver: solver::Ty<'_>) -> Self {
+        // Canonical evaluation turns the caller's T into a rigid placeholder. It cannot
+        // match User or &User, but blanket and unresolved headers still need proof.
+        if matches!(receiver.kind(), rustc_type_ir::Placeholder(_)) {
+            return Self::Fallbacks;
+        }
         let head = match receiver.shape() {
             TyShape::Unit => TraitImplSelfHead::Unit,
             TyShape::Never => TraitImplSelfHead::Never,

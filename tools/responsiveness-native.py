@@ -23,11 +23,18 @@ class NativeEvidence:
         "RSP-002": {"rg_body_ir": [
             "resolution::infer::tests::binding_hover_skips_unrelated_statements_only_after_its_type_settles",
             "resolution::infer::tests::binding_hover_omits_only_irrelevant_obligations_for_closed_calls"],
+              "rg_ty": [
+                  "trait_selection::tests::canonical_impls::canonical_projection_skips_disjoint_direct_impl_candidates"],
             "rg_lsp_engine": [
                 "engine::queue::tests::hover_bypasses_queued_analysis_but_the_oldest_query_gets_the_next_turn",
                 "engine::queue::tests::completion_receives_the_same_bounded_preference_as_hover",
                 "engine::queue::tests::finite_lookahead_does_not_drain_an_unbounded_query_prefix"]},
         "RSP-003": {
+            "rg_ty": [
+                "trait_selection::tests::canonical_impls::canonical_bounds_and_blanket_projection_preserve_pending_goals",
+                "trait_selection::tests::canonical_impls::canonical_projection_retains_alias_and_unresolved_headers",
+                "trait_selection::tests::canonical_impls::live_variable_and_alias_receivers_keep_concrete_projection_answers",
+                "trait_selection::tests::canonical_impls::canonical_projection_keeps_cancellation_and_incomplete_environment_unavailable"],
             "rg_project": [
                 "tests::body_products::saved_generation_rejects_old_products_before_touching_its_artifact",
                 "tests::failed_saved_candidate_preserves_published_generation",

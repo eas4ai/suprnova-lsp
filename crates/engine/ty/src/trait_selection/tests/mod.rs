@@ -1,3 +1,4 @@
+mod canonical_impls;
 mod utils;
 
 use std::fmt::Write as _;
