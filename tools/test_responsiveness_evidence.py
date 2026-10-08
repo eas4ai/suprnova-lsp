@@ -62,7 +62,7 @@ class NativeBindingIntegrity(unittest.TestCase):
             return evidence.Evidence(self.manifest).native("RSP-002" if failed else "RSP-003")
 
     def test_accepts_complete_cases_and_preserves_actual_test_failure(self):
-        self.assertEqual(len(self.observe()["cases"]), 16)
+        self.assertEqual(len(self.observe()["cases"]), 17)
         with self.assertRaisesRegex(ValueError, "RSP-002 native invariant failed"):
             self.observe(failed=True)
 

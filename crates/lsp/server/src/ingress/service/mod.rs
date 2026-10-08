@@ -15,7 +15,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::future::BoxFuture;
+use futures::{future::BoxFuture, task::noop_waker_ref};
 use tower::Service;
 use tower_lsp_server::{
     gen_lsp_types::{
@@ -278,17 +278,31 @@ where
     fn call(&mut self, request: Request) -> Self::Future {
         // The server invokes this method in decoded message order. Finish the order-sensitive
         // editor work before this handler may run at the same time as handlers for later messages.
+        let cancellation = request.method() == "$/cancelRequest" && request.id().is_none();
         let ingress_call = self.prepare_call(&request);
         let lifecycle = ingress_call.lifecycle();
         let future = self.inner.call(request);
 
-        Box::pin(async move {
+        let mut future: Self::Future = Box::pin(async move {
             let result = CURRENT_INGRESS_CALL.scope(ingress_call, future).await;
             if let Some(lifecycle) = lifecycle {
                 lifecycle.finish();
             }
             result
-        })
+        });
+
+        // The transport shares four async slots between requests and notifications.
+        // Cancellation must reach the library's pending-request owner even when all
+        // slots are occupied. Poll its scoped handler once here; if it needs more
+        // work, keep the same future for normal async polling instead of dropping it.
+        if cancellation
+            && let Poll::Ready(result) = future
+                .as_mut()
+                .poll(&mut Context::from_waker(noop_waker_ref()))
+        {
+            return Box::pin(std::future::ready(result));
+        }
+        future
     }
 }
 

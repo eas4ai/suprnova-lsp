@@ -21,7 +21,15 @@ export interface SerializedPosition {
 export interface HoverAction {
   readonly command: string;
   readonly label: string;
-  readonly locations: readonly SerializedLocation[];
+  readonly origin: HoverOrigin;
+}
+
+export interface HoverOrigin {
+  readonly uri: string;
+  readonly position: SerializedPosition;
+  readonly range?: SerializedRange;
+  readonly version: number;
+  readonly session: string;
 }
 
 export interface HoverActionLinkLine {
@@ -45,14 +53,8 @@ export type ProtocolDefinitionLike =
   | readonly (ProtocolLocationLike | ProtocolLocationLinkLike)[]
   | null;
 
-export function hoverAction(
-  command: string,
-  locations: readonly SerializedLocation[],
-  singularLabel: string,
-  pluralNoun: string,
-): HoverAction {
-  const label = locations.length === 1 ? singularLabel : `${locations.length} ${pluralNoun}`;
-  return { command, label, locations };
+export function hoverAction(command: string, label: string, origin: HoverOrigin): HoverAction {
+  return { command, label, origin };
 }
 
 export function hoverActionLinkLine(actions: readonly HoverAction[]): HoverActionLinkLine {
@@ -120,7 +122,7 @@ export function locationsExcludingCurrentHover(
 }
 
 function commandLink(action: HoverAction): string {
-  const args = encodeURIComponent(JSON.stringify([action.locations]));
+  const args = encodeURIComponent(JSON.stringify([action.origin]));
   return `[${action.label}](command:${action.command}?${args})`;
 }
 

@@ -1,6 +1,7 @@
 //! RPC transport and project status for one engine process.
 //!
-//! Semantic RPC methods enter the engine's single FIFO command lane with immutable editor input.
+//! Semantic RPC methods enter the engine's single command lane with immutable editor input.
+//! Hover and completion can pass queued read-only work while saved mutations keep their order.
 //! Project indexing state is presentation telemetry, not query-result policy. This module controls
 //! what the server does around each kind of RPC:
 //!

@@ -9,6 +9,7 @@ import * as vscode from "vscode";
 
 import { StatusView } from "../status/status-view";
 import { LanguageClientSession } from "./language-client-session";
+import { HoverActions } from "../features/hover-actions";
 
 export class LanguageClientSlot implements vscode.Disposable {
   private session: LanguageClientSession | undefined;
@@ -20,6 +21,7 @@ export class LanguageClientSlot implements vscode.Disposable {
     private readonly serverOutput: vscode.OutputChannel,
     private readonly status: StatusView,
     private readonly extensionUri: vscode.Uri,
+    private readonly hoverActions: HoverActions,
   ) {}
 
   public current(): LanguageClientSession | undefined {
@@ -82,6 +84,7 @@ export class LanguageClientSlot implements vscode.Disposable {
       this.status,
       this.extensionUri,
       workspaceFolder,
+      this.hoverActions,
     );
     const started = await session.start();
 
