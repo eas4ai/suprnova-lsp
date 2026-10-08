@@ -8,11 +8,41 @@ const extensionRoot = dirname(fileURLToPath(import.meta.url));
 const userDataDir = mkdtempSync(resolve(tmpdir(), "suprnova-lsp-user-data-"));
 const extensionsDir = mkdtempSync(resolve(tmpdir(), "suprnova-lsp-extensions-"));
 const workspaceFile = resolve(userDataDir, "acceptance.code-workspace");
+// Seed the existing client trace in this isolated workspace. VS Code's settings
+// API writes only registered keys, while LanguageClient reads this key directly.
+const settings =
+  process.env.SUPRNOVA_LSP_EXTENSION_TEST_TRACE === "json"
+    ? { "suprnova-lsp.trace.server": { verbosity: "verbose", format: "json" } }
+    : {};
+const responsivenessRoot = process.env.SUPRNOVA_LSP_RESPONSIVENESS_APPLICATION;
+if (responsivenessRoot !== undefined) {
+  Object.assign(settings, {
+    "files.autoSave": "off",
+    "files.hotExit": "off",
+    "suprnova-lsp.rustdoc.inputs": [
+      {
+        workspaceRoot: responsivenessRoot,
+        manifestPath: resolve(responsivenessRoot, "Cargo.toml"),
+        targetName: "directory",
+        targetKind: "lib",
+        exportPath: process.env.SUPRNOVA_LSP_RESPONSIVENESS_EXPORT,
+        itemPath: "directory::models::user::User",
+      },
+    ],
+    "suprnova-lsp.rustdoc.automatic": { enabled: false },
+    "suprnova-lsp.cfg.test": false,
+    "suprnova-lsp.cache.packageResidency": "workspace",
+    "suprnova-lsp.indexing.performancePreference": "faster-builds",
+  });
+}
 // Tests add genuine Cargo roots. Start in workspace mode so adding the first one cannot
 // leave a single-folder conversion pending and block every subsequent folder addition.
 writeFileSync(
   workspaceFile,
-  JSON.stringify({ folders: [{ path: resolve(extensionRoot, "../../test_targets") }] }),
+  JSON.stringify({
+    folders: [{ path: responsivenessRoot ?? resolve(extensionRoot, "../../test_targets") }],
+    settings,
+  }),
 );
 
 export default defineConfig({

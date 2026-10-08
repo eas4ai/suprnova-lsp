@@ -18,6 +18,22 @@ spec.loader.exec_module(observer)
 
 class ResponsivenessCheck:
     @staticmethod
+    def revision_evidence():
+        try:
+            binding = observer.helpers.module("rsp_evidence_binding", ROOT / "tools/responsiveness-evidence.py")
+            evidence = binding.Evidence(EVIDENCE)
+            # Check deterministic races first so a genuine failed invariant remains
+            # the reason for rejection even when other observations are unavailable.
+            invariants = evidence.native("RSP-003")
+            semantic = observer.helpers.module("rsp_semantic_evidence", ROOT / "tools/responsiveness-semantic.py")
+            delivery = observer.helpers.module("rsp_editor_binding", ROOT / "tools/responsiveness-delivery.py")
+            return {"passed": True, "native": invariants,
+                    "semantic": semantic.SemanticEvidence.assess(evidence), "editor": delivery.EditorEvidence.assess(evidence)}
+
+        except (ValueError, KeyError, OSError, TypeError, StopIteration) as error:
+            return {"passed": False, "reason": str(error)}
+
+    @staticmethod
     def read_report(path):
         data = path.read_bytes()
         if len(data) > 4 * 1024 * 1024:
@@ -189,6 +205,7 @@ class ResponsivenessCheck:
                 results["RSP-002"] = {"passed": False, "sourceCohorts": source, "reason": str(error)}
         except (ValueError, KeyError, OSError) as error:
             results["RSP-001"] = {"passed": False, "reason": str(error)}
+        results["RSP-003"] = cls.revision_evidence()
         (directory / "observations.json").write_text(json.dumps(results, indent=2) + "\n")
         for requirement, result in results.items():
             print(json.dumps({"requirement": requirement, **result}), flush=True)
