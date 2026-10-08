@@ -132,12 +132,43 @@ struct PackageArtifactReaders {
 
 impl Drop for PackageArtifactReaders {
     fn drop(&mut self) {
-        // All phase loaders have released their shared readers. Separate reader teardown from
-        // dropping the decoded semantic values owned by the phase transactions.
+        // All phase loaders have released their shared readers. Their independent files and name
+        // tables can be destroyed together; no reader or project mutation survives this scope.
         let started = std::time::Instant::now();
+        let loaded = self
+            .packages
+            .iter()
+            .filter(|cell| cell.get().is_some())
+            .count();
+        let worker_count = if loaded >= 64 { 8 } else { 0 };
+        let chunk_size = self.packages.len().div_ceil(8).max(1);
+        std::thread::scope(|scope| {
+            let mut workers = Vec::new();
+            for chunk in self.packages.chunks_mut(chunk_size).take(worker_count) {
+                match std::thread::Builder::new()
+                    .name("release-artifacts".to_owned())
+                    .spawn_scoped(scope, move || {
+                        chunk.iter_mut().map(OnceLock::take).for_each(drop);
+                    }) {
+                    Ok(worker) => workers.push(worker),
+                    Err(error) => tracing::warn!(
+                        %error,
+                        "could not start an artifact release worker; releasing its readers on the query lane"
+                    ),
+                }
+            }
+            for worker in workers {
+                if let Err(panic) = worker.join() {
+                    std::panic::resume_unwind(panic);
+                }
+            }
+        });
+        // A failed spawn leaves its cells untouched. Drop those on this lane only after every
+        // successful worker has joined; small and sparse reader sets also follow this path.
         drop(std::mem::take(&mut self.packages));
         tracing::trace!(
             elapsed_us = started.elapsed().as_micros(),
+            loaded,
             "query artifact readers released"
         );
     }
@@ -354,5 +385,182 @@ impl ProjectState {
     /// Create one request-owned loader set for this saved project snapshot.
     pub(crate) fn query_read_loaders(&self) -> PackageReadLoaders {
         PackageReadLoaders::new(self)
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use std::{fs, process::Command};
+
+    use super::PackageArtifactReaders;
+    use crate::{PackageResidencyPolicy, testonly::ProjectFixture};
+
+    fn reader_set(count: usize) -> (ProjectFixture, PackageArtifactReaders) {
+        let fixture = ProjectFixture::build_with_package_residency_policy(
+            r#"
+//- /Cargo.toml
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+pub struct App;
+"#,
+            PackageResidencyPolicy::AllOffloadable,
+        );
+        let state = &fixture.project().state;
+        let header = state
+            .cache_plan
+            .artifact_header(
+                rg_ir_model::PackageSlot(0),
+                &state.package_source_fingerprints,
+            )
+            .expect("offloaded package should have an artifact header");
+        let mut readers = PackageArtifactReaders::new(
+            state.cache_plan.clone(),
+            state.cache_store.clone(),
+            state.package_source_fingerprints.clone(),
+        );
+        // Independent opens of one genuine artifact exercise handle ownership without needing
+        // a large workspace fixture. Teardown does not inspect package identities.
+        readers.packages = (0..count)
+            .map(|_| {
+                std::sync::OnceLock::from(
+                    state
+                        .cache_store
+                        .open_artifact(&header)
+                        .expect("fixture artifact should open")
+                        .expect("fixture artifact should exist"),
+                )
+            })
+            .collect();
+        (fixture, readers)
+    }
+
+    fn process_entries(name: &str) -> usize {
+        fs::read_dir(format!("/proc/self/{name}"))
+            .expect("process resources should be readable")
+            .count()
+    }
+
+    fn artifact_handles(fixture: &ProjectFixture) -> usize {
+        let state = &fixture.project().state;
+        let header = state
+            .cache_plan
+            .artifact_header(
+                rg_ir_model::PackageSlot(0),
+                &state.package_source_fingerprints,
+            )
+            .unwrap();
+        let path = state.cache_store.package_artifact_path(&header.package);
+        fs::read_dir("/proc/self/fd")
+            .unwrap()
+            .filter(
+                |entry| match fs::read_link(entry.as_ref().unwrap().path()) {
+                    Ok(target) => target == path,
+                    // Other fixture/runtime handles can close while procfs is being enumerated.
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(error) => panic!("read process handle: {error}"),
+                },
+            )
+            .count()
+    }
+
+    #[test]
+    fn large_reader_release_closes_handles_and_joins_every_thread() {
+        for count in [0, 70] {
+            let (fixture, readers) = reader_set(count);
+            assert_eq!(artifact_handles(&fixture), count);
+            let threads = process_entries("task");
+            drop(readers);
+            assert_eq!(artifact_handles(&fixture), 0);
+            assert_eq!(process_entries("task"), threads);
+        }
+    }
+
+    #[test]
+    fn sparse_reader_release_preserves_a_cloned_revision_until_its_owner_drops() {
+        for count in [1, 70] {
+            let (fixture, mut readers) = reader_set(count);
+            readers.packages.resize_with(140, std::sync::OnceLock::new);
+            let reader = readers.packages[0].get().unwrap().clone();
+            let header = reader.probe().header.clone();
+            assert_eq!(artifact_handles(&fixture), count);
+            let threads = process_entries("task");
+            drop(readers);
+            assert_eq!(artifact_handles(&fixture), 1);
+            assert_eq!(process_entries("task"), threads);
+            assert_eq!(reader.probe().header, header);
+            reader
+                .read_def_map_manifest()
+                .expect("cloned reader should keep its pinned revision readable");
+            drop(reader);
+            assert_eq!(artifact_handles(&fixture), 0);
+        }
+    }
+
+    #[test]
+    fn thread_start_failure_still_releases_all_reader_handles() {
+        const CHILD: &str = "SUPRNOVA_LSP_READER_RELEASE_LIMIT_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            // A process limit must not affect other tests in a shared libtest process.
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "storage::loaders::tests::thread_start_failure_still_releases_all_reader_handles",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .expect("isolated release test should start");
+            assert!(
+                output.status.success(),
+                "isolated release failed: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        let (fixture, readers) = reader_set(70);
+        assert_eq!(artifact_handles(&fixture), 70);
+        let threads = process_entries("task");
+        let mut original = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: original is valid writable storage for the queried process limit.
+        assert_eq!(
+            unsafe { libc::getrlimit(libc::RLIMIT_NPROC, &mut original) },
+            0
+        );
+        let restricted = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: original.rlim_max,
+        };
+        // SAFETY: both values describe this isolated child's limit; the hard limit is unchanged.
+        assert_eq!(
+            unsafe { libc::setrlimit(libc::RLIMIT_NPROC, &restricted) },
+            0
+        );
+        let attempt = std::thread::Builder::new().spawn(|| {});
+        let failure = match attempt {
+            Ok(thread) => {
+                thread.join().unwrap();
+                None
+            }
+            Err(error) => error.raw_os_error(),
+        };
+        drop(readers);
+        // SAFETY: original came from getrlimit; restore the child before checking any assertions.
+        assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NPROC, &original) }, 0);
+        assert_eq!(
+            failure,
+            Some(libc::EAGAIN),
+            "control must actually deny a thread start"
+        );
+        assert_eq!(artifact_handles(&fixture), 0);
+        assert_eq!(process_entries("task"), threads);
     }
 }
