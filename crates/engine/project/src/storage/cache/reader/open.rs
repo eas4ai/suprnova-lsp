@@ -123,7 +123,8 @@ impl PackageCacheStore {
         // found at the right path but containing bytes for another package.
         let probe_bytes =
             PackageArtifactReader::read_section_bytes(&path, &mut file, layout.probe)?;
-        metric::CACHE_SECTION_READ.record("probe", read_started.elapsed());
+        let read_elapsed = read_started.elapsed();
+        metric::CACHE_SECTION_READ.record("probe", read_elapsed);
         metric::CACHE_SECTION_BYTES.add(
             "probe",
             layout.probe.len + PACKAGE_CACHE_CONTAINER_PREFIX_BYTES as u64,
@@ -137,10 +138,19 @@ impl PackageCacheStore {
                 },
             }
         })?;
-        metric::CACHE_SECTION_DECODE.record("probe", decode_started.elapsed());
+        let decode_elapsed = decode_started.elapsed();
+        metric::CACHE_SECTION_DECODE.record("probe", decode_elapsed);
         if probe.header.package != *package {
             return Err(self.header_mismatch(package, &probe.header.package));
         }
+        tracing::trace!(
+            package = %package.name,
+            thread_id = ?std::thread::current().id(),
+            encoded_bytes = probe_bytes.len(),
+            read_us = read_elapsed.as_micros(),
+            decode_us = decode_elapsed.as_micros(),
+            "package artifact probe read phases"
+        );
 
         // 4. Keep the open file, validated ranges, and probe together. The nested phase indexes
         // and shared name table start empty and grow only when later queries need them.
