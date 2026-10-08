@@ -1,4 +1,7 @@
 {
   "schema": 1,
-  "matrix": null
+  "matrix": {
+    "path": "target/agent-debug/runs/20261008T123820401Z-rsp-matrix-2030191-634b4e/report.json",
+    "sha256": "d6827eceb1f1725d0d31d2f519ac28a27fca819f3dc310d0e8c3108c9fdd169a"
+  }
 }
