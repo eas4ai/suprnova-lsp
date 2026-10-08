@@ -85,11 +85,15 @@ impl PackageCacheStore {
         // so callers can distinguish unavailable storage from malformed bytes.
         let read_started = Instant::now();
         let path = self.package_artifact_path(package);
+        let path_elapsed = read_started.elapsed();
+        let open_started = Instant::now();
         let mut file = match File::open(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(source) => return Err(PackageCacheReadError::Io { path, source }),
         };
+        let open_elapsed = open_started.elapsed();
+        let framing_started = Instant::now();
         // 2. Read and validate the fixed outer directory against the complete file length. This
         // establishes trusted ranges before any variable-size section is allocated.
         let file_len = file
@@ -119,10 +123,13 @@ impl PackageCacheStore {
                 },
             }
         })?;
+        let framing_elapsed = framing_started.elapsed();
         // 3. Read and decode only the probe. It contains the package identity used to reject a file
         // found at the right path but containing bytes for another package.
+        let probe_started = Instant::now();
         let probe_bytes =
             PackageArtifactReader::read_section_bytes(&path, &mut file, layout.probe)?;
+        let probe_elapsed = probe_started.elapsed();
         let read_elapsed = read_started.elapsed();
         metric::CACHE_SECTION_READ.record("probe", read_elapsed);
         metric::CACHE_SECTION_BYTES.add(
@@ -147,6 +154,10 @@ impl PackageCacheStore {
             package = %package.name,
             thread_id = ?std::thread::current().id(),
             encoded_bytes = probe_bytes.len(),
+            path_us = path_elapsed.as_micros(),
+            open_us = open_elapsed.as_micros(),
+            framing_us = framing_elapsed.as_micros(),
+            payload_read_us = probe_elapsed.as_micros(),
             read_us = read_elapsed.as_micros(),
             decode_us = decode_elapsed.as_micros(),
             "package artifact probe read phases"
