@@ -93,6 +93,13 @@ impl PackageCacheStore {
             Err(source) => return Err(PackageCacheReadError::Io { path, source }),
         };
         let open_elapsed = open_started.elapsed();
+        #[cfg(target_os = "linux")]
+        tracing::trace!(
+            file_descriptor = std::os::fd::AsRawFd::as_raw_fd(&file),
+            open_us = open_elapsed.as_micros(),
+            thread_id = ?std::thread::current().id(),
+            "package artifact file opened"
+        );
         let framing_started = Instant::now();
         // 2. Read and validate the fixed outer directory against the complete file length. This
         // establishes trusted ranges before any variable-size section is allocated.
