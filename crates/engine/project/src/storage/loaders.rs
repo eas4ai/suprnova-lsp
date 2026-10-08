@@ -438,10 +438,47 @@ pub struct App;
         (fixture, readers)
     }
 
-    fn process_entries(name: &str) -> usize {
-        fs::read_dir(format!("/proc/self/{name}"))
-            .expect("process resources should be readable")
-            .count()
+    fn isolated_release_test(name: &str) -> bool {
+        const CHILD: &str = "SUPRNOVA_LSP_READER_RELEASE_CHILD";
+        if std::env::var_os(CHILD).as_deref() == Some(std::ffi::OsStr::new(name)) {
+            return false;
+        }
+
+        // Resource observations belong to this test's process. Other tests can release artifacts
+        // concurrently, using the same worker names and their own independent reader handles.
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .expect("isolated release test should start");
+        assert!(
+            output.status.success(),
+            "isolated release failed: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        true
+    }
+
+    fn artifact_release_workers() -> Vec<std::ffi::OsString> {
+        fs::read_dir("/proc/self/task")
+            .expect("process tasks should be readable")
+            .filter_map(|entry| {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+                    Err(error) => panic!("read process task entry: {error}"),
+                };
+                let name = match fs::read_to_string(entry.path().join("comm")) {
+                    Ok(name) => name,
+                    // A fixture/runtime thread can exit between listing its task and reading it.
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+                    Err(error) => panic!("read process task name: {error}"),
+                };
+                // Linux comm retains only the first 15 bytes of the production worker name.
+                (name.trim_end() == "release-artifac").then(|| entry.file_name())
+            })
+            .collect()
     }
 
     fn artifact_handles(fixture: &ProjectFixture) -> usize {
@@ -469,28 +506,36 @@ pub struct App;
 
     #[test]
     fn large_reader_release_closes_handles_and_joins_every_thread() {
+        if isolated_release_test(
+            "storage::loaders::tests::large_reader_release_closes_handles_and_joins_every_thread",
+        ) {
+            return;
+        }
         for count in [0, 70] {
             let (fixture, readers) = reader_set(count);
             assert_eq!(artifact_handles(&fixture), count);
-            let threads = process_entries("task");
             drop(readers);
             assert_eq!(artifact_handles(&fixture), 0);
-            assert_eq!(process_entries("task"), threads);
+            assert_eq!(artifact_release_workers(), Vec::<std::ffi::OsString>::new());
         }
     }
 
     #[test]
     fn sparse_reader_release_preserves_a_cloned_revision_until_its_owner_drops() {
+        if isolated_release_test(
+            "storage::loaders::tests::sparse_reader_release_preserves_a_cloned_revision_until_its_owner_drops",
+        ) {
+            return;
+        }
         for count in [1, 70] {
             let (fixture, mut readers) = reader_set(count);
             readers.packages.resize_with(140, std::sync::OnceLock::new);
             let reader = readers.packages[0].get().unwrap().clone();
             let header = reader.probe().header.clone();
             assert_eq!(artifact_handles(&fixture), count);
-            let threads = process_entries("task");
             drop(readers);
             assert_eq!(artifact_handles(&fixture), 1);
-            assert_eq!(process_entries("task"), threads);
+            assert_eq!(artifact_release_workers(), Vec::<std::ffi::OsString>::new());
             assert_eq!(reader.probe().header, header);
             reader
                 .read_def_map_manifest()
@@ -502,30 +547,14 @@ pub struct App;
 
     #[test]
     fn thread_start_failure_still_releases_all_reader_handles() {
-        const CHILD: &str = "SUPRNOVA_LSP_READER_RELEASE_LIMIT_CHILD";
-        if std::env::var_os(CHILD).is_none() {
-            // A process limit must not affect other tests in a shared libtest process.
-            let output = Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    "storage::loaders::tests::thread_start_failure_still_releases_all_reader_handles",
-                    "--nocapture",
-                ])
-                .env(CHILD, "1")
-                .output()
-                .expect("isolated release test should start");
-            assert!(
-                output.status.success(),
-                "isolated release failed: {} {}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
+        if isolated_release_test(
+            "storage::loaders::tests::thread_start_failure_still_releases_all_reader_handles",
+        ) {
             return;
         }
 
         let (fixture, readers) = reader_set(70);
         assert_eq!(artifact_handles(&fixture), 70);
-        let threads = process_entries("task");
         let mut original = libc::rlimit {
             rlim_cur: 0,
             rlim_max: 0,
@@ -561,6 +590,6 @@ pub struct App;
             "control must actually deny a thread start"
         );
         assert_eq!(artifact_handles(&fixture), 0);
-        assert_eq!(process_entries("task"), threads);
+        assert_eq!(artifact_release_workers(), Vec::<std::ffi::OsString>::new());
     }
 }
