@@ -87,6 +87,46 @@ class BaselineIntegrity(unittest.TestCase):
                 self.assertIs(results["RSP-001"]["passed"], expected)
 
 
+
+class SourceLatencyIntegrity(unittest.TestCase):
+    def test_slow_source_fails_for_latency_and_fast_source_still_requires_the_matrix(self):
+        original = json.loads((ROOT / "tools/fixtures/responsiveness/baseline-source.json").read_text())
+        baseline = original["identity"]
+        for slow in (True, False):
+            candidate = copy.deepcopy(original)
+            candidate["binaryUnchanged"] = True
+            candidate["runtimeSourcesUnchanged"] = True
+            candidate["identity"]["runtimeSourcesSha256"] = "unit-test-native-source"
+            if not slow:
+                for mode in check.observer.MODES:
+                    fixture = matrix_tests.SourceSeriesIntegrity()
+                    fixture.setUp()
+                    for session in fixture.sessions:
+                        session["plan"]["initializationOptions"]["indexing"]["performancePreference"] = mode
+                    candidate["reports"][mode]["sessions"] = fixture.sessions
+            with self.subTest(slow=slow), tempfile.TemporaryDirectory() as scratch, \
+                 patch.object(check.ResponsivenessCheck, "baseline", return_value=baseline), \
+                 patch.object(check.ResponsivenessCheck, "read_report", return_value=candidate), \
+                 patch.object(check.ResponsivenessCheck, "matrix", side_effect=ValueError("complete latency matrix evidence has not been selected")) as matrix, \
+                 patch.object(check.observer.Diagnostic, "inventory", return_value=baseline["sources"]), \
+                 patch.object(check.observer.Diagnostic, "runtime_fingerprint", return_value="unit-test-native-source"), \
+                 patch.object(check.observer.SourceSeries, "run", new_callable=AsyncMock, return_value=Path(scratch) / "candidate.json"), \
+                 patch.object(check.observer.helpers, "module", return_value=SimpleNamespace(create_run_directory=lambda _: Path(scratch))), \
+                 redirect_stdout(io.StringIO()):
+                code = asyncio.run(check.ResponsivenessCheck.run())
+                results = json.loads((Path(scratch) / "observations.json").read_text())
+                self.assertEqual(code, 1)
+                self.assertTrue(results["RSP-001"]["passed"])
+                self.assertFalse(results["RSP-002"]["passed"])
+                if slow:
+                    self.assertGreaterEqual(results["RSP-002"]["sourceCohorts"]["faster-builds"]["first"]["p95Ns"], 200_000_000)
+                    self.assertTrue(results["RSP-002"]["reason"].startswith("cohort exceeds 200 ms:"))
+                    matrix.assert_not_called()
+                else:
+                    self.assertEqual(results["RSP-002"]["reason"], "complete latency matrix evidence has not been selected")
+                    matrix.assert_called_once()
+
+
 class MatrixReceiptIntegrity(unittest.TestCase):
     def setUp(self):
         self.scratch = tempfile.TemporaryDirectory(dir=ROOT / "target/agent-debug")

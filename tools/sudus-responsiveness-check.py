@@ -175,6 +175,10 @@ class ResponsivenessCheck:
                     for mode, series in source.items() for cohort in ("first", "repeated")
                     if not series[cohort]["belowTarget"]]
             try:
+                # A measured source violation is sufficient to fail acceptance.
+                # Missing matrix evidence must not hide the cause of that failure.
+                if slow:
+                    raise ValueError("cohort exceeds 200 ms: " + ", ".join(slow))
                 matrix = cls.matrix(identity)
                 slow.extend(f"{cell}/{cohort}: {summary[cohort]['p95Ns']} ns"
                             for cell, summary in matrix.items() for cohort in ("first", "repeated")
