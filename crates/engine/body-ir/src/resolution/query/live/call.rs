@@ -77,17 +77,7 @@ where
                 // `receivers` gives the order in which a method's self parameter may match:
                 // T, &T, &mut T, then the same three forms for the next dereference step.
                 let cx = table.interner();
-                let receiver_started = std::time::Instant::now();
                 let self_types = table.method_receivers(receiver).collect::<Vec<_>>();
-                tracing::trace!(
-                    elapsed_us = receiver_started.elapsed().as_micros(),
-                    owner = ?self.context.body().owner(),
-                    ?call,
-                    ?method_name,
-                    ?receiver,
-                    receiver_count = self_types.len(),
-                    "method receivers expanded"
-                );
                 let receivers = self_types
                     .iter()
                     .flat_map(|&ty| {
@@ -105,24 +95,13 @@ where
                 // methods. Finding a method here is not enough to choose it: its self parameter
                 // may need another borrow, while a method found later may match directly.
                 for self_ty in self_types {
-                    let lookup_started = std::time::Instant::now();
-                    let targets = self.member_targets(
+                    for mut target in self.member_targets(
                         data.scope,
                         self_ty,
                         FunctionLookup::Method(method_name),
                         generic_args,
                         table,
-                    )?;
-                    tracing::trace!(
-                        elapsed_us = lookup_started.elapsed().as_micros(),
-                        owner = ?self.context.body().owner(),
-                        ?call,
-                        ?method_name,
-                        ?self_ty,
-                        candidate_count = targets.len(),
-                        "method candidates discovered"
-                    );
-                    for mut target in targets {
+                    )? {
                         let Some(function) = items.function_data(target.function)? else {
                             continue;
                         };
