@@ -17,7 +17,7 @@ pub(crate) enum TraitImplFilter {
     All,
     /// Include this concrete family and the blanket/unresolved-header fallbacks.
     Head(TraitImplSelfHead),
-    /// A closure or function item cannot be named by a concrete source impl.
+    /// Only blanket and unresolved headers can match this receiver.
     Fallbacks,
     /// An unknown owned type supplies no evidence; do not guess its type from visible impls.
     NoEvidence,
@@ -92,8 +92,13 @@ impl From<solver::Ty<'_>> for TraitImplFilter {
                 Err(_) => return Self::Fallbacks,
             },
             TyShape::Adt(adt) => TraitImplSelfHead::Adt(adt.def),
-            TyShape::Closure(_) | TyShape::FnDef(_) => return Self::Fallbacks,
-            TyShape::Param(_) | TyShape::Alias(_) | TyShape::InferVar { .. } | TyShape::Unknown => {
+            // A caller's T is rigid, unlike a variable which can learn T = Vec<u8>.
+            // Concrete impls cannot match it. Keep blanket and unresolved headers so
+            // the solver still proves their bounds and reports missing relevant data.
+            TyShape::Param(_) | TyShape::Closure(_) | TyShape::FnDef(_) => {
+                return Self::Fallbacks;
+            }
+            TyShape::Alias(_) | TyShape::InferVar { .. } | TyShape::Unknown => {
                 return Self::All;
             }
         };
