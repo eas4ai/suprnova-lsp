@@ -130,6 +130,19 @@ struct PackageArtifactReaders {
     packages: Vec<OnceLock<PackageArtifactReader>>,
 }
 
+impl Drop for PackageArtifactReaders {
+    fn drop(&mut self) {
+        // All phase loaders have released their shared readers. Separate reader teardown from
+        // dropping the decoded semantic values owned by the phase transactions.
+        let started = std::time::Instant::now();
+        drop(std::mem::take(&mut self.packages));
+        tracing::trace!(
+            elapsed_us = started.elapsed().as_micros(),
+            "query artifact readers released"
+        );
+    }
+}
+
 impl PackageArtifactReaders {
     fn new(
         cache_plan: WorkspaceCachePlan,
