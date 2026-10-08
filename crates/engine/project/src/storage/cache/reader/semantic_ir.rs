@@ -54,20 +54,38 @@ impl PackageArtifactReader {
         &self,
         crate_id: CrateId,
     ) -> Result<ItemLookupIndex, PackageCacheReadError> {
+        let directory_started = Instant::now();
         let (manifest, crate_range, crate_index) = self.semantic_ir_crate_index(crate_id)?;
         let range = self.semantic_ir_crate_part_range(crate_range, crate_index.lookup_index())?;
+        let directory_elapsed = directory_started.elapsed();
+        let read_started = Instant::now();
         let bytes = self.read_nested_range(
             "semantic_ir.lookup_index",
             self.inner.layout.semantic_ir,
             range,
         )?;
+        let read_elapsed = read_started.elapsed();
         let started = Instant::now();
         let decoded = self
             .decode_with_names(|| {
                 PackageCacheCodec::decode_semantic_ir_lookup_index(&bytes, manifest, crate_id)
             })
             .map_err(|error| self.decode_error(error));
-        metric::CACHE_SECTION_DECODE.record("semantic_ir.lookup_index", started.elapsed());
+        let decode_elapsed = started.elapsed();
+        metric::CACHE_SECTION_DECODE.record("semantic_ir.lookup_index", decode_elapsed);
+        // Reader jobs overlap. Keep each phase with its package and thread so their summed work
+        // is not mistaken for the foreground request's elapsed time.
+        tracing::trace!(
+            package = %self.inner.probe.header.package.name,
+            crate_id = crate_id.0,
+            thread_id = ?std::thread::current().id(),
+            encoded_bytes = bytes.len(),
+            directory_us = directory_elapsed.as_micros(),
+            read_us = read_elapsed.as_micros(),
+            decode_us = decode_elapsed.as_micros(),
+            succeeded = decoded.is_ok(),
+            "semantic lookup artifact read phases"
+        );
         decoded
     }
 
