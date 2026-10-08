@@ -19,7 +19,7 @@ class EditorCase:
             or report.get("failures") or report.get("pending")
             or report["tests"][0].get("fullTitle") != expected
             or report["passes"][0].get("fullTitle") != expected):
-            raise ValueError("genuine editor revision case did not pass exactly once")
+            raise ValueError("genuine editor case did not pass exactly once")
 
 
 class EditorDelivery:
@@ -155,5 +155,18 @@ class EditorCancellation:
             or "Builder<User>" not in observed["following"]["text"]
             or "Builder<User>" not in observed["visible"]["text"]):
             raise ValueError("cancelled tooltip remained visible or following valid tooltip was absent")
+        uri = (Path(root) / "src/models/user.rs").as_uri()
+        following = [event for event in events if event["type"] == "send-request"
+                     and event["message"].get("method") == "textDocument/hover"
+                     and event["message"]["params"]["textDocument"].get("uri") == uri
+                     and events.index(event) > events.index(replies[0])]
+        responses = {event["message"]["id"]: event for event in events if event["type"] == "receive-response"}
+        valid = [responses[event["message"]["id"]] for event in following
+                 if "Builder<User>" in json.dumps(responses.get(event["message"]["id"], {}).get("message", {}).get("result"))]
+        if (not valid or observed["visibleObservedAt"] < max(event["timestamp"] for event in valid)
+            or EditorDelivery.events(observed["visibleSnapshot"]["output"]) != observed["visibleSnapshot"]["events"]
+            or events[:len(observed["visibleSnapshot"]["events"])] != observed["visibleSnapshot"]["events"]
+            or any(event["message"].get("method") == "textDocument/didSave" for event in events)):
+            raise ValueError("following tooltip lacks a subsequent genuine response or the editor saved its probe")
         return {"case": cls.case, "requestId": request_id, "cancelledCode": -32800,
                 "followingTooltip": observed["visible"], "visibleObservedAt": observed["visibleObservedAt"]}

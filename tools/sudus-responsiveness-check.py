@@ -18,18 +18,23 @@ spec.loader.exec_module(observer)
 
 class ResponsivenessCheck:
     @staticmethod
-    def revision_evidence():
+    def invariant_evidence(requirement):
         try:
             binding = observer.helpers.module("rsp_evidence_binding", ROOT / "tools/responsiveness-evidence.py")
             evidence = binding.Evidence(EVIDENCE)
             # Check deterministic races first so a genuine failed invariant remains
             # the reason for rejection even when other observations are unavailable.
-            invariants = evidence.native("RSP-003")
-            semantic = observer.helpers.module("rsp_semantic_evidence", ROOT / "tools/responsiveness-semantic.py")
+            invariants = evidence.native(requirement)
             delivery = observer.helpers.module("rsp_editor_binding", ROOT / "tools/responsiveness-delivery.py")
-            return {"passed": True, "native": invariants,
-                    "semantic": semantic.SemanticEvidence.assess(evidence), "editor": delivery.EditorEvidence.assess(evidence)}
-
+            if requirement == "RSP-003":
+                semantic = observer.helpers.module("rsp_semantic_evidence", ROOT / "tools/responsiveness-semantic.py")
+                return {"passed": True, "native": invariants,
+                        "semantic": semantic.SemanticEvidence.assess(evidence), "editor": delivery.EditorEvidence.assess(evidence)}
+            if requirement != "RSP-004":
+                raise ValueError("unsupported invariant requirement: " + requirement)
+            progress = observer.helpers.module("rsp_progress_binding", ROOT / "tools/responsiveness-progress.py")
+            return {"passed": True, "native": invariants, "progress": progress.ProgressEvidence.assess(evidence),
+                    "editor": delivery.EditorEvidence.assess(evidence, "cancellation", cancellation=True)}
         except (ValueError, KeyError, OSError, TypeError, StopIteration) as error:
             return {"passed": False, "reason": str(error)}
 
@@ -205,7 +210,8 @@ class ResponsivenessCheck:
                 results["RSP-002"] = {"passed": False, "sourceCohorts": source, "reason": str(error)}
         except (ValueError, KeyError, OSError) as error:
             results["RSP-001"] = {"passed": False, "reason": str(error)}
-        results["RSP-003"] = cls.revision_evidence()
+        results["RSP-003"] = cls.invariant_evidence("RSP-003")
+        results["RSP-004"] = cls.invariant_evidence("RSP-004")
         (directory / "observations.json").write_text(json.dumps(results, indent=2) + "\n")
         for requirement, result in results.items():
             print(json.dumps({"requirement": requirement, **result}), flush=True)
