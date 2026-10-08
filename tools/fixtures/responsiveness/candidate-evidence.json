@@ -25,5 +25,17 @@
   "editor": {
     "path": "target/agent-debug/runs/20261008T155836237Z-rsp-editor-4001731-f59b4c/report.json",
     "sha256": "2b45c2923c80cd1689fa0c3a977e1b684d4bc22718a17132051085ed6a9198f9"
+  },
+  "cancellation": {
+    "path": "target/agent-debug/runs/20261008T161630101Z-rsp-editor-cancellation-55106-4dbde0/report.json",
+    "sha256": "951b0d54e5c33ebd956459717073ecac7ba919bf5b235c2caf702d453363f99a"
+  },
+  "progress": {
+    "path": "target/agent-debug/runs/20261008T162546419Z-rsp-progress-226676-524c22/report.json",
+    "sha256": "cebef707c91da75626999ccbf3f6347e062f6915ecabc86016e187d92daf9b45",
+    "artifacts": {
+      "stream-faster-builds/stdout.log": "07442d2b0b0e91acf449ab97775aa7bfe6b1fd8462fff4da0e9340a0579787bf",
+      "stream-faster-builds-plan.json": "f4eef5d749faa9b037935e46f75fa1bc8a39462dc1dbdbaf2bdd2d0b8f20cd19"
+    }
   }
 }

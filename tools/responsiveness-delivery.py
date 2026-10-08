@@ -9,6 +9,19 @@ import re
 ROOT = Path(__file__).resolve().parent.parent
 
 
+class EditorCase:
+    @staticmethod
+    def require_pass(terminal, expected):
+        report = json.loads(terminal)
+        if (report["stats"].get("tests") != 1 or report["stats"].get("passes") != 1
+            or report["stats"].get("pending") != 0 or report["stats"].get("failures") != 0
+            or len(report.get("tests", [])) != 1 or len(report.get("passes", [])) != 1
+            or report.get("failures") or report.get("pending")
+            or report["tests"][0].get("fullTitle") != expected
+            or report["passes"][0].get("fullTitle") != expected):
+            raise ValueError("genuine editor case did not pass exactly once")
+
+
 class EditorDelivery:
     case = "Suprnova LSP responsiveness RSP-003 delivers generated hover during indexing and rejects an overtaken revision"
 
@@ -28,14 +41,7 @@ class EditorDelivery:
 
     @classmethod
     def assess(cls, terminal, protocol, root):
-        report = json.loads(terminal)
-        if (report["stats"].get("tests") != 1 or report["stats"].get("passes") != 1
-            or report["stats"].get("pending") != 0 or report["stats"].get("failures") != 0
-            or len(report.get("tests", [])) != 1 or len(report.get("passes", [])) != 1
-            or report.get("failures") or report.get("pending")
-            or report["tests"][0].get("fullTitle") != cls.case
-            or report["passes"][0].get("fullTitle") != cls.case):
-            raise ValueError("genuine editor revision case did not pass exactly once")
+        EditorCase.require_pass(terminal, cls.case)
         observed = json.loads(protocol)
         if observed.get("application") != root:
             raise ValueError("editor observed another application")
@@ -97,8 +103,8 @@ class EditorDelivery:
 
 class EditorEvidence:
     @staticmethod
-    def assess(evidence):
-        path, report = evidence.bound("editor")
+    def assess(evidence, name="editor", cancellation=False):
+        path, report = evidence.bound(name)
         commands = evidence.cleanup(report)
         if (len(commands) != 1 or commands[0]["code"] != 0
             or report.get("runtimeSourcesSha256") != evidence.observer.Diagnostic.runtime_fingerprint()
@@ -119,4 +125,48 @@ class EditorEvidence:
             raise ValueError("editor binary or generated declarations changed")
         outputs = [evidence.artifacts.read(path.parent, report["artifacts"], name)
                    for name in ("editor-results.json", "editor-results.json.protocol.json")]
-        return {"report": str(path), **EditorDelivery.assess(*outputs, str(evidence.observer.APP))}
+        observer = EditorCancellation if cancellation else EditorDelivery
+        return {"report": str(path), **observer.assess(*outputs, str(evidence.observer.APP))}
+
+
+class EditorCancellation:
+    case = "Suprnova LSP responsiveness RSP-004 cancels a genuine editor hover and serves the following request"
+
+    @classmethod
+    def assess(cls, terminal, protocol, root):
+        EditorCase.require_pass(terminal, cls.case)
+        observed = json.loads(protocol)
+        events = EditorDelivery.events(observed["final"]["output"])
+        if observed.get("application") != root or events != observed["final"]["events"]:
+            raise ValueError("cancellation trace summary or application differs")
+        request_id = observed["requestId"]
+        requests = [event for event in events if event["type"] == "send-request" and event["message"].get("id") == request_id]
+        cancels = [event for event in events if event["type"] == "send-notification"
+                   and event["message"].get("method") == "$/cancelRequest"
+                   and event["message"]["params"].get("id") == request_id]
+        replies = [event for event in events if event["type"] == "receive-response" and event["message"].get("id") == request_id]
+        if (len(requests) != 1 or len(cancels) != 1 or len(replies) != 1
+            or not events.index(requests[0]) < events.index(cancels[0]) < events.index(replies[0])
+            or requests[0]["message"].get("method") != "textDocument/hover"
+            or requests[0]["message"]["params"]["textDocument"].get("uri") != (Path(root) / "src/models/user.rs").as_uri()
+            or replies[0]["message"].get("error", {}).get("code") != -32800):
+            raise ValueError("actual editor cancellation did not suppress its hover response")
+        if (observed["hidden"].get("visible") is not False or observed["visible"].get("visible") is not True
+            or "Builder<User>" not in observed["following"]["text"]
+            or "Builder<User>" not in observed["visible"]["text"]):
+            raise ValueError("cancelled tooltip remained visible or following valid tooltip was absent")
+        uri = (Path(root) / "src/models/user.rs").as_uri()
+        following = [event for event in events if event["type"] == "send-request"
+                     and event["message"].get("method") == "textDocument/hover"
+                     and event["message"]["params"]["textDocument"].get("uri") == uri
+                     and events.index(event) > events.index(replies[0])]
+        responses = {event["message"]["id"]: event for event in events if event["type"] == "receive-response"}
+        valid = [responses[event["message"]["id"]] for event in following
+                 if "Builder<User>" in json.dumps(responses.get(event["message"]["id"], {}).get("message", {}).get("result"))]
+        if (not valid or observed["visibleObservedAt"] < max(event["timestamp"] for event in valid)
+            or EditorDelivery.events(observed["visibleSnapshot"]["output"]) != observed["visibleSnapshot"]["events"]
+            or events[:len(observed["visibleSnapshot"]["events"])] != observed["visibleSnapshot"]["events"]
+            or any(event["message"].get("method") == "textDocument/didSave" for event in events)):
+            raise ValueError("following tooltip lacks a subsequent genuine response or the editor saved its probe")
+        return {"case": cls.case, "requestId": request_id, "cancelledCode": -32800,
+                "followingTooltip": observed["visible"], "visibleObservedAt": observed["visibleObservedAt"]}
