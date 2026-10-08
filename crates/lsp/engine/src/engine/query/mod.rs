@@ -679,6 +679,15 @@ impl<'a> QueryRunner<'a> {
                 elapsed_ms = started.elapsed().as_millis(),
                 "hover query finished"
             );
+            // Owned protocol data no longer borrows the analysis. Time its release separately
+            // from preparation and rendering, while keeping it on the same query lane.
+            let release_started = Instant::now();
+            drop(destinations);
+            drop(current);
+            tracing::trace!(
+                elapsed_us = release_started.elapsed().as_micros(),
+                "hover request-owned analysis released"
+            );
             return Ok(hover);
         }
     }
