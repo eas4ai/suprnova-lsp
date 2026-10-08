@@ -2,6 +2,7 @@
 """Retain named native responsiveness tests and their actual terminal outcomes."""
 
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -35,6 +36,8 @@ class NativeEvidence:
                 "tests::utils::rustdoc_import::edt_004_saved_body_and_reindex_keep_the_imported_api",
                 "tests::document_read_flow::document_reads_combine_current_locals_with_saved_global_semantics"],
             "rg_lsp_server": [
+                "methods::query_response::tests::document_query_reports_an_edit_that_arrived_after_analysis",
+                "methods::query_response::tests::target_document_query_rejects_an_action_overtaken_by_a_new_version",
                 "ingress::state::tests::target_change_invalidates_both_target_and_open_document_identity",
                 "ingress::state::tests::sibling_edit_invalidates_only_the_open_document_set_identity",
                 "ingress::state::tests::save_proposal_keeps_the_revision_seen_at_ingress",
@@ -47,8 +50,12 @@ class NativeEvidence:
                 "engine::query::lifecycle::tests::query_stops_when_request_token_is_cancelled_during_analysis",
                 "engine::query::lifecycle::tests::cancellation_before_publication_cleans_up_and_allows_the_next_query"],
             "rg_body_ir": ["resolution::infer::tests::cancelling_recursive_inference_never_finalizes_partial_body_facts"]},
-        "RSP-005": {"rg_lsp_engine": [
-            "engine::query::lifecycle::tests::wrapped_cancellation_is_distinct_from_a_source_failure_racing_with_cancellation"]},
+        "RSP-005": {
+            "rg_lsp_engine": [
+                "engine::query::lifecycle::tests::wrapped_cancellation_is_distinct_from_a_source_failure_racing_with_cancellation"],
+            "rg_lsp_server": [
+                "methods::query_response::tests::internal_error_preserves_context_chain",
+                "methods::query_response::tests::maps_typed_retryable_query_errors_to_content_modified"]},
     }
 
     @classmethod
@@ -64,6 +71,7 @@ class NativeEvidence:
         runner.install_signal_handlers()
         directory = runner.create_run_directory("rsp-native")
         before = observer.Diagnostic.runtime_fingerprint()
+        observer_digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
         env = dict(os.environ, RUSTUP_TOOLCHAIN="1.98.1", CARGO_NET_OFFLINE="true",
                    NEXTEST_EXPERIMENTAL_LIBTEST_JSON="1", CARGO_TARGET_DIR=str(ROOT / "target"))
         packages = sorted({package for group in cls.cases.values() for package in group})
@@ -92,6 +100,10 @@ class NativeEvidence:
         finally:
             report = {"purpose": "named native invariant cases; other RSP gates remain separate",
                 "runtimeSourcesSha256": before, "runtimeSourcesUnchanged": before == observer.Diagnostic.runtime_fingerprint(),
+                "observerSha256": observer_digest,
+                "observerUnchanged": observer_digest == hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                "artifacts": {label: hashlib.sha256((directory / label / "stdout.log").read_bytes()).hexdigest()
+                              for label in ("discovery", "native") if (directory / label / "stdout.log").exists()},
                 "observationComplete": complete, "tests": tests, "commands": commands,
                 "processCleanup": runner.summarize_cleanup(commands)}
             (directory / "report.json").write_text(json.dumps(report, indent=2) + "\n")
