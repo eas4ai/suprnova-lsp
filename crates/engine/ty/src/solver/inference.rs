@@ -406,9 +406,19 @@ impl<'s> InferenceTable<'s> {
                 let snapshot = self.solver.snapshot();
                 let was_tainted = self.solver.is_tainted();
                 cx.profile(|p| p.evaluations += 1);
+                let started = tracing::enabled!(tracing::Level::TRACE)
+                    .then(std::time::Instant::now);
                 let result =
                     self.solver
                         .evaluate_root_goal(pending.goal, (), pending.stalled.take());
+                if let Some(started) = started {
+                    tracing::trace!(
+                        elapsed_us = started.elapsed().as_micros(),
+                        thread_id = ?std::thread::current().id(),
+                        predicate = ?pending.goal.predicate,
+                        "obligation evaluated"
+                    );
+                }
                 // The compiler's Result does not include our missing-data reports. Check those
                 // before accepting even a successful result and the assignments it produced.
                 let unavailable_reason = callbacks.failure();
