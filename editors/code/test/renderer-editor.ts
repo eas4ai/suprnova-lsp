@@ -115,6 +115,15 @@ export class RendererEditor {
       .map(span => ({ text: span.textContent ?? '', color: getComputedStyle(span).color }))`);
   }
 
+  /** Observe the actual tooltip after the client cancels its hover request. */
+  public async hoverState(): Promise<{ visible: boolean; text: string }> {
+    return this.evaluate(`(() => {
+      const hover = document.querySelector('.monaco-hover');
+      return { visible: hover !== null && hover.getClientRects().length > 0,
+               text: hover?.textContent ?? '' };
+    })()`);
+  }
+
   /** The same renderer state used for readiness is retained in failure messages. */
   public async snapshot(): Promise<RendererSnapshot> {
     return this.evaluate(`(() => {
