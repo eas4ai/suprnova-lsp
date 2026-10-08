@@ -3,8 +3,8 @@
 //! RPC handlers clone `EngineHandle` and enqueue typed commands. A dedicated thread consumes those
 //! commands one at a time, which keeps saved-project mutation, query-time materialization, and
 //! package offloading from racing each other. Hover and completion can bypass queued analysis
-//! between mutation barriers, with alternating turns for the oldest command. The child modules split that thread into command
-//! dispatch, project lifecycle ownership, and request-scoped query execution.
+//! between mutation barriers, with alternating turns for the oldest command. The child modules
+//! split that thread into command dispatch, project lifecycle ownership, and request-scoped queries.
 
 mod command;
 mod dispatcher;

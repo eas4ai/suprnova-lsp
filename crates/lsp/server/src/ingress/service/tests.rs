@@ -112,7 +112,12 @@ async fn admitted_cancellation_drops_pending_hover_without_polling_its_notificat
     for index in [0, 1, 3] {
         assert!(futures::poll!(requests[index].as_mut()).is_pending());
     }
-    assert!(cancellation.await.expect("cancel notification should finish").is_none());
+    assert!(
+        cancellation
+            .await
+            .expect("cancel notification should finish")
+            .is_none()
+    );
 }
 
 struct PendingHoverBackend {
@@ -167,10 +172,27 @@ async fn pending_cancellation_future_survives_ingress_poll_and_completes_once() 
             .finish(),
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    assert_eq!(polls.load(Ordering::SeqCst), 1, "ingress should try the first poll");
-    assert!(cancellation.await.expect("pending notification should survive").is_none());
-    assert_eq!(calls.load(Ordering::SeqCst), 1, "the inner service must not be called again");
-    assert_eq!(polls.load(Ordering::SeqCst), 2, "the same future should finish on its next poll");
+    assert_eq!(
+        polls.load(Ordering::SeqCst),
+        1,
+        "ingress should try the first poll"
+    );
+    assert!(
+        cancellation
+            .await
+            .expect("pending notification should survive")
+            .is_none()
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the inner service must not be called again"
+    );
+    assert_eq!(
+        polls.load(Ordering::SeqCst),
+        2,
+        "the same future should finish on its next poll"
+    );
 }
 
 struct PendingCancellationService {

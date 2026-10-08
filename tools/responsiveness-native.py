@@ -57,7 +57,10 @@ class NativeEvidence:
                 "engine::query::lifecycle::tests::query_stops_when_response_closes_during_analysis",
                 "engine::query::lifecycle::tests::query_stops_when_request_token_is_cancelled_during_analysis",
                 "engine::query::lifecycle::tests::cancellation_before_publication_cleans_up_and_allows_the_next_query"],
-            "rg_body_ir": ["resolution::infer::tests::cancelling_recursive_inference_never_finalizes_partial_body_facts"]},
+            "rg_body_ir": ["resolution::infer::tests::cancelling_recursive_inference_never_finalizes_partial_body_facts"],
+            "rg_lsp_server": [
+                "ingress::service::tests::admitted_cancellation_drops_pending_hover_without_polling_its_notification_future",
+                "ingress::service::tests::pending_cancellation_future_survives_ingress_poll_and_completes_once"]},
         "RSP-005": {
             "rg_lsp_engine": [
                 "engine::query::lifecycle::tests::wrapped_cancellation_is_distinct_from_a_source_failure_racing_with_cancellation"],
