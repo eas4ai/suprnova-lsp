@@ -31,7 +31,7 @@ class NativeEvidenceIntegrity(unittest.TestCase):
 
     def test_preserves_each_case_and_failed_outcome(self):
         observed = self.assess(self.discovery, self.events)
-        self.assertEqual(sum(len(cases) for cases in observed.values()), 35)
+        self.assertEqual(sum(len(cases) for cases in observed.values()), 39)
         self.assertTrue(all(result for cases in observed.values() for result in cases.values()))
         self.events[1]["event"] = "failed"
         failed = self.assess(self.discovery, self.events, 100)
