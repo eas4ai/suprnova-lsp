@@ -4,6 +4,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 
 import { EXTENSION_COMMANDS } from "../src/commands";
+import type { HoverOrigin } from "../src/features/hover-actions-model";
 import { waitFor, withTimeout } from "./async";
 import { RendererEditor } from "./renderer-editor";
 import { ResponsivenessProtocol } from "./responsiveness-protocol";
@@ -122,7 +123,68 @@ suite("Suprnova LSP responsiveness", () => {
         (state) => state.visible && state.text.includes("Builder<User>"),
       );
       observations.visibleObservedAt = Date.now();
-      observations.visibleSnapshot = await ResponsivenessProtocol.snapshot();
+      const visibleSnapshot = await ResponsivenessProtocol.snapshot();
+      observations.visibleSnapshot = visibleSnapshot;
+      assert.ok(
+        !visibleSnapshot.events.some(
+          (event) =>
+            event.type === "send-request" &&
+            ["textDocument/typeDefinition", "textDocument/implementation"].includes(
+              event.message.method ?? "",
+            ),
+        ),
+        "displaying hover must not wait for navigation requests",
+      );
+      const contents = following?.flatMap((hover) => hover.contents) ?? [];
+      const link = contents
+        .map((content) => (typeof content === "string" ? content : content.value))
+        .join("\n")
+        .match(/command:suprnova-lsp\.gotoTypeFromHover\?([^)]*)/);
+      assert.ok(link, "hover should retain a type navigation action");
+      const [origin] = JSON.parse(decodeURIComponent(link[1])) as [HoverOrigin];
+      assert.equal(origin.uri, document.uri.toString());
+      assert.equal(origin.version, document.version);
+      assert.ok(
+        origin.range?.start !== undefined && origin.range.end !== undefined,
+        "encoded VS Code ranges must retain the serialized object shape",
+      );
+      await withTimeout(
+        vscode.commands.executeCommand(EXTENSION_COMMANDS.goToTypeFromHover, origin),
+        "navigate using decoded hover origin",
+      );
+      const navigation = await ResponsivenessProtocol.snapshot();
+      const lookup = navigation.events.find(
+        (event) =>
+          event.type === "send-request" && event.message.method === "textDocument/typeDefinition",
+      );
+      assert.ok(lookup, "navigation must query on click");
+      const target = navigation.events.find(
+        (event) => event.type === "receive-response" && event.message.id === lookup.message.id,
+      );
+      assert.ok(target && target.message.error === undefined, "type lookup must succeed");
+      observations.navigation = { origin, snapshot: navigation };
+      assert.ok(
+        await editor.edit((edit) =>
+          edit.insert(
+            document!.positionAt(document!.getText().length),
+            "\n// hover navigation revision fence\n",
+          ),
+        ),
+      );
+      await withTimeout(
+        vscode.commands.executeCommand(EXTENSION_COMMANDS.goToTypeFromHover, origin),
+        "reject navigation from an obsolete hover",
+      );
+      const obsolete = await ResponsivenessProtocol.snapshot();
+      assert.equal(
+        obsolete.events.filter(
+          (event) =>
+            event.type === "send-request" && event.message.method === "textDocument/typeDefinition",
+        ).length,
+        1,
+        "editing the origin must suppress the obsolete navigation request",
+      );
+      observations.obsoleteNavigation = obsolete;
     } finally {
       try {
         const report = process.env.SUPRNOVA_LSP_EXTENSION_TEST_REPORT;

@@ -7,6 +7,8 @@
 import * as vscode from "vscode";
 import {
   ExecuteCommandRequest,
+  ImplementationRequest,
+  TypeDefinitionRequest,
   LanguageClient,
   State,
   type LanguageClientOptions,
@@ -14,7 +16,8 @@ import {
 
 import { SERVER_COMMANDS, SERVER_NOTIFICATIONS } from "../commands";
 import { ExtensionConfig } from "../config";
-import { hoverMiddleware } from "../features/hover-actions";
+import { HoverActions } from "../features/hover-actions";
+import type { HoverOrigin, ProtocolDefinitionLike } from "../features/hover-actions-model";
 import {
   ClientStatus,
   type ActiveWorkspaceState,
@@ -43,6 +46,7 @@ export class LanguageClientSession implements vscode.Disposable {
     status: StatusView,
     private readonly extensionUri: vscode.Uri,
     private readonly workspaceFolder: vscode.WorkspaceFolder,
+    private readonly hoverActions: HoverActions,
   ) {
     this.clientStatus = new ClientStatus(status);
   }
@@ -57,6 +61,26 @@ export class LanguageClientSession implements vscode.Disposable {
 
   public isRunning(): boolean {
     return this.client !== undefined && this.clientStatus.isRunning();
+  }
+
+  public async hoverNavigation(
+    origin: HoverOrigin,
+    kind: "type" | "implementation",
+  ): Promise<ProtocolDefinitionLike> {
+    const client = this.client;
+    if (client === undefined || !this.isRunning()) {
+      throw new Error("Suprnova LSP server is not running");
+    }
+    const params = { textDocument: { uri: origin.uri }, position: origin.position };
+    const result = await (kind === "type"
+      ? client.sendRequest(TypeDefinitionRequest.type, params)
+      : client.sendRequest(ImplementationRequest.type, params));
+    // A stopped session may finish an already queued request while shutting down.
+    // Its result must not navigate after a replacement session has taken over.
+    if (this.client !== client || !this.isRunning()) {
+      throw new Error("Suprnova LSP server changed during navigation; hover again");
+    }
+    return result;
   }
 
   public async start(): Promise<boolean> {
@@ -238,7 +262,7 @@ export class LanguageClientSession implements vscode.Disposable {
 
   private middleware(): LanguageClientOptions["middleware"] {
     return {
-      ...hoverMiddleware(() => this.client, this.extensionLog),
+      ...this.hoverActions.middleware(),
       handleWorkDoneProgress: (token, params, next) => {
         this.clientStatus.handleWorkDoneProgress(token, params, this.isActiveRustDocumentDirty());
         next(token, params);

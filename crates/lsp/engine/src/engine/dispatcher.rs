@@ -1,9 +1,11 @@
-//! FIFO command routing for the single semantic execution lane.
+//! Command routing for the single semantic execution lane.
 //!
 //! RPC tasks may enqueue work concurrently, but saved-project changes and semantic queries run one
 //! at a time here. This is intentional: query-time materialization mutates package residency, so a
 //! pool of otherwise read-only queries would still need to coordinate ownership of the project.
 //! Background deferred indexing follows the same rule by returning its result as another command.
+//! The queue prefers hover and completion between project mutations; it cannot interrupt a
+//! command that has already started.
 
 use std::sync::{
     Arc,
@@ -16,6 +18,7 @@ use crate::{
         command::EngineCommand,
         project::ProjectCoordinator,
         query::{QueryContext, QueryRunner},
+        queue::EngineCommandQueue,
     },
     memory::MemoryControl,
     service::ServiceNotificationsSink,
@@ -55,7 +58,8 @@ impl EngineDispatcher {
     pub(super) fn run(mut self, receiver: Receiver<QueuedEngineCommand>) {
         tracing::debug!("LSP engine dispatcher started");
 
-        while let Ok(queued) = receiver.recv() {
+        let mut queue = EngineCommandQueue::new(receiver);
+        while let Some(queued) = queue.next() {
             let queue_elapsed = queued.enqueued_at.elapsed();
             let cancellation = queued.cancellation;
             let command = queued.command;

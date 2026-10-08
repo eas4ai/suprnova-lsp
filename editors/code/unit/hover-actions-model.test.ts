@@ -8,6 +8,7 @@ import {
   protocolDefinitionLocations,
   uniqueLocations,
   type SerializedLocation,
+  type HoverOrigin,
 } from "../src/features/hover-actions-model";
 import { EXTENSION_COMMANDS } from "../src/commands";
 
@@ -46,20 +47,17 @@ describe("hover action model", () => {
     );
   });
 
-  it("renders trusted command links with singular and plural labels", () => {
-    const typeTarget = location("file:///src/types.rs", 1, 0, 1, 6);
-    const implTargets = [
-      location("file:///src/lib.rs", 4, 0, 4, 8),
-      location("file:///src/lib.rs", 8, 0, 8, 8),
-    ];
+  it("encodes the originating document session and revision for deferred navigation", () => {
+    const origin: HoverOrigin = {
+      uri: "file:///src/lib.rs",
+      position: { line: 4, character: 8 },
+      range: range(4, 8, 4, 12),
+      version: 7,
+      session: "opened-document-session",
+    };
     const actions = [
-      hoverAction(EXTENSION_COMMANDS.goToTypeFromHover, [typeTarget], "type", "type definitions"),
-      hoverAction(
-        EXTENSION_COMMANDS.goToImplementationFromHover,
-        implTargets,
-        "implementation",
-        "implementations",
-      ),
+      hoverAction(EXTENSION_COMMANDS.goToTypeFromHover, "type", origin),
+      hoverAction(EXTENSION_COMMANDS.goToImplementationFromHover, "implementation", origin),
     ];
 
     const actual = hoverActionLinkLine(actions);
@@ -70,21 +68,17 @@ describe("hover action model", () => {
     ]);
     assert.equal(
       actual.markdown,
-      `Go to ${commandLink("type", EXTENSION_COMMANDS.goToTypeFromHover, [typeTarget])} | ${commandLink(
-        "2 implementations",
+      `Go to ${commandLink("type", EXTENSION_COMMANDS.goToTypeFromHover, origin)} | ${commandLink(
+        "implementation",
         EXTENSION_COMMANDS.goToImplementationFromHover,
-        implTargets,
+        origin,
       )}`,
     );
   });
 });
 
-function commandLink(
-  label: string,
-  command: string,
-  locations: readonly SerializedLocation[],
-): string {
-  const args = encodeURIComponent(JSON.stringify([locations]));
+function commandLink(label: string, command: string, origin: HoverOrigin): string {
+  const args = encodeURIComponent(JSON.stringify([origin]));
   return `[${label}](command:${command}?${args})`;
 }
 

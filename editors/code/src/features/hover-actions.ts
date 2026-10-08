@@ -1,18 +1,7 @@
-/**
- * Adds suprnova-lsp-specific actions to VS Code hover results.
- *
- * The language server provides navigation data through standard LSP requests; this feature turns
- * that data into safe command links so users can jump from hover text to related declarations.
- */
+/** Return hover text promptly; look up navigation destinations when a link is clicked. */
+import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
-import {
-  ImplementationRequest,
-  TypeDefinitionRequest,
-  type ImplementationParams,
-  type LanguageClient,
-  type LanguageClientOptions,
-  type TypeDefinitionParams,
-} from "vscode-languageclient/node";
+import type { LanguageClientOptions } from "vscode-languageclient/node";
 
 import { EXTENSION_COMMANDS } from "../commands";
 import {
@@ -21,207 +10,170 @@ import {
   locationsExcludingCurrentHover,
   protocolDefinitionLocations,
   uniqueLocations,
-  type HoverAction,
-  type SerializedLocation,
-  type SerializedRange,
+  type HoverOrigin,
+  type ProtocolDefinitionLike,
 } from "./hover-actions-model";
 
-export function hoverMiddleware(
-  clientProvider: () => LanguageClient | undefined,
-  output: vscode.LogOutputChannel,
-): LanguageClientOptions["middleware"] {
-  return {
-    async provideHover(document, position, token, next) {
-      const hover = await next(document, position, token);
-      if (hover == null || token.isCancellationRequested) {
-        return hover;
-      }
+export class HoverActions {
+  // A weak key distinguishes reopening a document from editing the same open
+  // document, without retaining its text after VS Code closes it.
+  private readonly sessions = new WeakMap<vscode.TextDocument, string>();
 
-      const client = clientProvider();
-      if (client === undefined) {
-        return hover;
-      }
+  public constructor(
+    private readonly output: vscode.LogOutputChannel,
+    private readonly load: (
+      origin: HoverOrigin,
+      kind: "type" | "implementation",
+    ) => Promise<ProtocolDefinitionLike>,
+  ) {}
 
-      try {
-        const [rawTypeLocations, rawImplementationLocations] = await Promise.all([
-          navigationLocationsOrEmpty(output, "hover go-to-type", () =>
-            typeDefinitionLocations(client, document, position),
-          ),
-          navigationLocationsOrEmpty(output, "hover go-to-implementation", () =>
-            implementationLocations(client, document, position),
-          ),
-        ]);
-        const typeLocations = locationsExcludingCurrentHover(
-          rawTypeLocations,
-          document.uri.toString(),
-          hoverRange(hover.range),
-        );
-        const implementationTargets = locationsExcludingCurrentHover(
-          rawImplementationLocations,
-          document.uri.toString(),
-          hoverRange(hover.range),
-        );
-        if (token.isCancellationRequested) {
+  public middleware(): LanguageClientOptions["middleware"] {
+    return {
+      provideHover: async (document, position, token, next) => {
+        const version = document.version;
+        const hover = await next(document, position, token);
+        if (token.isCancellationRequested || document.isClosed || document.version !== version) {
+          return undefined;
+        }
+        if (hover == null) {
           return hover;
         }
+        let session = this.sessions.get(document);
+        if (session === undefined) {
+          session = randomUUID();
+          this.sessions.set(document, session);
+        }
+        const origin: HoverOrigin = {
+          uri: document.uri.toString(),
+          position: { line: position.line, character: position.character },
+          // VS Code Range.toJSON() produces a tuple. Command arguments need the
+          // same plain range shape that location filtering reads after decoding.
+          range:
+            hover.range === undefined
+              ? undefined
+              : {
+                  start: { line: hover.range.start.line, character: hover.range.start.character },
+                  end: { line: hover.range.end.line, character: hover.range.end.character },
+                },
+          version,
+          session,
+        };
+        const line = hoverActionLinkLine([
+          hoverAction(EXTENSION_COMMANDS.goToTypeFromHover, "type", origin),
+          hoverAction(EXTENSION_COMMANDS.goToImplementationFromHover, "implementation", origin),
+        ]);
+        const links = new vscode.MarkdownString(line.markdown);
+        // Trust only these local command links; server documentation remains untrusted.
+        links.isTrusted = { enabledCommands: [...line.enabledCommands] };
+        const contents = Array.isArray(hover.contents) ? [...hover.contents] : [hover.contents];
+        return new vscode.Hover([...contents, links], hover.range);
+      },
+    };
+  }
 
-        return appendHoverActions(
-          hover,
-          [
-            hoverAction(
-              EXTENSION_COMMANDS.goToTypeFromHover,
-              typeLocations,
-              "type",
-              "type definitions",
-            ),
-            hoverAction(
-              EXTENSION_COMMANDS.goToImplementationFromHover,
-              implementationTargets,
-              "implementation",
-              "implementations",
-            ),
-          ].filter((action) => action.locations.length > 0),
+  public registerCommands(): vscode.Disposable {
+    return vscode.Disposable.from(
+      vscode.commands.registerCommand(EXTENSION_COMMANDS.goToTypeFromHover, (origin: unknown) =>
+        this.navigate(origin, "type"),
+      ),
+      vscode.commands.registerCommand(
+        EXTENSION_COMMANDS.goToImplementationFromHover,
+        (origin: unknown) => this.navigate(origin, "implementation"),
+      ),
+    );
+  }
+
+  private document(origin: HoverOrigin | undefined): vscode.TextDocument | undefined {
+    if (origin === undefined) {
+      return undefined;
+    }
+    return vscode.workspace.textDocuments.find(
+      (document) =>
+        !document.isClosed &&
+        document.uri.toString() === origin.uri &&
+        document.version === origin.version &&
+        this.sessions.get(document) === origin.session,
+    );
+  }
+
+  private async navigate(value: unknown, kind: "type" | "implementation") {
+    // Commands can also be invoked directly, without our trusted Markdown link.
+    // Reject malformed positions and ranges before constructing VS Code values.
+    const candidate =
+      value !== null && typeof value === "object" ? (value as Partial<HoverOrigin>) : undefined;
+    const positions = [candidate?.position];
+    if (candidate?.range !== undefined) {
+      positions.push(candidate.range?.start, candidate.range?.end);
+    }
+    if (
+      candidate === undefined ||
+      typeof candidate.uri !== "string" ||
+      typeof candidate.session !== "string" ||
+      !Number.isSafeInteger(candidate.version) ||
+      positions.some(
+        (position) =>
+          position === undefined ||
+          position === null ||
+          !Number.isSafeInteger(position.line) ||
+          position.line < 0 ||
+          !Number.isSafeInteger(position.character) ||
+          position.character < 0,
+      )
+    ) {
+      this.output.warn("invalid hover navigation origin");
+      return;
+    }
+    const origin = candidate as HoverOrigin;
+    const document = this.document(origin);
+    if (document === undefined || origin === undefined) {
+      void vscode.window.showInformationMessage(
+        "Hover target changed; hover again before navigating.",
+      );
+      return;
+    }
+    const position = new vscode.Position(origin.position.line, origin.position.character);
+    try {
+      const targets = await this.load(origin, kind);
+      // An edit or close can overtake the lookup. Never move to an old location
+      // just because the result arrived after the originating hover disappeared.
+      if (this.document(origin) !== document) {
+        void vscode.window.showInformationMessage(
+          "Hover target changed; hover again before navigating.",
         );
-      } catch (error) {
-        output.warn(`hover navigation action failed: ${String(error)}`);
-        return hover;
-      }
-    },
-  };
-}
-
-export function registerHoverActionCommands(output: vscode.LogOutputChannel): vscode.Disposable {
-  return vscode.Disposable.from(
-    registerGoToLocationsCommand(
-      EXTENSION_COMMANDS.goToTypeFromHover,
-      output,
-      "hover go-to-type",
-      "No type definition found",
-    ),
-    registerGoToLocationsCommand(
-      EXTENSION_COMMANDS.goToImplementationFromHover,
-      output,
-      "hover go-to-implementation",
-      "No implementation found",
-    ),
-  );
-}
-
-function registerGoToLocationsCommand(
-  command: string,
-  output: vscode.LogOutputChannel,
-  logLabel: string,
-  notFoundMessage: string,
-): vscode.Disposable {
-  return vscode.commands.registerCommand(
-    command,
-    async (serializedLocations?: SerializedLocation[]) => {
-      const locations = toVsCodeLocations(serializedLocations);
-      if (locations.length === 0) {
-        output.warn(`${logLabel} command ignored empty locations`);
         return;
       }
-
-      const activeEditor = vscode.window.activeTextEditor;
-      const originUri = activeEditor?.document.uri ?? locations[0].uri;
-      const originPosition = activeEditor?.selection.active ?? locations[0].range.start;
+      const locations = locationsExcludingCurrentHover(
+        uniqueLocations(protocolDefinitionLocations(targets)),
+        origin.uri,
+        origin.range,
+      ).map(
+        (target) =>
+          new vscode.Location(
+            vscode.Uri.parse(target.uri),
+            new vscode.Range(
+              target.range.start.line,
+              target.range.start.character,
+              target.range.end.line,
+              target.range.end.character,
+            ),
+          ),
+      );
+      const missing = kind === "type" ? "No type definition found" : "No implementation found";
+      if (locations.length === 0) {
+        void vscode.window.showInformationMessage(missing);
+        return;
+      }
       await vscode.commands.executeCommand(
         "editor.action.goToLocations",
-        originUri,
-        originPosition,
+        document.uri,
+        position,
         locations,
         "peek",
-        notFoundMessage,
+        missing,
       );
-    },
-  );
-}
-
-async function typeDefinitionLocations(
-  client: LanguageClient,
-  document: vscode.TextDocument,
-  position: vscode.Position,
-): Promise<SerializedLocation[]> {
-  const params: TypeDefinitionParams = {
-    textDocument: { uri: document.uri.toString() },
-    position: { line: position.line, character: position.character },
-  };
-
-  const definition = await client.sendRequest(TypeDefinitionRequest.type, params);
-  return uniqueLocations(protocolDefinitionLocations(definition));
-}
-
-async function implementationLocations(
-  client: LanguageClient,
-  document: vscode.TextDocument,
-  position: vscode.Position,
-): Promise<SerializedLocation[]> {
-  const params: ImplementationParams = {
-    textDocument: { uri: document.uri.toString() },
-    position: { line: position.line, character: position.character },
-  };
-
-  const implementation = await client.sendRequest(ImplementationRequest.type, params);
-  return uniqueLocations(protocolDefinitionLocations(implementation));
-}
-
-async function navigationLocationsOrEmpty(
-  output: vscode.LogOutputChannel,
-  label: string,
-  load: () => Promise<SerializedLocation[]>,
-): Promise<SerializedLocation[]> {
-  try {
-    return await load();
-  } catch (error) {
-    output.warn(`${label} action failed: ${String(error)}`);
-    return [];
+    } catch (error) {
+      this.output.warn(`hover ${kind} navigation failed: ${String(error)}`);
+      void vscode.window.showWarningMessage(`Suprnova LSP navigation failed: ${String(error)}`);
+    }
   }
-}
-
-function appendHoverActions(hover: vscode.Hover, actions: readonly HoverAction[]): vscode.Hover {
-  if (actions.length === 0) {
-    return hover;
-  }
-
-  const contents = Array.isArray(hover.contents) ? [...hover.contents] : [hover.contents];
-  contents.push(commandLinkLine(actions));
-  return new vscode.Hover(contents, hover.range);
-}
-
-function commandLinkLine(actions: readonly HoverAction[]): vscode.MarkdownString {
-  const linkLine = hoverActionLinkLine(actions);
-  const line = new vscode.MarkdownString(linkLine.markdown);
-
-  // Only these locally generated command links are trusted. The server-rendered docs and signatures
-  // keep VS Code's default untrusted Markdown behavior.
-  line.isTrusted = { enabledCommands: [...linkLine.enabledCommands] };
-  return line;
-}
-
-function toVsCodeLocations(
-  locations: readonly SerializedLocation[] | undefined,
-): vscode.Location[] {
-  return (locations ?? []).map(
-    (location) => new vscode.Location(vscode.Uri.parse(location.uri), range(location.range)),
-  );
-}
-
-function hoverRange(range: vscode.Range | undefined): SerializedRange | undefined {
-  if (range === undefined) {
-    return undefined;
-  }
-
-  return {
-    start: range.start,
-    end: range.end,
-  };
-}
-
-function range(range: SerializedRange): vscode.Range {
-  return new vscode.Range(
-    range.start.line,
-    range.start.character,
-    range.end.line,
-    range.end.character,
-  );
 }

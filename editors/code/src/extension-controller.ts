@@ -11,6 +11,7 @@ import { LanguageClientSlot } from "./language-client/language-client-slot";
 import type { LanguageClientSessionSnapshot } from "./language-client/language-client-session";
 import { isRustFile } from "./utils/lsp-utils";
 import { StatusView, type StatusSnapshot } from "./status/status-view";
+import { HoverActions } from "./features/hover-actions";
 
 export interface ExtensionControllerSnapshot {
   readonly status: StatusSnapshot;
@@ -29,8 +30,22 @@ export class ExtensionController implements vscode.Disposable {
     private readonly status: StatusView,
     extensionUri: vscode.Uri,
   ) {
-    this.clientSlot = new LanguageClientSlot(extensionLog, serverOutput, status, extensionUri);
+    const hoverActions = new HoverActions(extensionLog, async (origin, kind) => {
+      const session = this.clientSlot.current();
+      if (session === undefined) {
+        throw new Error("Suprnova LSP server is not running");
+      }
+      return session.hoverNavigation(origin, kind);
+    });
+    this.clientSlot = new LanguageClientSlot(
+      extensionLog,
+      serverOutput,
+      status,
+      extensionUri,
+      hoverActions,
+    );
     this.workspaceListeners = vscode.Disposable.from(
+      hoverActions.registerCommands(),
       vscode.window.onDidChangeActiveTextEditor((editor) => {
         void this.activateForEditor(editor);
       }),

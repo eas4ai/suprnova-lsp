@@ -8,7 +8,6 @@ import * as vscode from "vscode";
 
 import { EXTENSION_COMMANDS } from "./commands";
 import { ExtensionController } from "./extension-controller";
-import { registerHoverActionCommands } from "./features/hover-actions";
 import { createServerOutputChannel, isExtensionTestMode } from "./logging/server-output-channel";
 import { StatusView } from "./status/status-view";
 import { RecordingLogOutputChannel } from "./test-support/recording-output-channel";
@@ -53,7 +52,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     serverOutput.output,
     status,
     controller,
-    registerHoverActionCommands(extensionLog),
     vscode.commands.registerCommand(EXTENSION_COMMANDS.showServerActions, async () => {
       await controller?.showServerActions();
     }),
