@@ -2072,6 +2072,7 @@ dependencies = [
  "codspeed-divan-compat",
  "derive_more",
  "expect-test",
+ "libc",
  "memchr",
  "rayon",
  "rg_analysis",
