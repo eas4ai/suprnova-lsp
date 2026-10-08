@@ -12,7 +12,22 @@ native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
 
 
+class RecordedArtifact:
+    @staticmethod
+    def read(directory, hashes, name):
+        path = (directory / name).resolve(strict=True)
+        if not path.is_relative_to(directory.resolve()) or path.stat().st_size > 512 * 1024 * 1024:
+            raise ValueError("selected artifact escaped its run or exceeds its report bound")
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != hashes[name]:
+            raise ValueError("selected artifact changed: " + name)
+        return data.decode()
+
+
 class Evidence:
+    observer = native.observer
+    artifacts = RecordedArtifact
+
     def __init__(self, manifest):
         self.manifest = manifest
 

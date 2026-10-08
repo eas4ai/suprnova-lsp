@@ -77,6 +77,7 @@ class BaselineIntegrity(unittest.TestCase):
             with self.subTest(effective=effective), tempfile.TemporaryDirectory() as scratch, \
                  patch.object(check.ResponsivenessCheck, "baseline", return_value=baseline), \
                  patch.object(check.ResponsivenessCheck, "read_report", return_value=candidate), \
+                 patch.object(check.ResponsivenessCheck, "revision_evidence", return_value={"passed": True}), \
                  patch.object(check.observer.Diagnostic, "inventory", return_value=baseline["sources"]), \
                  patch.object(check.observer.Diagnostic, "runtime_fingerprint", return_value="native-source"), \
                  patch.object(check.observer.SourceSeries, "run", new_callable=AsyncMock, return_value=Path(scratch) / "candidate.json"), \
@@ -108,6 +109,7 @@ class SourceLatencyIntegrity(unittest.TestCase):
                  patch.object(check.ResponsivenessCheck, "baseline", return_value=baseline), \
                  patch.object(check.ResponsivenessCheck, "read_report", return_value=candidate), \
                  patch.object(check.ResponsivenessCheck, "matrix", side_effect=ValueError("complete latency matrix evidence has not been selected")) as matrix, \
+                 patch.object(check.ResponsivenessCheck, "revision_evidence", return_value={"passed": True}), \
                  patch.object(check.observer.Diagnostic, "inventory", return_value=baseline["sources"]), \
                  patch.object(check.observer.Diagnostic, "runtime_fingerprint", return_value="unit-test-native-source"), \
                  patch.object(check.observer.SourceSeries, "run", new_callable=AsyncMock, return_value=Path(scratch) / "candidate.json"), \

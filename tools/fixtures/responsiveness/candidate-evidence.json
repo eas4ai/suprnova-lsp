@@ -3,5 +3,27 @@
   "matrix": {
     "path": "target/agent-debug/runs/20261008T123820401Z-rsp-matrix-2030191-634b4e/report.json",
     "sha256": "d6827eceb1f1725d0d31d2f519ac28a27fca819f3dc310d0e8c3108c9fdd169a"
+  },
+  "native": {
+    "path": "target/agent-debug/runs/20261008T150433791Z-rsp-native-3522255-8abcff/report.json",
+    "sha256": "b9fc8fab95fdd77674f83ee2688f1c7a662bf3a55ec2ea372f8bca2ab7e7f748"
+  },
+  "semantic": {
+    "path": "target/agent-debug/runs/20261008T154856730Z-editor-import-3910227-c097b7/observations.json",
+    "sha256": "b119f549f29a984e4551094161c1fb8452496d99a8a413e2f15008cf7cea621a",
+    "queryLogs": {
+      "initial/stdout.log": "f6c56d5de8f72d8b2b6d81c37967b3c711a7777a6fc9d96fbb0fb9f446e44323",
+      "batched/stdout.log": "e1b271e3f25951eb64dbc32de8d085ac14272503bd4648bec568eafcf20b0aef",
+      "source-initial/stdout.log": "9224dfceb9119ca6f6b2f9ac92e59485a274947218b676c5731ee194bddd4e30",
+      "source-batched/stdout.log": "b88234de55721a38f1654350c8d69fc351b6dfe1fd4dc80c0e5dfef1f3ab35aa"
+    }
+  },
+  "semanticCleanup": {
+    "path": "target/agent-debug/runs/20261008T154856730Z-editor-import-3910227-c097b7/summary.json",
+    "sha256": "54f04e3812f7703762ac4db30297c660d112e97371625a01f9c7a484636c942b"
+  },
+  "editor": {
+    "path": "target/agent-debug/runs/20261008T155836237Z-rsp-editor-4001731-f59b4c/report.json",
+    "sha256": "2b45c2923c80cd1689fa0c3a977e1b684d4bc22718a17132051085ed6a9198f9"
   }
 }

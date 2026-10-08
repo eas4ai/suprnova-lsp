@@ -197,8 +197,13 @@ async def main():
     user = module("suprnova_user", ROOT / "tools/sudus-suprnova-user.py")
     engine = module("engine_import", ROOT / "tools/sudus-engine-import.py")
     runner = module("agent_debug", ROOT / "tools/agent-debug.py")
+    runtime = module("editor_runtime_identity", ROOT / "tools/sudus-responsiveness.py")
     runner.install_signal_handlers()
     directory = runner.create_run_directory("editor-import")
+    observed_sources = runtime.Diagnostic.inventory()
+    observed_runtime = runtime.Diagnostic.runtime_fingerprint()
+    observer_names = ("sudus-editor-import.py", "sudus-suprnova-user.py", "sudus-engine-import.py", "lsp-query.py", "agent-debug.py")
+    observed_tools = {name: user.digest((ROOT / "tools" / name).read_bytes()) for name in observer_names}
     environment = dict(os.environ, RUSTUP_TOOLCHAIN=user.TOOLCHAIN, CARGO_BUILD_JOBS="2", RAYON_NUM_THREADS="2",
                        RUST_MIN_STACK="16777216", CARGO_TARGET_DIR=str(ROOT / "target/agent-debug/devlist-target"), CARGO_NET_OFFLINE="true")
     build_env = dict(environment, RUSTUP_TOOLCHAIN="1.98.1", CARGO_TARGET_DIR=str(ROOT / "target"), NEXTEST_EXPERIMENTAL_LIBTEST_JSON="1")
@@ -257,6 +262,7 @@ async def main():
         if code != 0:
             raise ValueError("current LSP executable failed to compile")
         binary = runner.rust_glancer_binary("debug")
+        binary_hash = user.digest(binary.read_bytes())
         editor_report = directory / "editor-results.json"
         editor_env = dict(build_env, SUPRNOVA_LSP_TEST_SERVER=str(binary), SUPRNOVA_LSP_EXTENSION_TEST_GREP="EDT-001 sends",
                           SUPRNOVA_LSP_EXTENSION_TEST_REPORT=str(editor_report))
@@ -270,7 +276,7 @@ async def main():
         if not cargo:
             raise ValueError("Cargo executable missing")
         shim = tools / "cargo"
-        shim.write_text(f"#!{sys.executable}\nimport os, sys\nargs = sys.argv[1:]\nif args and args[0] == 'metadata':\n    args += ['--locked', '--offline']\nos.execv({cargo!r}, ['cargo', *args])\n")
+        shim.write_text(f"#!{sys.executable}\nimport os, sys\nargs = sys.argv[1:]\nif args and args[0] == 'metadata':\n    for flag in ('--locked', '--offline'):\n        if flag not in args: args.append(flag)\nos.execv({cargo!r}, ['cargo', *args])\n")
         shim.chmod(0o755)
         query_env = dict(environment, PATH=str(tools) + os.pathsep + environment["PATH"])
         original = (user.APP / "src/models/user.rs").read_text()
@@ -334,7 +340,22 @@ async def main():
             if re.search(r"^\s*(?:pub(?:\([^)]*\))?\s+)?\w+\s*:\s*[^\n]*(?:RustdocExport|rustdoc_types|rd::Crate)", path.read_text(), re.M):
                 retained = False
         results = assess(tests, editor, reports, traces, retained, setting_description_ok())
-        runner.write_json(directory / "observations.json", {"tests": tests, "editor": editor, "reports": reports, "traces": traces, "results": results})
+        artifacts = [directory / phase / "stdout.log" for phase in ("discovery", "semantic")]
+        artifacts += [editor_report, export_path]
+        artifacts += [directory / f"{mode}{suffix}" for mode in MODES for suffix in ("-plan.json", ".exec")]
+        identity = {
+            "sources": observed_sources,
+            "applicationInputsUnchanged": observed_sources == runtime.Diagnostic.inventory(),
+            "runtimeSourcesSha256": observed_runtime,
+            "runtimeSourcesUnchanged": observed_runtime == runtime.Diagnostic.runtime_fingerprint(),
+            "observers": observed_tools,
+            "observersUnchanged": observed_tools == {name: user.digest((ROOT / "tools" / name).read_bytes()) for name in observer_names},
+            "binary": str(binary), "binarySha256": binary_hash,
+            "binaryUnchanged": binary_hash == user.digest(binary.read_bytes()),
+        }
+        runner.write_json(directory / "observations.json", {"identity": identity,
+            "artifacts": {str(path.relative_to(directory)): user.digest(path.read_bytes()) for path in artifacts},
+            "tests": tests, "editor": editor, "reports": reports, "traces": traces, "results": results})
         for req in sorted(results):
             print(f"sudus: {req}: {'pass' if results[req] else 'fail'}", flush=True)
         return 0 if all(results.values()) else 1
