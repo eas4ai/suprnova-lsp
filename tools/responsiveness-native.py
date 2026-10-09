@@ -26,6 +26,7 @@ class NativeEvidence:
               "rg_ty": [
                   "trait_selection::tests::canonical_impls::canonical_projection_skips_disjoint_direct_impl_candidates"],
             "rg_lsp_engine": [
+                  "engine::project::tests::hover::binding_hover_prepares_source_once_across_declaration_probe_and_body_fallback",
                 "engine::queue::tests::hover_bypasses_queued_analysis_but_the_oldest_query_gets_the_next_turn",
                 "engine::queue::tests::completion_receives_the_same_bounded_preference_as_hover",
                 "engine::queue::tests::finite_lookahead_does_not_drain_an_unbounded_query_prefix"]},
