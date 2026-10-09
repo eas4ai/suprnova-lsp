@@ -1935,6 +1935,7 @@ dependencies = [
  "rg_ir_model",
  "rg_lsp_proto",
  "rg_parse",
+ "rg_profile",
  "rg_project",
  "rg_source",
  "rg_std",
