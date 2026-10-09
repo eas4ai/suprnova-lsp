@@ -44,9 +44,6 @@ class NativeEvidence:
                 "tests::captured_saved_source_publishes_the_captured_text_and_revision",
                 "tests::captured_saved_source_rejects_newer_disk_without_changing_the_published_project"],
             "rg_lsp_engine": [
-                "engine::query::lifecycle::tests::hover_completion_publishes_before_local_release_and_drains_cleanup",
-                "engine::query::lifecycle::tests::completion_route_returns_owned_none_with_exact_global_scope",
-                "engine::query::lifecycle::tests::completion_route_rejects_error_after_publication",
                 "engine::queue::tests::hover_cannot_cross_an_earlier_save_background_completion_or_shutdown",
                 "engine::project::tests::rustdoc_candidates_use_the_captured_graph_and_reject_late_inputs",
                 "engine::project::tests::hover::declaration_hover_preserves_pending_saved_bodies_and_current_header_coordinates",
@@ -63,9 +60,6 @@ class NativeEvidence:
                 "ingress::service::tests::save_echo_is_recorded_before_any_handler_future_is_polled"]},
         "RSP-004": {
             "rg_lsp_engine": [
-                "engine::query::lifecycle::tests::completion_route_cancelled_before_publication_drains_locals",
-                "engine::query::lifecycle::tests::completion_route_receiver_drop_before_publication_drains_locals",
-                "engine::query::lifecycle::tests::completion_receiver_drop_between_final_check_and_send_still_drains_locals",
                 "engine::queue::tests::interactive_burst_does_not_starve_ordinary_analysis",
                 "engine::queue::tests::replenished_interactive_requests_leave_oldest_commands_a_turn",
                 "engine::queue::tests::dropping_the_queue_releases_buffered_and_unread_request_payloads",
@@ -79,9 +73,6 @@ class NativeEvidence:
                 "ingress::service::tests::pending_cancellation_future_survives_ingress_poll_and_completes_once"]},
         "RSP-005": {
             "rg_lsp_engine": [
-                "engine::query::lifecycle::tests::completion_route_preserves_real_error_racing_with_cancellation",
-                "engine::query::lifecycle::tests::completion_route_preserves_wrapped_cancellation_without_empty_success",
-                "engine::query::lifecycle::tests::completion_route_preserves_save_required_error",
                 "engine::query::lifecycle::tests::wrapped_cancellation_is_distinct_from_a_source_failure_racing_with_cancellation"],
             "rg_lsp_server": [
                 "methods::query_response::tests::internal_error_preserves_context_chain",

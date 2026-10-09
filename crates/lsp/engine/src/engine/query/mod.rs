@@ -36,7 +36,7 @@ use rg_std::UniqueVec;
 
 pub(super) use self::lifecycle::{QueryCancellation, QueryContext};
 use self::{
-    lifecycle::{QueryCompleted, QueryCompletion, QueryRunError},
+    lifecycle::QueryRunError,
     navigation::{CapturedNavigationDocuments, CapturedTargetLocation},
 };
 use crate::{
@@ -596,8 +596,7 @@ impl<'a> QueryRunner<'a> {
         &mut self,
         input: GlobalPositionSnapshot,
         cancellation: &QueryCancellation<'_>,
-        completion: QueryCompletion<'_, Option<gen_lsp_types::Hover>>,
-    ) -> Result<QueryCompleted, QueryRunError> {
+    ) -> Result<Option<gen_lsp_types::Hover>, QueryRunError> {
         let (target, _, documents, position) = input.into_parts();
         let document = documents
             .iter()
@@ -624,7 +623,7 @@ impl<'a> QueryRunner<'a> {
                 )
                 .context("prepare hover analysis")?
             else {
-                return completion.complete(None);
+                return Ok(None);
             };
             preparation_us += preparation_started.elapsed().as_micros();
 
@@ -713,10 +712,8 @@ impl<'a> QueryRunner<'a> {
                 elapsed_ms = started.elapsed().as_millis(),
                 "hover query finished"
             );
-            // Rendering and link conversion are finished. Publish the owned value before releasing
-            // its analysis. Receiving this value can cancel the RPC token, so the remaining tail
-            // must drain unconditionally on this lane without another cancellation checkpoint.
-            let completed = completion.complete(hover)?;
+            // Owned protocol data no longer borrows the analysis. Time its release separately
+            // from preparation and rendering, while keeping it on the same query lane.
             let release_started = Instant::now();
             drop(destinations);
             drop(current);
@@ -724,7 +721,7 @@ impl<'a> QueryRunner<'a> {
                 elapsed_us = release_started.elapsed().as_micros(),
                 "hover request-owned analysis released"
             );
-            return Ok(completed);
+            return Ok(hover);
         }
     }
 
