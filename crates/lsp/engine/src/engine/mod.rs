@@ -51,11 +51,15 @@ impl EngineHandle {
         notifications: ServiceNotificationsSink,
     ) -> Self {
         let (sender, receiver) = mpsc::channel();
-        thread::spawn({
-            let sender = sender.clone();
-            let notifications = notifications.clone();
-            move || EngineDispatcher::new(sender, memory_control, notifications).run(receiver)
-        });
+        // A separate name lets runtime measurements distinguish this lane from background workers.
+        thread::Builder::new()
+            .name("rg-analysis".to_string())
+            .spawn({
+                let sender = sender.clone();
+                let notifications = notifications.clone();
+                move || EngineDispatcher::new(sender, memory_control, notifications).run(receiver)
+            })
+            .expect("failed to spawn analysis engine thread");
 
         Self {
             sender,
