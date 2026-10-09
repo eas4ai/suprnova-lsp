@@ -29,17 +29,17 @@ pub struct SemanticIrReadTxn<'db> {
 
 impl Drop for SemanticIrReadTxn<'_> {
     fn drop(&mut self) {
-        if !tracing::enabled!(tracing::Level::TRACE) {
-            return;
+        let started = tracing::enabled!(tracing::Level::TRACE).then(std::time::Instant::now);
+        PackageReadEntry::release_loaded(&mut self.packages);
+        if let Some(started) = started {
+            // Include both decoded-value retirement and the final serial loader-handle release.
+            drop(std::mem::take(&mut self.packages));
+            tracing::trace!(
+                thread_id = ?std::thread::current().id(),
+                elapsed_us = started.elapsed().as_micros(),
+                "semantic read entries released"
+            );
         }
-        // Time the ordinary serial release, including any loader released by the last entry.
-        let started = std::time::Instant::now();
-        drop(std::mem::take(&mut self.packages));
-        tracing::trace!(
-            thread_id = ?std::thread::current().id(),
-            elapsed_us = started.elapsed().as_micros(),
-            "semantic read entries released"
-        );
     }
 }
 

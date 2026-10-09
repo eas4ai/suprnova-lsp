@@ -390,7 +390,12 @@ impl ProjectState {
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
-    use std::{fs, process::Command};
+    use std::{
+        fs,
+        process::Command,
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
 
     use super::PackageArtifactReaders;
     use crate::{PackageResidencyPolicy, testonly::ProjectFixture};
@@ -461,24 +466,70 @@ pub struct App;
     }
 
     fn artifact_release_workers() -> Vec<std::ffi::OsString> {
-        fs::read_dir("/proc/self/task")
-            .expect("process tasks should be readable")
-            .filter_map(|entry| {
-                let entry = match entry {
-                    Ok(entry) => entry,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-                    Err(error) => panic!("read process task entry: {error}"),
-                };
-                let name = match fs::read_to_string(entry.path().join("comm")) {
-                    Ok(name) => name,
-                    // A fixture/runtime thread can exit between listing its task and reading it.
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-                    Err(error) => panic!("read process task name: {error}"),
-                };
-                // Linux comm retains only the first 15 bytes of the production worker name.
-                (name.trim_end() == "release-artifac").then(|| entry.file_name())
-            })
-            .collect()
+        // pthread_join waits for child_tid to clear. Linux can remove the task from procfs
+        // slightly later, so wait for disappearance without accepting any visible state.
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let workers: Vec<_> = fs::read_dir("/proc/self/task")
+                .expect("process tasks should be readable")
+                .filter_map(|entry| {
+                    let entry = match entry {
+                        Ok(entry) => entry,
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::NotFound
+                                || error.raw_os_error() == Some(libc::ESRCH) =>
+                        {
+                            return None;
+                        }
+                        Err(error) => panic!("read process task entry: {error}"),
+                    };
+                    let name = match fs::read_to_string(entry.path().join("comm")) {
+                        Ok(name) => name,
+                        // A fixture/runtime thread can exit between listing its task and reading it.
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::NotFound
+                                || error.raw_os_error() == Some(libc::ESRCH) =>
+                        {
+                            return None;
+                        }
+                        Err(error) => panic!("read process task name: {error}"),
+                    };
+                    // Linux comm retains only the first 15 bytes of the production worker name.
+                    if name.trim_end() != "release-artifac" {
+                        return None;
+                    }
+                    let stat = match fs::read_to_string(entry.path().join("stat")) {
+                        Ok(stat) => stat,
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::NotFound
+                                || error.raw_os_error() == Some(libc::ESRCH) =>
+                        {
+                            return None;
+                        }
+                        Err(error) => panic!("read artifact release task stat: {error}"),
+                    };
+                    let (_, fields) = stat
+                        .rsplit_once(')')
+                        .expect("task stat should contain its comm");
+                    let state = fields
+                        .split_whitespace()
+                        .next()
+                        .expect("task stat should contain its state");
+                    Some(std::ffi::OsString::from(format!(
+                        "task={} comm={} state={state} stat={}",
+                        entry.file_name().to_string_lossy(),
+                        name.trim_end(),
+                        stat.trim_end()
+                    )))
+                })
+                .collect();
+            if workers.is_empty() || Instant::now() >= deadline {
+                return workers;
+            }
+            std::thread::sleep(
+                Duration::from_millis(1).min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
     }
 
     fn artifact_handles(fixture: &ProjectFixture) -> usize {
@@ -502,6 +553,51 @@ pub struct App;
                 },
             )
             .count()
+    }
+
+    #[test]
+    fn live_artifact_release_worker_is_retained_at_observation_deadline() {
+        if isolated_release_test(
+            "storage::loaders::tests::live_artifact_release_worker_is_retained_at_observation_deadline",
+        ) {
+            return;
+        }
+        let (started, ready) = mpsc::channel();
+        let (release, held) = mpsc::channel();
+        let worker = std::thread::Builder::new()
+            .name("release-artifacts".to_owned())
+            .spawn(move || {
+                let task = fs::read_link("/proc/thread-self")
+                    .unwrap()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                started.send(task).unwrap();
+                held.recv().unwrap();
+            })
+            .expect("violating worker should start");
+        let started = ready.recv_timeout(Duration::from_secs(10));
+        let observed = std::panic::catch_unwind(artifact_release_workers);
+        // Always release and manually join, even if observation itself fails.
+        let released = release.send(());
+        let joined = worker.join();
+        let after_join = artifact_release_workers();
+        assert!(released.is_ok());
+        assert!(joined.is_ok());
+        let started = started.expect("violating worker must reach its hold gate");
+        let observed = observed.expect("worker observation should succeed");
+        assert_eq!(
+            observed.len(),
+            1,
+            "held worker must be retained at the deadline: {observed:?}"
+        );
+        assert!(
+            observed[0]
+                .to_string_lossy()
+                .contains(&format!("task={started} "))
+        );
+        assert_eq!(after_join, Vec::<std::ffi::OsString>::new());
     }
 
     #[test]

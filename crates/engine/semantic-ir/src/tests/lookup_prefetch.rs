@@ -272,3 +272,38 @@ fn lookup_prefetch_cancelled_before_start_reads_nothing() {
     assert!(error.downcast_ref::<rg_std::Cancelled>().is_some());
     assert!(loader.state.reads.lock().unwrap().is_empty());
 }
+
+#[test]
+fn large_decoded_transaction_retains_its_clone_and_releases_last_owner_without_tracing() {
+    let (loader, _started) = LookupLoader::new(true, None);
+    let txn = loader.transaction(72);
+    let crates = LookupLoader::crates(72);
+    txn.prefetch_lookup_indexes(&crates, &CancellationToken::new())
+        .unwrap();
+    let retained = txn.clone();
+    drop(txn);
+
+    for crate_ref in crates {
+        assert!(retained.item_lookup_index(crate_ref).unwrap().is_some());
+    }
+    assert_eq!(loader.state.reads.lock().unwrap().len(), 72);
+    assert!(
+        loader
+            .state
+            .indexes
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|index| index.upgrade().is_some())
+    );
+    drop(retained);
+    assert!(
+        loader
+            .state
+            .indexes
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|index| index.upgrade().is_none())
+    );
+}
