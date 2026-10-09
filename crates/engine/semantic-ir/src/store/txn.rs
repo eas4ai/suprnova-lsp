@@ -107,6 +107,8 @@ impl<'db> SemanticIrReadTxn<'db> {
             return Ok(());
         }
 
+        let prefetch_started =
+            tracing::enabled!(tracing::Level::TRACE).then(std::time::Instant::now);
         let next = AtomicUsize::new(0);
         std::thread::scope(|scope| {
             let mut readers = Vec::new();
@@ -116,6 +118,13 @@ impl<'db> SemanticIrReadTxn<'db> {
                     std::thread::Builder::new()
                         .name("lookup-artifacts".to_owned())
                         .spawn_scoped(scope, move || {
+                            if let Some(started) = prefetch_started {
+                                tracing::trace!(
+                                    elapsed_us = started.elapsed().as_micros(),
+                                    thread_id = ?std::thread::current().id(),
+                                    "lookup artifact reader started"
+                                );
+                            }
                             loop {
                                 rg_std::check_cancel!(
                                     cancellation,
@@ -130,13 +139,31 @@ impl<'db> SemanticIrReadTxn<'db> {
                                 };
                                 self.item_lookup_index(*crate_ref)?;
                             }
+                            // Joining also waits for thread-local allocator cleanup. Record when
+                            // reads finish so that work is distinct from the thread's shutdown.
+                            if let Some(started) = prefetch_started {
+                                tracing::trace!(
+                                    elapsed_us = started.elapsed().as_micros(),
+                                    thread_id = ?std::thread::current().id(),
+                                    "lookup artifact reader loads finished"
+                                );
+                            }
                             Ok::<_, anyhow::Error>(())
                         })
                         .context("start a lookup artifact reader")?,
                 );
             }
             for reader in readers {
-                match reader.join() {
+                let thread_id = reader.thread().id();
+                let result = reader.join();
+                if let Some(started) = prefetch_started {
+                    tracing::trace!(
+                        elapsed_us = started.elapsed().as_micros(),
+                        thread_id = ?thread_id,
+                        "lookup artifact reader joined"
+                    );
+                }
+                match result {
                     Ok(result) => result?,
                     Err(panic) => std::panic::resume_unwind(panic),
                 }
