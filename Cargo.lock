@@ -2122,7 +2122,6 @@ dependencies = [
  "anyhow",
  "derive_more",
  "expect-test",
- "libc",
  "rg_arena",
  "rg_def_map",
  "rg_ir_model",

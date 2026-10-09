@@ -20,19 +20,9 @@ class NativeEvidence:
     # These cases cover individual invariants. They do not replace Devlist
     # timings, the sustained request stream, editor checks or memory evidence.
     cases = {
-          "RSP-002": {
-              "rg_semantic_ir": [
-                  "tests::lookup_prefetch::large_decoded_transaction_retains_its_clone_and_releases_last_owner_without_tracing",
-                  "tests::semantic_release::decoded_semantic_release_joins_eight_workers_and_preserves_retained_transaction",
-                    "tests::semantic_release::semantic_release_worker_panic_joins_other_workers_through_tls_teardown",
-                  "tests::semantic_release::sparse_decoded_semantic_release_stays_serial",
-                  "tests::semantic_release::manifest_only_semantic_release_stays_serial",
-                  "tests::semantic_release::semantic_release_without_trace_releases_payloads_and_retains_clones",
-                  "tests::semantic_release::denied_semantic_release_worker_start_releases_cells_on_parent",
-                  "tests::semantic_release::live_semantic_release_worker_is_retained_at_observation_deadline"],
-              "rg_project": [
-                  "storage::loaders::tests::live_artifact_release_worker_is_retained_at_observation_deadline"],
-              "rg_body_ir": [
+        "RSP-002": {
+            "rg_project": ["storage::loaders::tests::live_artifact_release_worker_is_retained_at_observation_deadline"],
+            "rg_body_ir": [
             "resolution::infer::tests::binding_hover_skips_unrelated_statements_only_after_its_type_settles",
             "resolution::infer::tests::binding_hover_omits_only_irrelevant_obligations_for_closed_calls"],
               "rg_ty": [

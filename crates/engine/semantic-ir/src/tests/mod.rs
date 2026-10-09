@@ -1,7 +1,5 @@
 mod builtin_derives;
 mod lookup_prefetch;
-#[cfg(target_os = "linux")]
-mod semantic_release;
 mod trait_impl_lookup;
 mod utils;
 
