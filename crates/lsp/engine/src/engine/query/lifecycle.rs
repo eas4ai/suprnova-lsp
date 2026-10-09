@@ -19,6 +19,7 @@
 //! synchronous reindex.
 
 use std::{
+    cell::RefCell,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -147,6 +148,30 @@ impl QueryContext {
     }
 }
 
+/// Proof that the query used its response endpoint after its final cancellation check.
+pub(crate) struct QueryCompleted(());
+
+/// Consume the right to complete one response once its protocol value is fully owned.
+pub(crate) struct QueryCompletion<'a, T> {
+    control: &'a QueryCancellation<'a>,
+    response: &'a RefCell<Option<(QueryScope, QueryResponder<T>)>>,
+}
+
+impl<T> QueryCompletion<'_, T> {
+    pub(crate) fn complete(self, value: T) -> Result<QueryCompleted, QueryRunError> {
+        // The RPC may disappear as the last analysis unit finishes. Check before taking the
+        // endpoint: the cancellation check itself reads whether that endpoint is closed.
+        rg_std::check_cancel!(self.control, "before query publication");
+        let (scope, sender) = self
+            .response
+            .borrow_mut()
+            .take()
+            .expect("query response is pending");
+        let _ = sender.send(Ok(QueryValue::new(value, scope)));
+        Ok(QueryCompleted(()))
+    }
+}
+
 impl QueryRunner<'_> {
     /// Run one read-only request through the common query lifecycle.
     ///
@@ -163,6 +188,32 @@ impl QueryRunner<'_> {
         respond_to: QueryResponder<T>,
         cancellation: CancellationToken,
         query: impl FnOnce(&mut Self, &QueryCancellation<'_>) -> Result<T, QueryRunError>,
+    ) where
+        T: Send + 'static,
+    {
+        self.respond_to_query_with_completion(
+            context,
+            respond_to,
+            cancellation,
+            |runner, control, completion| completion.complete(query(runner, control)?),
+        );
+    }
+
+    /// Let a query publish fully owned protocol data before releasing its temporary analysis.
+    ///
+    /// The completion consumes the endpoint and checks cancellation immediately before sending.
+    /// After completion, the closure must only release data and return its marker. In particular,
+    /// receiving a successful RPC response can cancel the token; that must not interrupt cleanup.
+    pub(crate) fn respond_to_query_with_completion<T>(
+        &mut self,
+        context: QueryContext,
+        respond_to: QueryResponder<T>,
+        cancellation: CancellationToken,
+        query: impl FnOnce(
+            &mut Self,
+            &QueryCancellation<'_>,
+            QueryCompletion<'_, T>,
+        ) -> Result<QueryCompleted, QueryRunError>,
     ) where
         T: Send + 'static,
     {
@@ -208,16 +259,29 @@ impl QueryRunner<'_> {
         let started = Instant::now();
         let memory_control = Arc::clone(&self.memory_control);
         let memory_before = MemoryReporter::snapshot(memory_control.as_ref());
+        let response = RefCell::new(Some((scope, respond_to)));
         let result = {
-            let response_is_closed = || respond_to.is_closed();
+            let response_is_closed = || {
+                response
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|(_, sender)| sender.is_closed())
+            };
             let control = QueryCancellation::new(&cancellation, &response_is_closed);
-            query(self, &control).and_then(|value| {
-                // A kernel may finish its last unit as cancellation arrives. Keep real errors
-                // intact for recovery, but never publish a successful value for obsolete work.
-                rg_std::check_cancel!(control, "before query publication");
-                Ok(value)
-            })
+            let completion = QueryCompletion {
+                control: &control,
+                response: &response,
+            };
+            query(self, &control, completion)
         };
+        let respond_to = response.into_inner();
+        // A completed query has used its sole endpoint. Once success has been sent, its tail may
+        // only release owned data; a later fallible operation would hide its error from the caller.
+        assert_eq!(
+            result.is_ok(),
+            respond_to.is_none(),
+            "query must complete once or fail before publication"
+        );
         let cancelled_checkpoint = result
             .as_ref()
             .err()
@@ -304,25 +368,25 @@ impl QueryRunner<'_> {
             }
         }
 
-        if cancelled_checkpoint.is_some() {
-            // The receiver is already gone. Cancellation is an execution detail, not a semantic
-            // query error or an empty feature result, so there is deliberately nothing to publish.
-        } else if saved_source_changed {
-            let _ = respond_to.send(Err(QueryError::SavedSourceChanged));
-        } else if should_recover {
-            // Lazy package loads can fail when an offloaded artifact becomes stale between
-            // indexing and a query. The next command sees a repaired project; this request remains
-            // explicitly unavailable instead of pretending the feature found no result.
-            let _ = respond_to.send(Err(QueryError::TemporarilyUnavailable));
-        } else {
-            let result = match result {
-                Ok(value) => Ok(QueryValue::new(value, scope)),
-                Err(QueryRunError::SaveRequired(path)) => Err(QueryError::SaveRequired { path }),
-                Err(QueryRunError::Analysis(error)) => {
-                    Err(QueryError::Internal(EngineError::from(error)))
-                }
-            };
-            let _ = respond_to.send(result);
+        if let Some((_, respond_to)) = respond_to {
+            if cancelled_checkpoint.is_some() {
+                // Cancellation is an execution detail, not an empty feature result.
+            } else if saved_source_changed {
+                let _ = respond_to.send(Err(QueryError::SavedSourceChanged));
+            } else if should_recover {
+                // Keep the failed request explicitly unavailable while the next command sees the
+                // repaired cache, rather than pretending the feature found no result.
+                let _ = respond_to.send(Err(QueryError::TemporarilyUnavailable));
+            } else {
+                let error = match result {
+                    Err(QueryRunError::SaveRequired(path)) => QueryError::SaveRequired { path },
+                    Err(QueryRunError::Analysis(error)) => {
+                        QueryError::Internal(EngineError::from(error))
+                    }
+                    Ok(_) => unreachable!("successful query has completed its response"),
+                };
+                let _ = respond_to.send(Err(error));
+            }
         }
 
         // Publication wakes the RPC task immediately. Request-owned loads and allocator pages are
@@ -364,6 +428,14 @@ mod tests {
 
     impl ServiceNotificationPublisher for NoopNotifications {
         fn send(&self, _notification: ServiceNotification) {}
+    }
+
+    struct ReleaseFlag<'a>(&'a Cell<bool>);
+
+    impl Drop for ReleaseFlag<'_> {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
     }
 
     #[test]
@@ -554,6 +626,355 @@ mod tests {
             .expect("next query succeeds");
         assert_eq!(result.value(), &[2]);
         assert_eq!(purges.0.load(std::sync::atomic::Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn hover_completion_publishes_before_local_release_and_drains_cleanup() {
+        #[derive(Debug, Default)]
+        struct Purges(std::sync::atomic::AtomicUsize);
+        impl MemoryControl for Purges {
+            fn try_purge_allocator(&self) -> bool {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                true
+            }
+        }
+
+        struct LocalAnalysisRelease<'a> {
+            response: &'a mut oneshot::Receiver<
+                Result<QueryValue<Option<gen_lsp_types::Hover>>, QueryError>,
+            >,
+            cancellation: &'a CancellationToken,
+            released: &'a Cell<bool>,
+        }
+
+        impl Drop for LocalAnalysisRelease<'_> {
+            fn drop(&mut self) {
+                let response = self
+                    .response
+                    .try_recv()
+                    .expect("owned typed hover must be published before local analysis release")
+                    .expect("completed hover must be a successful typed response");
+                assert_eq!(response.scope(), &QueryScope::SavedProject);
+                let hover = response.into_value().expect("completed hover has content");
+                let gen_lsp_types::Contents::MarkupContent(content) = hover.contents else {
+                    panic!("completed hover must keep its owned Markdown");
+                };
+                assert_eq!(content.value, "let rsp_without: Builder<User>");
+
+                // Receiving the response also drops the RPC cancellation guard. Local release
+                // and common housekeeping must still finish after that normal completion.
+                self.cancellation.cancel();
+                self.released.set(true);
+            }
+        }
+
+        let purges = Arc::new(Purges::default());
+        let memory: Arc<dyn MemoryControl> = purges.clone();
+        let mut project = test_project(Arc::clone(&memory));
+        let mut runner = QueryRunner::new(&mut project, memory);
+        let (sender, mut response) = oneshot::channel();
+        let cancellation = CancellationToken::new();
+        let released = Cell::new(false);
+        let query_returned_after_release = Cell::new(false);
+
+        runner.respond_to_query_with_completion(
+            QueryContext::saved_project("hover", Duration::ZERO),
+            sender,
+            cancellation.clone(),
+            |_, _, completion| {
+                let local_analysis = LocalAnalysisRelease {
+                    response: &mut response,
+                    cancellation: &cancellation,
+                    released: &released,
+                };
+                let hover = Some(gen_lsp_types::Hover {
+                    contents: gen_lsp_types::Contents::MarkupContent(
+                        gen_lsp_types::MarkupContent {
+                            kind: gen_lsp_types::MarkupKind::Markdown,
+                            value: "let rsp_without: Builder<User>".to_string(),
+                        },
+                    ),
+                    range: None,
+                });
+                let completed = completion.complete(hover)?;
+                drop(local_analysis);
+                query_returned_after_release.set(true);
+                Ok(completed)
+            },
+        );
+
+        assert!(cancellation.is_cancelled());
+        assert!(released.get());
+        assert!(query_returned_after_release.get());
+        assert_eq!(purges.0.load(std::sync::atomic::Ordering::Relaxed), 1);
+
+        let (sender, response) = oneshot::channel();
+        runner.respond_to_query(
+            QueryContext::saved_project("workspace_symbol", Duration::ZERO),
+            sender,
+            CancellationToken::new(),
+            |_, _| {
+                assert!(released.get(), "the next query must follow local release");
+                assert!(query_returned_after_release.get());
+                assert_eq!(purges.0.load(std::sync::atomic::Ordering::Relaxed), 1);
+                Ok(vec![2_usize])
+            },
+        );
+        let next = futures::executor::block_on(response)
+            .expect("the next query responds after cleanup")
+            .expect("the next query succeeds");
+        assert_eq!(next.value(), &[2]);
+        assert_eq!(purges.0.load(std::sync::atomic::Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn completion_route_cancelled_before_publication_drains_locals() {
+        let memory: Arc<dyn MemoryControl> = Arc::new(());
+        let mut project = test_project(Arc::clone(&memory));
+        let mut runner = QueryRunner::new(&mut project, memory);
+        let (sender, mut response) = oneshot::channel();
+        let cancellation = CancellationToken::new();
+        let released = Cell::new(false);
+        runner.respond_to_query_with_completion(
+            QueryContext::saved_project("hover", Duration::ZERO),
+            sender,
+            cancellation.clone(),
+            |_, control, completion| {
+                let _local_analysis = ReleaseFlag(&released);
+                control.token().cancel();
+                completion.complete(Some(7_usize))
+            },
+        );
+        assert!(cancellation.is_cancelled());
+        assert!(released.get());
+        assert_eq!(
+            response.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        );
+    }
+
+    #[test]
+    fn completion_route_preserves_real_error_racing_with_cancellation() {
+        let memory: Arc<dyn MemoryControl> = Arc::new(());
+        let mut project = test_project(Arc::clone(&memory));
+        let mut runner = QueryRunner::new(&mut project, memory);
+        let (sender, response) =
+            oneshot::channel::<Result<QueryValue<Option<usize>>, QueryError>>();
+        let released = Cell::new(false);
+        runner.respond_to_query_with_completion(
+            QueryContext::saved_project("hover", Duration::ZERO),
+            sender,
+            CancellationToken::new(),
+            |_, control, _completion| {
+                let _local_analysis = ReleaseFlag(&released);
+                control.token().cancel();
+                let error =
+                    rg_std::OperationError::Source(std::io::Error::other("source read failed"));
+                Err(anyhow::Error::new(error)
+                    .context("render owned hover")
+                    .into())
+            },
+        );
+        let response =
+            futures::executor::block_on(response).expect("real source error is published");
+        let Err(QueryError::Internal(error)) = response else {
+            panic!("real source error must not turn into cancellation or empty success");
+        };
+        assert!(error.to_string().contains("source read failed"));
+        assert!(error.to_string().contains("render owned hover"));
+        assert!(released.get());
+    }
+
+    #[test]
+    fn completion_route_preserves_wrapped_cancellation_without_empty_success() {
+        let memory: Arc<dyn MemoryControl> = Arc::new(());
+        let mut project = test_project(Arc::clone(&memory));
+        let mut runner = QueryRunner::new(&mut project, memory);
+        let (sender, mut response) =
+            oneshot::channel::<Result<QueryValue<Option<usize>>, QueryError>>();
+        let released = Cell::new(false);
+        runner.respond_to_query_with_completion(
+            QueryContext::saved_project("hover", Duration::ZERO),
+            sender,
+            CancellationToken::new(),
+            |_, control, _completion| {
+                let _local_analysis = ReleaseFlag(&released);
+                let token = control.token();
+                token.cancel();
+                let cancelled =
+                    rg_std::Cancelable::check_cancelled(&token, "owned hover conversion")
+                        .expect_err("request was cancelled");
+                let error: rg_std::OperationError<std::io::Error> =
+                    rg_std::OperationError::Cancelled(cancelled);
+                Err(anyhow::Error::new(error)
+                    .context("render owned hover")
+                    .into())
+            },
+        );
+        assert!(released.get());
+        assert_eq!(
+            response.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        );
+    }
+
+    #[test]
+    fn completion_route_preserves_save_required_error() {
+        let memory: Arc<dyn MemoryControl> = Arc::new(());
+        let mut project = test_project(Arc::clone(&memory));
+        let mut runner = QueryRunner::new(&mut project, memory);
+        let (sender, response) =
+            oneshot::channel::<Result<QueryValue<Option<usize>>, QueryError>>();
+        let path = PathBuf::from("/workspace/src/lib.rs");
+        runner.respond_to_query_with_completion(
+            QueryContext::saved_project("hover", Duration::ZERO),
+            sender,
+            CancellationToken::new(),
+            |_, _, _completion| Err(super::QueryRunError::SaveRequired(path.clone())),
+        );
+        assert_eq!(
+            futures::executor::block_on(response).expect("save requirement is published"),
+            Err(QueryError::SaveRequired { path }),
+        );
+    }
+
+    #[test]
+    fn completion_route_returns_owned_none_with_exact_global_scope() {
+        let document = EditorDocumentSnapshot::new(
+            PathBuf::from("/workspace/src/lib.rs"),
+            OpenDocumentSession::new(3),
+            DocumentRevision::new(8),
+            Some(5),
+            "fn editor() {}".to_string(),
+        );
+        let snapshot = GlobalPositionSnapshot::new(
+            document.target().clone(),
+            OpenDocumentsRevision::new(13),
+            vec![document],
+            gen_lsp_types::Position::new(0, 3),
+        );
+        let memory: Arc<dyn MemoryControl> = Arc::new(());
+        let mut project = test_project(Arc::clone(&memory));
+        let mut runner = QueryRunner::new(&mut project, memory);
+        let (sender, mut response) = oneshot::channel();
+        runner.respond_to_query_with_completion(
+            QueryContext::global_operation("hover", Duration::ZERO, &snapshot),
+            sender,
+            CancellationToken::new(),
+            |_, _, completion| {
+                let completed = completion.complete(Option::<gen_lsp_types::Hover>::None)?;
+                let response = response
+                    .try_recv()
+                    .expect("valid None is already published")
+                    .expect("valid None remains successful");
+                assert!(response.value().is_none());
+                assert_eq!(
+                    response.scope(),
+                    &QueryScope::GlobalOperation {
+                        target: snapshot.target().clone(),
+                        open_documents_revision: snapshot.open_documents_revision(),
+                    }
+                );
+                Ok(completed)
+            },
+        );
+    }
+
+    #[test]
+    fn completion_route_receiver_drop_before_publication_drains_locals() {
+        let memory: Arc<dyn MemoryControl> = Arc::new(());
+        let mut project = test_project(Arc::clone(&memory));
+        let mut runner = QueryRunner::new(&mut project, memory);
+        let (sender, response) = oneshot::channel();
+        let cancellation = CancellationToken::new();
+        let released = Cell::new(false);
+        runner.respond_to_query_with_completion(
+            QueryContext::saved_project("hover", Duration::ZERO),
+            sender,
+            cancellation.clone(),
+            |_, _, completion| {
+                let _local_analysis = ReleaseFlag(&released);
+                drop(response);
+                completion.complete(Some(7_usize))
+            },
+        );
+        assert!(cancellation.is_cancelled());
+        assert!(released.get());
+    }
+
+    #[test]
+    fn completion_receiver_drop_between_final_check_and_send_still_drains_locals() {
+        let (sender, receiver) =
+            oneshot::channel::<Result<QueryValue<Option<usize>>, QueryError>>();
+        let response = std::cell::RefCell::new(Some((QueryScope::SavedProject, sender)));
+        let receiver = std::cell::RefCell::new(Some(receiver));
+        let cancellation = CancellationToken::new();
+        let released = Cell::new(false);
+        // Read an open endpoint, then close its receiver before returning that observed state.
+        // This deterministically represents the close racing with the subsequent send.
+        let response_is_closed = || {
+            let was_closed = response
+                .borrow()
+                .as_ref()
+                .expect("response is pending")
+                .1
+                .is_closed();
+            drop(receiver.borrow_mut().take());
+            was_closed
+        };
+        let control = super::QueryCancellation::new(&cancellation, &response_is_closed);
+        let completion = super::QueryCompletion {
+            control: &control,
+            response: &response,
+        };
+        {
+            let _local_analysis = ReleaseFlag(&released);
+            completion
+                .complete(None)
+                .expect("racing close does not create a semantic error");
+        }
+        assert!(
+            response.borrow().is_none(),
+            "the endpoint is consumed exactly once"
+        );
+        assert!(receiver.borrow().is_none());
+        assert!(released.get());
+        assert!(!cancellation.is_cancelled());
+    }
+
+    #[test]
+    fn completion_route_rejects_error_after_publication() {
+        let memory: Arc<dyn MemoryControl> = Arc::new(());
+        let mut project = test_project(Arc::clone(&memory));
+        let mut runner = QueryRunner::new(&mut project, memory);
+        let (sender, mut response) = oneshot::channel();
+        let released = Cell::new(false);
+        let violated = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runner.respond_to_query_with_completion(
+                QueryContext::saved_project("hover", Duration::ZERO),
+                sender,
+                CancellationToken::new(),
+                |_, _, completion| {
+                    let _local_analysis = ReleaseFlag(&released);
+                    let _completed = completion.complete(Option::<gen_lsp_types::Hover>::None)?;
+                    Err(anyhow::anyhow!("fallible work after completed hover").into())
+                },
+            );
+        }));
+        let panic = violated.expect_err("late error must violate the publication invariant");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .expect("invariant panic has a message");
+        assert!(message.contains("query must complete once or fail before publication"));
+        assert!(released.get());
+        let published = response
+            .try_recv()
+            .expect("original success is still the only response")
+            .expect("late error cannot replace the published success");
+        assert!(published.value().is_none());
+        assert_eq!(published.scope(), &QueryScope::SavedProject);
     }
 
     #[test]
