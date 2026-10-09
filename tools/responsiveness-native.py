@@ -31,6 +31,7 @@ class NativeEvidence:
                   "engine::project::tests::hover::binding_hover_prepares_source_once_across_declaration_probe_and_body_fallback",
                 "engine::queue::tests::hover_bypasses_queued_analysis_but_the_oldest_query_gets_the_next_turn",
                 "engine::queue::tests::completion_receives_the_same_bounded_preference_as_hover",
+                  "engine::queue::tests::cancelled_hover_does_not_spend_the_following_live_hovers_turn",
                 "engine::queue::tests::finite_lookahead_does_not_drain_an_unbounded_query_prefix"]},
         "RSP-003": {
             "rg_ty": [
@@ -45,6 +46,7 @@ class NativeEvidence:
                 "tests::captured_saved_source_rejects_newer_disk_without_changing_the_published_project"],
             "rg_lsp_engine": [
                 "engine::queue::tests::hover_cannot_cross_an_earlier_save_background_completion_or_shutdown",
+                  "engine::queue::tests::cancelled_hover_does_not_relax_an_earlier_save_barrier",
                 "engine::project::tests::rustdoc_candidates_use_the_captured_graph_and_reject_late_inputs",
                 "engine::project::tests::hover::declaration_hover_preserves_pending_saved_bodies_and_current_header_coordinates",
                 "tests::utils::rustdoc_import::edt_004_rejects_invalid_startup_without_replacing_the_previous_project",
@@ -61,6 +63,7 @@ class NativeEvidence:
         "RSP-004": {
             "rg_lsp_engine": [
                 "engine::queue::tests::interactive_burst_does_not_starve_ordinary_analysis",
+                  "engine::queue::tests::cancelled_interactive_arrivals_do_not_starve_the_oldest_command",
                 "engine::queue::tests::replenished_interactive_requests_leave_oldest_commands_a_turn",
                 "engine::queue::tests::dropping_the_queue_releases_buffered_and_unread_request_payloads",
                 "engine::tests::cancelled_running_and_queued_hovers_release_the_lane_for_a_valid_hover",
