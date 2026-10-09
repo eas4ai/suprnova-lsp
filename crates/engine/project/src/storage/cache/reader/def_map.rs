@@ -46,7 +46,7 @@ impl PackageArtifactReader {
         );
         let started = Instant::now();
         let decoded = self
-            .decode_with_names(|| {
+            .decode_with_names("def_map.crate", || {
                 PackageCacheCodec::decode_def_map_crate(
                     &bytes,
                     index.manifest(),

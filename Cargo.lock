@@ -1793,7 +1793,6 @@ dependencies = [
  "anyhow",
  "derive_more",
  "expect-test",
- "libc",
  "rayon",
  "rg_arena",
  "rg_cfg_eval",
@@ -2062,6 +2061,9 @@ dependencies = [
 [[package]]
 name = "rg_profile"
 version = "0.0.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "rg_project"
