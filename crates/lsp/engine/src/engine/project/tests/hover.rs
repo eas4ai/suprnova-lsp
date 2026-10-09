@@ -82,11 +82,11 @@ fn declaration_hover_preserves_pending_saved_bodies_and_current_header_coordinat
         );
         let context = QueryContext::global_operation("hover", Duration::ZERO, &input);
         let (sender, response) = tokio::sync::oneshot::channel();
-        QueryRunner::new(&mut project, Arc::new(())).respond_to_query_with_completion(
+        QueryRunner::new(&mut project, Arc::new(())).respond_to_query(
             context,
             sender,
             CancellationToken::new(),
-            |runner, cancellation, completion| runner.hover(input, cancellation, completion),
+            |runner, cancellation| runner.hover(input, cancellation),
         );
         let response = futures::executor::block_on(response).unwrap().unwrap();
         let hover = response
@@ -257,11 +257,11 @@ fn binding_hover_prepares_source_once_across_declaration_probe_and_body_fallback
         let (sender, response) = tokio::sync::oneshot::channel();
         let observation = Arc::new(HoverPreparationLog::default());
         tracing::subscriber::with_default(Arc::clone(&observation), || {
-            QueryRunner::new(&mut project, Arc::new(())).respond_to_query_with_completion(
+            QueryRunner::new(&mut project, Arc::new(())).respond_to_query(
                 context,
                 sender,
                 CancellationToken::new(),
-                |runner, cancellation, completion| runner.hover(input, cancellation, completion),
+                |runner, cancellation| runner.hover(input, cancellation),
             );
         });
         let response = futures::executor::block_on(response).unwrap().unwrap();
