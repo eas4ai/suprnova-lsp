@@ -59,10 +59,6 @@ class NativeEvidence:
                 "ingress::service::tests::later_request_keeps_incrementally_changed_text_when_futures_finish_in_reverse",
                 "ingress::service::tests::save_echo_is_recorded_before_any_handler_future_is_polled"]},
         "RSP-004": {
-            "rg_project": [
-                "indexing::split::build::tests::deferred_faster_builds_reserve_parallelism_for_queries",
-                "indexing::split::build::tests::deferred_width_preserves_explicit_rayon_environment",
-                "indexing::split::build::tests::deferred_width_preserves_lower_memory_and_synchronous_limits"],
             "rg_lsp_engine": [
                 "engine::queue::tests::interactive_burst_does_not_starve_ordinary_analysis",
                 "engine::queue::tests::replenished_interactive_requests_leave_oldest_commands_a_turn",
