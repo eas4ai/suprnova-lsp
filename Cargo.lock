@@ -2130,6 +2130,7 @@ dependencies = [
  "rg_std",
  "rg_text",
  "rg_workspace",
+ "tracing",
  "wincode",
 ]
 
