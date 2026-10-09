@@ -125,9 +125,11 @@ class ResponsivenessCheck:
                 raise ValueError("latency matrix/current candidate identities differ: " + field)
         if identity["openFileLimits"]["effective"] != candidate_identity["openFileLimits"]["effective"]:
             raise ValueError("latency matrix/current candidate effective open-file limits differ")
-        binary = Path(identity["binary"]).resolve(strict=True)
-        if (not binary.is_relative_to(owned) or binary != Path(candidate_identity["binary"]).resolve(strict=True)
-            or hashlib.sha256(binary.read_bytes()).hexdigest() != identity["binarySha256"]):
+        # An archive and a fresh build can have different paths. Both actual
+        # files must match the shared executable digest inside the owned root.
+        binaries = (Path(identity["binary"]).resolve(strict=True), Path(candidate_identity["binary"]).resolve(strict=True))
+        if any(not binary.is_relative_to(owned)
+               or hashlib.sha256(binary.read_bytes()).hexdigest() != identity["binarySha256"] for binary in binaries):
             raise ValueError("latency matrix native binary changed or escaped the owned root")
         observers = {name: hashlib.sha256((ROOT / "tools" / name).read_bytes()).hexdigest()
                      for name in ("lsp-query.py", "sudus-responsiveness.py", "agent-debug.py")}

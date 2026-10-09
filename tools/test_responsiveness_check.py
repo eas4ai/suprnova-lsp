@@ -178,16 +178,91 @@ class MatrixReceiptIntegrity(unittest.TestCase):
         self.manifest.write_text(json.dumps({"schema": 1, "matrix": {
             "path": str(self.path), "sha256": hashlib.sha256(self.path.read_bytes()).hexdigest()}}))
 
-    def validate(self):
+    def validate(self, candidate_identity=None):
         with patch.object(check, "EVIDENCE", self.manifest), \
              patch.object(check.observer.Diagnostic, "inventory", return_value=self.identity["sources"]), \
              patch.object(check.observer.Diagnostic, "runtime_fingerprint", return_value="test-native-inputs"):
-            return check.ResponsivenessCheck.matrix(self.identity)
+            return check.ResponsivenessCheck.matrix(self.identity if candidate_identity is None else candidate_identity)
 
     def test_accepts_all_twenty_cells_from_raw_evidence(self):
         summaries = self.validate()
         self.assertEqual(len(summaries), 20)
         self.assertTrue(all(summary[cohort]["belowTarget"] for summary in summaries.values() for cohort in ("first", "repeated")))
+
+    def test_accepts_identical_candidate_binary_at_distinct_owned_path(self):
+        candidate_binary = self.directory / "archived-suprnova-lsp"
+        candidate_binary.write_bytes(self.binary.read_bytes())
+        candidate_identity = copy.deepcopy(self.identity)
+        candidate_identity["binary"] = str(candidate_binary)
+        self.assertNotEqual(candidate_binary.resolve(), self.binary.resolve())
+        self.assertEqual(hashlib.sha256(candidate_binary.read_bytes()).hexdigest(), self.identity["binarySha256"])
+
+        summaries = self.validate(candidate_identity)
+
+        self.assertEqual(len(summaries), 20)
+        for key, summary in summaries.items():
+            with self.subTest(cell=key):
+                self.assertTrue(summary["completeCounts"])
+                self.assertEqual(summary["first"]["count"], 20)
+                self.assertEqual(summary["repeated"]["count"], 100)
+                self.assertTrue(summary["first"]["belowTarget"])
+                self.assertTrue(summary["repeated"]["belowTarget"])
+
+    def test_rejects_changed_candidate_binary_despite_matching_claimed_sha(self):
+        candidate_binary = self.directory / "changed-suprnova-lsp"
+        candidate_binary.write_bytes(b"changed native executable bytes")
+        candidate_identity = copy.deepcopy(self.identity)
+        candidate_identity["binary"] = str(candidate_binary)
+        self.assertEqual(candidate_identity["binarySha256"], self.report["identity"]["binarySha256"])
+        self.assertNotEqual(hashlib.sha256(candidate_binary.read_bytes()).hexdigest(), candidate_identity["binarySha256"])
+
+        with self.assertRaisesRegex(ValueError, "binary"):
+            self.validate(candidate_identity)
+
+    def test_rejects_changed_matrix_binary_with_identical_owned_candidate(self):
+        candidate_binary = self.directory / "archived-suprnova-lsp"
+        candidate_binary.write_bytes(self.binary.read_bytes())
+        candidate_identity = copy.deepcopy(self.identity)
+        candidate_identity["binary"] = str(candidate_binary)
+        report_bytes = self.path.read_bytes()
+        selection_bytes = self.manifest.read_bytes()
+
+        self.binary.write_bytes(b"changed matrix executable bytes")
+
+        self.assertEqual(candidate_identity["binarySha256"], self.identity["binarySha256"])
+        self.assertEqual(hashlib.sha256(candidate_binary.read_bytes()).hexdigest(), self.identity["binarySha256"])
+        self.assertNotEqual(hashlib.sha256(self.binary.read_bytes()).hexdigest(), self.identity["binarySha256"])
+        self.assertEqual(self.path.read_bytes(), report_bytes)
+        self.assertEqual(self.manifest.read_bytes(), selection_bytes)
+        with self.assertRaisesRegex(ValueError, "binary"):
+            self.validate(candidate_identity)
+
+    def test_rejects_candidate_binary_outside_owned_root(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "target") as outside:
+            candidate_binary = Path(outside) / "suprnova-lsp"
+            candidate_binary.write_bytes(self.binary.read_bytes())
+            candidate_identity = copy.deepcopy(self.identity)
+            candidate_identity["binary"] = str(candidate_binary)
+            self.assertFalse(candidate_binary.resolve().is_relative_to((ROOT / "target/agent-debug").resolve()))
+            self.assertEqual(hashlib.sha256(candidate_binary.read_bytes()).hexdigest(), candidate_identity["binarySha256"])
+
+            with self.assertRaisesRegex(ValueError, "binary"):
+                self.validate(candidate_identity)
+
+    def test_rejects_candidate_binary_symlink_escaping_owned_root(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "target") as outside:
+            outside_binary = Path(outside) / "suprnova-lsp"
+            outside_binary.write_bytes(self.binary.read_bytes())
+            candidate_link = self.directory / "escaped-suprnova-lsp"
+            candidate_link.symlink_to(outside_binary)
+            candidate_identity = copy.deepcopy(self.identity)
+            candidate_identity["binary"] = str(candidate_link)
+            self.assertTrue(candidate_link.is_relative_to((ROOT / "target/agent-debug").resolve()))
+            self.assertFalse(candidate_link.resolve().is_relative_to((ROOT / "target/agent-debug").resolve()))
+            self.assertEqual(hashlib.sha256(candidate_link.read_bytes()).hexdigest(), candidate_identity["binarySha256"])
+
+            with self.assertRaisesRegex(ValueError, "binary"):
+                self.validate(candidate_identity)
 
     def test_rejects_missing_altered_or_escaped_report(self):
         for violation in ("missing", "altered", "escaped", "symlink", "schema"):
