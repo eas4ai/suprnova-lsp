@@ -1793,6 +1793,7 @@ dependencies = [
  "anyhow",
  "derive_more",
  "expect-test",
+ "libc",
  "rayon",
  "rg_arena",
  "rg_cfg_eval",

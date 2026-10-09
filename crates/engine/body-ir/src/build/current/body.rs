@@ -71,6 +71,36 @@ pub(super) struct CurrentBodyBuilder<'source, 'db> {
 }
 
 impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
+    // Wall timers include waiting and descheduling. This diagnostic clock counts only the current
+    // thread's execution, so a slow serial phase can be distinguished from time spent off CPU.
+    fn thread_cpu_time() -> Option<u64> {
+        #[cfg(target_os = "linux")]
+        {
+            if !tracing::enabled!(tracing::Level::TRACE) {
+                return None;
+            }
+            let mut time = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            // SAFETY: clock_gettime writes one initialized timespec through this valid pointer.
+            if unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) } != 0 {
+                return None;
+            }
+            let seconds = u64::try_from(time.tv_sec).ok()?;
+            let nanos = u64::try_from(time.tv_nsec).ok()?;
+            seconds.checked_mul(1_000_000)?.checked_add(nanos / 1_000)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+    }
+
+    fn thread_cpu_elapsed(started: Option<u64>) -> Option<u64> {
+        started.and_then(|started| Self::thread_cpu_time()?.checked_sub(started))
+    }
+
     /// Prepare current-body construction for one explicit selection policy.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -118,6 +148,7 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
     ) -> anyhow::Result<CurrentBodyBuildOutcome> {
         let cancellation = self.cancellation.clone();
         let started = Instant::now();
+        let thread_cpu_started = Self::thread_cpu_time();
 
         // 1. Parse the editor text and choose the syntax bodies requested by the cursor or range.
         // Selection deliberately stops at syntax: it does not yet decide which semantic
@@ -285,6 +316,7 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
 
         let crate_items = CrateItemQuery::new(self.def_map, self.semantic_ir, self.crate_ref);
         let lookup_started = Instant::now();
+        let lookup_thread_cpu_started = Self::thread_cpu_time();
         let visible_crates = rg_def_map::DefMapQuery::new(self.def_map)
             .item_lookup_crates_from(self.crate_ref)
             .context("find the current body's visible lookup crates")?;
@@ -298,12 +330,14 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
         let item_lookup_query =
             ItemLookupQuery::build_with_cache(&crate_items, &self.item_lookup_cache, &cancellation)
                 .context("build the current body's visible item lookup query")?;
+        let lookup_thread_cpu_us = Self::thread_cpu_elapsed(lookup_thread_cpu_started);
         tracing::trace!(
             elapsed_us = lookup_started.elapsed().as_micros(),
             visibility_us,
             prefetch_us,
             composition_us = composition_started.elapsed().as_micros(),
             visible_crate_count = visible_crates.len(),
+            lookup_thread_cpu_us,
             thread_id = ?std::thread::current().id(),
             "current body visible item lookup prepared"
         );
@@ -357,6 +391,7 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
         // nested functions and initializers. A uniquely associated nested declaration keeps its
         // saved identity; new or ambiguous declarations receive request-only identities.
         let local_items_started = Instant::now();
+        let local_items_thread_cpu_started = Self::thread_cpu_time();
         let mut build = CrateBodyBuildState::for_current(
             self.crate_ref,
             self.parse_package,
@@ -381,12 +416,15 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
             },
         )?;
         let local_items_us = local_items_started.elapsed().as_micros();
+        let local_items_thread_cpu_us = Self::thread_cpu_elapsed(local_items_thread_cpu_started);
         checkpoint(CurrentSourceBuildCheckpoint::BodyLocalItemsCollected)
             .context("check current-body work after collecting body-local items")?;
 
         // 6. Run the normal semantic stages over the completed request-local worklist. Only after
         // impl headers, pattern bindings, and body names are resolved do we expose these bodies to
         // the analysis request.
+        let semantics_started = Instant::now();
+        let semantics_thread_cpu_started = Self::thread_cpu_time();
         let semantic_timings = build.resolve_semantics(
             self.def_map,
             self.semantic_ir,
@@ -407,6 +445,8 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
                 })
             },
         )?;
+        let semantics_us = semantics_started.elapsed().as_micros();
+        let semantics_thread_cpu_us = Self::thread_cpu_elapsed(semantics_thread_cpu_started);
         let bodies = build.finish_current()?;
 
         // A body-local impl is complete unless it is the copied enclosing context that omits
@@ -448,10 +488,15 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
             body_count = bodies.len(),
             unavailable_count = unavailable.len(),
             interned_name_count = interner.len(),
+            thread_id = ?std::thread::current().id(),
             parse_us,
             association_us,
             lowering_us,
             local_items_us,
+            local_items_thread_cpu_us,
+            semantics_thread_cpu_us,
+            semantics_us,
+            total_thread_cpu_us = Self::thread_cpu_elapsed(thread_cpu_started),
             impl_headers_us = semantic_timings.impl_headers.as_micros(),
             pattern_bindings_us = semantic_timings.pattern_bindings.as_micros(),
             resolution_us = semantic_timings.bodies.as_micros(),
