@@ -22,6 +22,22 @@ pub struct DefMapReadTxn<'db> {
     packages: Vec<PackageReadEntry<'db>>,
 }
 
+impl Drop for DefMapReadTxn<'_> {
+    fn drop(&mut self) {
+        if !tracing::enabled!(tracing::Level::TRACE) {
+            return;
+        }
+        // Time the ordinary serial release, including any loader released by the last entry.
+        let started = std::time::Instant::now();
+        drop(std::mem::take(&mut self.packages));
+        tracing::trace!(
+            thread_id = ?std::thread::current().id(),
+            elapsed_us = started.elapsed().as_micros(),
+            "definition read entries released"
+        );
+    }
+}
+
 impl<'db> DefMapReadTxn<'db> {
     /// Builds transaction entries without changing their package-slot indexes.
     ///
