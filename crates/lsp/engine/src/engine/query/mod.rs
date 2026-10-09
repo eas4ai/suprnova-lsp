@@ -145,15 +145,19 @@ impl<'a> QueryRunner<'a> {
     /// Exact captured text can use the saved line index and Body IR directly. Changed text follows
     /// the request-local body path. Cursor and range queries share this source decision but retain
     /// their different current-body selection rules.
+    /// A hover's body fallback can reuse its declaration probe's source view because no saved
+    /// generation or captured document changes between those two passes.
     fn document_analysis<'project>(
         &'project mut self,
         query: &'static str,
         document: &EditorDocumentSnapshot,
         selection: DocumentSelection,
         declarations_only: bool,
+        prepared_source: Option<DocumentSourceView>,
         cancellation: &QueryCancellation<'_>,
     ) -> anyhow::Result<Option<DocumentAnalysis<'project>>> {
         let started = Instant::now();
+        let reusing_source = prepared_source.is_some();
 
         // Resolve every saved interpretation, then choose its source coordinate space once. Exact
         // text returns before current syntax or declaration associations are built.
@@ -183,9 +187,16 @@ impl<'a> QueryRunner<'a> {
                 .iter()
                 .map(|target| (target.crate_ref, target.context.file))
                 .collect::<Vec<_>>();
-            let source = snapshot
-                .prepare_document_source(&source_targets, document.text(), &cancellation.token())
-                .context("prepare document source")?;
+            let source = match prepared_source {
+                Some(source) => source,
+                None => snapshot
+                    .prepare_document_source(
+                        &source_targets,
+                        document.text(),
+                        &cancellation.token(),
+                    )
+                    .context("prepare document source")?,
+            };
             let Some(source_selection) = selection.to_current_source_selection(source.line_index())
             else {
                 return Ok(None);
@@ -194,7 +205,11 @@ impl<'a> QueryRunner<'a> {
         };
         tracing::trace!(
             query,
-            phase = "source and declaration associations",
+            phase = if reusing_source {
+                "prepared document source reuse"
+            } else {
+                "source and declaration associations"
+            },
             elapsed_us = started.elapsed().as_micros(),
             "document analysis phase"
         );
@@ -390,6 +405,7 @@ impl<'a> QueryRunner<'a> {
                 document,
                 DocumentSelection::Position(position),
                 false,
+                None,
                 cancellation,
             )
             .context("prepare completion analysis")?
@@ -497,6 +513,7 @@ impl<'a> QueryRunner<'a> {
                 &document,
                 DocumentSelection::Position(range.start),
                 false,
+                None,
                 cancellation,
             )
             .context("prepare code action analysis")?
@@ -591,6 +608,7 @@ impl<'a> QueryRunner<'a> {
         // needs body facts, so release the probe's view before preparing them.
         let mut declarations_only = true;
         let mut preparation_us = 0;
+        let mut prepared_source = None;
         loop {
             rg_std::check_cancel!(cancellation, "before hover preparation");
             let preparation_started = Instant::now();
@@ -600,6 +618,7 @@ impl<'a> QueryRunner<'a> {
                     document,
                     DocumentSelection::Position(position),
                     declarations_only,
+                    prepared_source.take(),
                     cancellation,
                 )
                 .context("prepare hover analysis")?
@@ -659,6 +678,20 @@ impl<'a> QueryRunner<'a> {
             }
 
             if declarations_only && hover.is_none() {
+                // Both passes use the same captured document and saved generation. Share only
+                // its source and associations; release the probe's analysis before building bodies.
+                prepared_source = Some(match &current.source {
+                    DocumentAnalysisSource::SavedExact(line_index) => {
+                        DocumentSourceView::SavedExact(line_index.clone())
+                    }
+                    DocumentAnalysisSource::Current(_) => DocumentSourceView::Current(
+                        current
+                            .analysis
+                            .current_source_view()
+                            .context("declaration probe has no current source view")?
+                            .clone(),
+                    ),
+                });
                 declarations_only = false;
                 continue;
             }
@@ -810,6 +843,7 @@ impl<'a> QueryRunner<'a> {
                 &document,
                 DocumentSelection::Range(range),
                 false,
+                None,
                 cancellation,
             )
             .context("prepare inlay hint analysis")?

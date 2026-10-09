@@ -73,6 +73,7 @@ impl QueryRunner<'_> {
                 document,
                 DocumentSelection::Position(position),
                 false,
+                None,
                 cancellation,
             )
             .context("prepare navigation analysis")?
