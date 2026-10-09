@@ -41,6 +41,22 @@ pub struct BodyIrReadTxn<'db> {
     current: Arc<CurrentSourceStore>,
 }
 
+impl Drop for BodyIrReadTxn<'_> {
+    fn drop(&mut self) {
+        if !tracing::enabled!(tracing::Level::TRACE) {
+            return;
+        }
+        // Current bodies keep their normal field-drop order after these saved read entries.
+        let started = std::time::Instant::now();
+        drop(std::mem::take(&mut self.packages));
+        tracing::trace!(
+            thread_id = ?std::thread::current().id(),
+            elapsed_us = started.elapsed().as_micros(),
+            "saved body read entries released"
+        );
+    }
+}
+
 impl<'db> BodyIrReadTxn<'db> {
     /// Freeze the package subset and residency states used by this query.
     ///
