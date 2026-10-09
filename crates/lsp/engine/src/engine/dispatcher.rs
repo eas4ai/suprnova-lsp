@@ -257,11 +257,13 @@ impl EngineDispatcher {
                         "engine command started: hover"
                     );
                     let context = QueryContext::global_operation("hover", queue_elapsed, &input);
-                    self.query_runner().respond_to_query(
+                    self.query_runner().respond_to_query_with_completion(
                         context,
                         respond_to,
                         cancellation,
-                        |runner, cancellation| runner.hover(input, cancellation),
+                        |runner, cancellation, completion| {
+                            runner.hover(input, cancellation, completion)
+                        },
                     );
                 }
                 EngineCommand::CodeAction {
