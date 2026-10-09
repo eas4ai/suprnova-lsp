@@ -52,7 +52,11 @@ impl EngineCommandQueue {
             .pending
             .iter()
             .take_while(|queued| queued.command.can_bypass())
-            .position(|queued| queued.command.is_interactive());
+            // Cancelled queries still drain through the dispatcher, but they do not take a
+            // priority turn from a live hover. Without a live preferred query, FIFO still advances.
+            .position(|queued| {
+                queued.command.is_interactive() && !queued.cancellation.is_cancelled()
+            });
         let index = preferred.unwrap_or(0);
         self.oldest_next = preferred.is_some();
         self.pending.remove(index)
@@ -174,6 +178,89 @@ mod tests {
             actual,
             ["hover-one", "first", "hover-two", "second", "hover-three"]
         );
+    }
+
+    #[test]
+    fn cancelled_hover_does_not_spend_the_following_live_hovers_turn() {
+        let (sender, receiver) = mpsc::channel();
+        let cancelled = QueuedEngineCommand::new(hover("cancelled"));
+        let cancellation = cancelled.cancellation.clone();
+        for queued in [
+            QueuedEngineCommand::new(ordinary("first")),
+            cancelled,
+            QueuedEngineCommand::new(hover("following")),
+            QueuedEngineCommand::new(ordinary("second")),
+            QueuedEngineCommand::new(hover("later")),
+        ] {
+            sender.send(queued).expect("live queue");
+        }
+        drop(sender);
+        // The cancelled request remains queued for the dispatcher to release. It must not take
+        // priority from the next valid hover or spend that hover's turn on a decoration.
+        cancellation.cancel();
+        let mut queue = EngineCommandQueue::new(receiver);
+        assert_eq!(name(queue.next().expect("following hover")), "following");
+        assert_eq!(name(queue.next().expect("oldest live request")), "first");
+        assert_eq!(name(queue.next().expect("later hover")), "later");
+        assert_eq!(name(queue.next().expect("cancelled request")), "cancelled");
+        assert_eq!(name(queue.next().expect("next ordinary request")), "second");
+        assert!(queue.next().is_none());
+    }
+
+    #[test]
+    fn cancelled_interactive_arrivals_do_not_starve_the_oldest_command() {
+        let (sender, receiver) = mpsc::channel();
+        sender
+            .send(QueuedEngineCommand::new(ordinary("oldest")))
+            .expect("live queue");
+        for _ in 0..super::LOOKAHEAD {
+            let queued = QueuedEngineCommand::new(hover("cancelled"));
+            queued.cancellation.cancel();
+            sender.send(queued).expect("live queue");
+        }
+        let mut queue = EngineCommandQueue::new(receiver);
+        let mut oldest_served = false;
+        for _ in 0..super::LOOKAHEAD * 2 {
+            let queued = QueuedEngineCommand::new(hover("cancelled"));
+            queued.cancellation.cancel();
+            sender.send(queued).expect("live queue");
+            if name(queue.next().expect("queued work")) == "oldest" {
+                oldest_served = true;
+                break;
+            }
+        }
+        assert!(
+            oldest_served,
+            "cancelled arrivals must leave the oldest command a turn"
+        );
+    }
+
+    #[test]
+    fn cancelled_hover_does_not_relax_an_earlier_save_barrier() {
+        let (sender, receiver) = mpsc::channel();
+        let cancelled = QueuedEngineCommand::new(hover("cancelled"));
+        cancelled.cancellation.cancel();
+        for queued in [
+            QueuedEngineCommand::new(ordinary("first")),
+            cancelled,
+            QueuedEngineCommand::new(EngineCommand::SavedProjectChanges {
+                changes: vec![],
+                respond_to: oneshot::channel().0,
+            }),
+            QueuedEngineCommand::new(hover("after-save")),
+        ] {
+            sender.send(queued).expect("live queue");
+        }
+        drop(sender);
+        let mut queue = EngineCommandQueue::new(receiver);
+        assert_eq!(name(queue.next().expect("oldest before save")), "first");
+        assert_eq!(
+            name(queue.next().expect("cancelled before save")),
+            "cancelled"
+        );
+        assert_eq!(name(queue.next().expect("save barrier")), "save");
+        assert_eq!(name(queue.next().expect("hover after save")), "after-save");
+        assert!(queue.next().is_none());
     }
 
     #[test]
