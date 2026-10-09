@@ -11,6 +11,7 @@ mod metric;
 mod registry;
 mod runtime;
 mod snapshot;
+mod thread_cpu;
 
 pub mod test_support;
 
@@ -40,6 +41,7 @@ pub use self::{
         ProfileKeyedDuration, ProfileMeasurement, ProfileMemoryRecord, ProfileMemorySnapshot,
         ProfileSnapshot, ProfileValue,
     },
+    thread_cpu::ThreadCpuTime,
 };
 
 pub fn record_counter(path: &'static str, amount: u64) {

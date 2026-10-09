@@ -20,6 +20,8 @@ mod def_map;
 mod error;
 mod open;
 mod semantic_ir;
+#[cfg(test)]
+mod tests;
 
 use std::{
     fs::File,
@@ -30,6 +32,7 @@ use std::{
 };
 
 use rg_package_store::MalformedCacheError;
+use rg_profile::ThreadCpuTime;
 use rg_text::NameInterner;
 
 pub(crate) use self::error::PackageCacheReadError;
@@ -182,14 +185,37 @@ impl PackageArtifactReader {
         range: PackageCacheSectionRange,
     ) -> Result<Vec<u8>, PackageCacheReadError> {
         let started = Instant::now();
+        let diagnostics = tracing::enabled!(tracing::Level::TRACE);
+        let acquire_cpu = ThreadCpuTime::capture(diagnostics);
         let mut file = self
             .inner
             .file
             .lock()
             .expect("package artifact file mutex should not be poisoned");
+        let lock_acquire_us = diagnostics.then(|| started.elapsed().as_micros());
+        let lock_acquire_cpu_us = acquire_cpu.and_then(ThreadCpuTime::elapsed_us);
+        let held_started = diagnostics.then(Instant::now);
+        let held_cpu = ThreadCpuTime::capture(diagnostics);
         let bytes = Self::read_section_bytes(&self.inner.path, &mut file, range);
         metric::CACHE_SECTION_READ.record(label, started.elapsed());
         metric::CACHE_SECTION_BYTES.add(label, range.len);
+        let lock_held_us = held_started.map(|started| started.elapsed().as_micros());
+        let lock_held_cpu_us = held_cpu.and_then(ThreadCpuTime::elapsed_us);
+        drop(file);
+        // Acquisition includes scheduling as well as waiting. Emit after unlocking so synchronous
+        // trace output does not extend the file's critical section.
+        tracing::trace!(
+            package = %self.inner.probe.header.package.name,
+            thread_id = ?std::thread::current().id(),
+            section = label,
+            encoded_bytes = range.len,
+            ?lock_acquire_us,
+            ?lock_acquire_cpu_us,
+            ?lock_held_us,
+            ?lock_held_cpu_us,
+            succeeded = bytes.is_ok(),
+            "artifact file lock phases"
+        );
         bytes
     }
 
@@ -240,16 +266,40 @@ impl PackageArtifactReader {
     /// context and then stores the expanded table back for the next section.
     fn decode_with_names<T>(
         &self,
+        label: &'static str,
         decode: impl FnOnce() -> anyhow::Result<T>,
     ) -> anyhow::Result<T> {
+        let diagnostics = tracing::enabled!(tracing::Level::TRACE);
+        let acquire_started = diagnostics.then(Instant::now);
+        let acquire_cpu = ThreadCpuTime::capture(diagnostics);
         let mut names = self
             .inner
             .names
             .lock()
             .expect("package decode name interner mutex should not be poisoned");
+        let lock_acquire_us = acquire_started.map(|started| started.elapsed().as_micros());
+        let lock_acquire_cpu_us = acquire_cpu.and_then(ThreadCpuTime::elapsed_us);
+        let held_started = diagnostics.then(Instant::now);
+        let held_cpu = ThreadCpuTime::capture(diagnostics);
         let interner = std::mem::take(&mut *names);
         let (interner, decoded) = rg_text::with_decode_name_interner(interner, decode);
         *names = interner;
+        let lock_held_us = held_started.map(|started| started.elapsed().as_micros());
+        let lock_held_cpu_us = held_cpu.and_then(ThreadCpuTime::elapsed_us);
+        drop(names);
+        // Decoding owns this interner until it restores the updated names, including on errors.
+        // Keep that work separate from acquisition and exclude trace output from the held time.
+        tracing::trace!(
+            package = %self.inner.probe.header.package.name,
+            thread_id = ?std::thread::current().id(),
+            section = label,
+            ?lock_acquire_us,
+            ?lock_acquire_cpu_us,
+            ?lock_held_us,
+            ?lock_held_cpu_us,
+            succeeded = decoded.is_ok(),
+            "artifact interner lock phases"
+        );
         decoded
     }
 
