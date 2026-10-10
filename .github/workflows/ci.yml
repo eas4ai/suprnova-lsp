@@ -10,6 +10,9 @@ on:
 permissions:
   contents: read
 
+env:
+  RUSTUP_TOOLCHAIN: 1.98.1
+
 # Superseded PR commits no longer need runners. Keep every main-branch run so
 # cache refreshes and performance baselines can finish independently.
 concurrency:
@@ -22,6 +25,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy,rustfmt
       - name: Check release versions
         run: python3 .github/scripts/check_release_versions.py
       - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
@@ -85,6 +91,7 @@ jobs:
       CARGO_TARGET_DIR: target/test-targets
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/cargo-cache
         with:
           scope: ci-${{ github.job }}

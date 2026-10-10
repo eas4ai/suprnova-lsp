@@ -163,6 +163,8 @@ $values=@{}; foreach($line in Get-Content (Join-Path $root '.env')){if($line -ma
         cache = (root / ".github/actions/cargo-cache/action.yml").read_text()
         cls.require(cache.count("${{ steps.cargo-home.outputs.path }}") == 8
                     and '${CARGO_HOME:-$HOME/.cargo}' in cache, "Cargo cache ignores service Cargo home")
+        rust = yaml.load((root / ".github/actions/setup-rust/action.yml").read_text(), Loader=yaml.BaseLoader)
+        cls.require(rust["inputs"]["components"]["default"] == "rustfmt", "Formatting tool missing from the pinned toolchain")
 
     @staticmethod
     def source_digest(root=ROOT):
@@ -181,7 +183,7 @@ $values=@{}; foreach($line in Get-Content (Join-Path $root '.env')){if($line -ma
         for role, name in NAMES.items():
             job = next(job for job in jobs if job["runner_name"] == name)
             cls.require(job["conclusion"] == "success" and set(LABELS[role]) <= set(job["labels"]), "Smoke job failed or labels differ")
-            for step_name in ("Compile and test Rust probe", "Upload runner observation"):
+            for step_name in ("Install native test tools", "Check required native tools", "Compile and test Rust probe", "Upload runner observation"):
                 cls.require(any(step["name"] == step_name and step["conclusion"] == "success" for step in job["steps"]), "Smoke step did not pass: " + step_name)
             value = observations[role]
             cls.require(value["runId"] == str(run["id"]) and value["sha"] == run["head_sha"]
