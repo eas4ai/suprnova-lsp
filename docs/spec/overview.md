@@ -17,6 +17,7 @@ Devlist's real User acceptance, explicit LSP/VS Code input wiring, the automatic
 | automatic-rustdoc.md | AUT | Agreed automatic discovery, debounced compiler worker, fresh project publication and consumer acceptance. |
 | identity.md | IDN | Agreed independent extension/server identities and collision-free local packaging. |
 | responsiveness.md | RSP | Agreed measured hover latency during indexing, ordering/cancellation safety and comparable idle-memory evidence. |
+| local-runners.md | CIR | Agreed repository-scoped local runners, trusted workflow routing and actual three-platform job acceptance. |
 
 Observed blocks describe inspected code and are not contract. Draft blocks propose the next behavior; none becomes Agreed without the developer's confirmation.
 

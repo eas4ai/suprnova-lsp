@@ -1,6 +1,6 @@
 # Roadmap
 
-Current: indexing-responsiveness
+Current: local-runner-enablement
 
 The engine-import, Devlist User, editor-input and automatic-worker commitments are Done, recorded as `7ccb5de8ae9cd0586774b640dbb47cfe111d57b0`, `88088a0c347ffbc3cf7e526dd763bd539a18d6a0`, `ec0b18211f3637882fea3bfb482706415a3664cd`, and `c2422443e63e78e192ea9427de4d9853ae5bbdfb`. The identity commitment is also Done; no commitment is open. The developer confirmed the [responsiveness contract](responsiveness.md) and [three staged plans](../../.planning/indexing-responsiveness/README.md) on 2026-10-06. `Current:` names the prepared next commitment; reviewed mechanisms and start authorization are being prepared.
 
@@ -84,6 +84,23 @@ observations are complete, relevant repository checks pass, and Sudus reviews
 close with every finding resolved or explicitly declined. A fast settled hover
 or a longer transport deadline does not satisfy this commitment. CI policy,
 unrelated portability failures, packaging and releases remain separate work.
+
+## local-runner-enablement
+
+Requirements: CIR-001, CIR-002, CIR-003
+
+Enable Actions and repository-scoped Linux x64, Windows x64 and macOS ARM64
+runners for trusted native CI and matching GitHub-release package jobs. Preserve
+hosted PR routing, unsupported hosted architectures, service budgets, owner
+Rust defaults, artifact identities and Linux release compatibility.
+[Execution plan](../../.planning/local-runners/README.md).
+
+Done when all three requirements have current passing receipts from reviewed
+failing controls, genuine consumer smoke jobs and downloaded artifacts pass on
+all three runners, workflow syntax and routing tests pass, preservation evidence
+is complete, and Sudus builder/adversarial review closes. Report application CI
+failures separately. Release publication and unrelated portability fixes are
+outside this commitment.
 
 ## Later work
 
