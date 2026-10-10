@@ -1,8 +1,18 @@
 import * as assert from "node:assert/strict";
+import * as nodePath from "node:path";
 import * as vscode from "vscode";
 
-import { waitFor } from "./async";
-import { serverOutput } from "./extension-harness";
+import { EXTENSION_COMMANDS } from "../src/commands";
+import { waitFor, withTimeout } from "./async";
+
+export async function serverOutput(): Promise<string> {
+  const output = await withTimeout(
+    vscode.commands.executeCommand<string>(EXTENSION_COMMANDS.testGetOutput),
+    "read server output",
+  );
+  assert.equal(typeof output, "string", "extension test output should be available");
+  return output;
+}
 
 export interface ProtocolEvent {
   readonly type: string;
@@ -23,6 +33,67 @@ export interface ProtocolEvent {
 export interface ProtocolSnapshot {
   readonly output: string;
   readonly events: readonly ProtocolEvent[];
+}
+
+// Keep route flags across polls: the output channel evicts old records. Store
+// only open paths and the preceding bounded snapshot, never the full trace.
+export class DocumentRouteReadiness {
+  private previousLines = new Set<string>();
+  private nextSession = 0;
+  private opened = new Map<string, { session: number; ready: boolean }>();
+
+  public observe(snapshot: ProtocolSnapshot): boolean {
+    const lines = snapshot.output.split("\n");
+    for (const line of lines) {
+      if (this.previousLines.has(line)) continue;
+      const offset = line.indexOf('{"isLSPMessage":true');
+      if (offset >= 0) {
+        const event = JSON.parse(line.slice(offset)) as ProtocolEvent;
+        if (event.type === "send-request" && event.message.method === "initialize") {
+          this.opened.clear();
+          this.nextSession = 0;
+        }
+        if (event.type !== "send-notification") continue;
+        const uri = event.message.params?.textDocument?.uri;
+        if (uri === undefined) continue;
+        const parsed = vscode.Uri.parse(uri);
+        if (parsed.scheme !== "file") continue;
+        // Unix file URLs reject remote authorities; Windows also admits UNC paths.
+        if (
+          process.platform !== "win32" &&
+          parsed.authority !== "" &&
+          parsed.authority !== "localhost"
+        )
+          continue;
+        const path = (parsed.authority === "localhost" ? parsed.with({ authority: "" }) : parsed)
+          .fsPath;
+        if (!nodePath.isAbsolute(path)) continue;
+        // Ingress assigns sessions to file opens in wire order, including
+        // non-Rust files. Match that identity rather than log arrival time:
+        // an old publication can arrive after the client traces a reopen.
+        if (event.message.method === "textDocument/didOpen") {
+          const session = ++this.nextSession;
+          if (path.endsWith(".rs")) this.opened.set(path, { session, ready: false });
+        }
+        if (event.message.method === "textDocument/didClose") this.opened.delete(path);
+        continue;
+      }
+      if (
+        !line.includes("editor document analysis route published") ||
+        !line.includes("ready=true") ||
+        !line.includes("current=true")
+      )
+        continue;
+      // Rendered path fields quote Windows separators and whitespace.
+      const field = line.match(/(?:^| )path=("(?:\\.|[^"\\])*"|[^ ]+)(?: |$)/)?.[1];
+      const path = field?.startsWith('"') ? JSON.parse(field) : field;
+      const session = Number(line.match(/(?:^| )session=OpenDocumentSession\((\d+)\)(?: |$)/)?.[1]);
+      const opened = typeof path === "string" ? this.opened.get(path) : undefined;
+      if (opened?.session === session) opened.ready = true;
+    }
+    this.previousLines = new Set(lines);
+    return this.opened.size > 0 && [...this.opened.values()].every((document) => document.ready);
+  }
 }
 
 // Read the client's JSON trace through the existing test output command. The

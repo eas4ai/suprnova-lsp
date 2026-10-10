@@ -70,8 +70,17 @@ suite("Suprnova LSP extension", () => {
       vscode.Uri.joinPath(projects, "simple_crate", "src", "lib.rs"),
     );
     await vscode.window.showTextDocument(simple);
+    await withTimeout(
+      vscode.commands.executeCommand(EXTENSION_COMMANDS.startServer),
+      "start multi-project test server",
+      30_000,
+    );
     await waitForReadyWorkspace("simple_crate");
     await assertDefinition(simple, "|left + right", "|left: i32");
+    // Another suite may have used this window before us. Count launches from our ready server.
+    const initialServerStarts =
+      (await serverOutput()).match(/server process started/g)?.length ?? 0;
+    assert.ok(initialServerStarts > 0, "the test server must have started");
 
     const commands = await vscode.commands.getCommands(true);
     for (const command of [
@@ -104,7 +113,7 @@ suite("Suprnova LSP extension", () => {
     await vscode.window.showTextDocument(simple);
     await assertDefinition(simple, "|left + right", "|left: i32");
     const output = await serverOutput();
-    assert.equal(output.match(/server process started/g)?.length ?? 0, 1, output);
+    assert.equal(output.match(/server process started/g)?.length ?? 0, initialServerStarts, output);
 
     await withTimeout(
       vscode.commands.executeCommand(EXTENSION_COMMANDS.stopServer),

@@ -824,7 +824,7 @@ impl EditorState {
             .is_some_and(|document| document.target() == target)
     }
 
-    fn route_published(&mut self, path: &Path, session: OpenDocumentSession) {
+    fn route_published(&mut self, path: &Path, session: OpenDocumentSession) -> bool {
         let belongs_to_open_session = self
             .documents
             .get(path)
@@ -833,6 +833,7 @@ impl EditorState {
         if belongs_to_open_session {
             self.advance_open_documents_revision(EditorChange::Other);
         }
+        belongs_to_open_session
     }
 
     fn diagnostics_publications(

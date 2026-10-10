@@ -138,21 +138,22 @@ impl UninitBuffer {
     }
 
     #[cfg(all(debug_assertions, not(miri)))]
-    unsafe fn finish(self, writer_finish: usize) -> Box<[u8]> {
-        self.buffer[writer_finish..].into()
+    unsafe fn finish(self, bytes_len: usize) -> Box<[u8]> {
+        self.buffer[self.buffer.len() - bytes_len..].into()
     }
 
     #[cfg(not(all(debug_assertions, not(miri))))]
     #[inline]
-    unsafe fn finish(mut self, writer_finish: *mut u8) -> Box<[u8]> {
-        let end = self.buffer.as_mut_ptr_range().end.cast::<u8>();
+    unsafe fn finish(self, bytes_len: usize) -> Box<[u8]> {
+        // Moving the owning Box invalidates pointers borrowed from the writer. Only the
+        // initialized suffix length crosses that move; borrow its bytes from the new owner.
+        let start = self.buffer.len() - bytes_len;
         unsafe {
-            let bytes_len = end.offset_from_unsigned(writer_finish);
             let mut buffer = Box::<[u8]>::new_uninit_slice(bytes_len);
             buffer
                 .as_mut_ptr()
                 .cast::<u8>()
-                .copy_from_nonoverlapping(writer_finish, bytes_len);
+                .copy_from_nonoverlapping(self.buffer.as_ptr().add(start).cast::<u8>(), bytes_len);
             buffer.assume_init()
         }
     }
@@ -207,17 +208,6 @@ impl<'a> BufferWriter<'a> {
         {
             other.ptr.addr() - self.ptr.addr()
         }
-    }
-
-    #[cfg(all(debug_assertions, not(miri)))]
-    fn finish(self) -> usize {
-        self.buffer.len()
-    }
-
-    #[cfg(not(all(debug_assertions, not(miri))))]
-    #[inline]
-    fn finish(self) -> *mut u8 {
-        self.ptr
     }
 }
 
@@ -614,6 +604,7 @@ fn encode_all(
     unsafe {
         let mut temp_buffer = UninitBuffer::new(bytes_capacity);
         let mut ptr = temp_buffer.writer();
+        let start = ptr;
         for (index, tt) in token_trees.rev() {
             ptr = encode(
                 ptr,
@@ -630,8 +621,8 @@ fn encode_all(
             &byte_size_after,
         );
 
-        let writer_finish = ptr.finish();
-        let buffer = temp_buffer.finish(writer_finish);
+        let bytes_len = ptr.len_since(start);
+        let buffer = temp_buffer.finish(bytes_len);
 
         TopSubtree {
             buffer,

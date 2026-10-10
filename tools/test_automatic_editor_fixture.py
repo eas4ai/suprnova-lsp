@@ -19,6 +19,8 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "target/agent-debug/release-readiness"
 ARTIFACTS.mkdir(parents=True, exist_ok=True)
+# Select the native event loop before dispatch tests override sys.platform.
+asyncio.run(asyncio.sleep(0))
 
 
 def module(name, filename):
@@ -90,7 +92,7 @@ class Preparation(unittest.TestCase):
             self.assertEqual(result.exception.code, 2)
             create.assert_not_called()
 
-    def test_windows_dispatch_owns_commands_and_creates_discoverable_wrapper(self):
+    def test_windows_dispatch_owns_commands_and_builds_discoverable_executable(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             supervisor = mock.Mock(return_value={"code": 0, "cleanup": {"verifiedEmpty": True}})
@@ -103,11 +105,12 @@ class Preparation(unittest.TestCase):
                     mock.patch.object(prepare.runner, "install_signal_handlers") as signals, \
                     contextlib.redirect_stdout(output):
                 asyncio.run(prepare.main())
-            self.assertEqual(supervisor.call_count, 2)
+            self.assertEqual(supervisor.call_count, 3)
             signals.assert_not_called()
-            wrapper = (directory / "proxy-tools/cargo.cmd").read_text()
-            self.assertIn("DisableDelayedExpansion", wrapper)
-            self.assertIn("%*", wrapper)
+            compile_command = supervisor.call_args.args[0]
+            self.assertIn("automatic-rustdoc-cargo-shim.rs", " ".join(compile_command.args))
+            self.assertEqual(compile_command.args[-1], str(directory / "proxy-tools/cargo.exe"))
+            self.assertEqual(supervisor.call_args.args[2]["RUSTUP_TOOLCHAIN"], "1.98.1")
             environment = json.loads(output.getvalue())
             self.assertTrue(environment["PATH"].startswith(str(directory / "proxy-tools") + os.pathsep))
             self.assertTrue(Path(environment["AUTOMATIC_RUSTDOC_REAL_CARGO"]).is_absolute())
@@ -128,6 +131,54 @@ class Preparation(unittest.TestCase):
 
 
 class Proxy(unittest.TestCase):
+    def test_rust_command_discovers_proxy_and_preserves_native_arguments(self):
+        with tempfile.TemporaryDirectory(dir=ARTIFACTS) as temporary:
+            root = Path(temporary)
+            tools = root / "proxy-tools"
+            tools.mkdir()
+            extension = ".exe" if sys.platform == "win32" else ""
+            driver_source = root / "driver.rs"
+            driver_source.write_text('fn main() { let status = std::process::Command::new("cargo")'
+                '.args(std::env::args_os().skip(1)).status().unwrap(); '
+                'std::process::exit(status.code().unwrap_or(1)); }\n')
+            environment = dict(os.environ, RUSTUP_TOOLCHAIN="1.98.1", RUSTUP_AUTO_INSTALL="0",
+                               CARGO_NET_OFFLINE="true")
+
+            def supervised(command, args, label, env=environment):
+                spec = prepare.runner.CommandSpec(command, args)
+                if sys.platform == "win32":
+                    return windows.run_supervised(spec, root, env, root / label, 120_000)
+                return asyncio.run(prepare.runner.run_supervised(spec, root, env, root / label, 120_000))
+
+            for source, executable, label in [
+                    (ROOT / "tools/automatic-rustdoc-cargo-shim.rs", tools / ("cargo" + extension), "shim"),
+                    (driver_source, root / ("driver" + extension), "compile-driver")]:
+                result = supervised("rustc", [str(source), "--edition=2024", "-o", str(executable)], label)
+                self.assertEqual(result.get("code"), 0, result)
+                self.assertTrue(result["cleanup"]["verifiedEmpty"])
+            control = root / "control.json"
+            events = root / "events.jsonl"
+            control.write_text(json.dumps({"mode": "real", "artifactRoot": str(root / "artifacts")}))
+            environment.update(PATH=str(tools) + os.pathsep + os.environ["PATH"],
+                AUTOMATIC_RUSTDOC_PYTHON=sys.executable,
+                AUTOMATIC_RUSTDOC_PROXY=str(ROOT / "tools/automatic-rustdoc-cargo.py"),
+                AUTOMATIC_RUSTDOC_REAL_CARGO=sys.executable,
+                AUTOMATIC_RUSTDOC_CONTROL=str(control), AUTOMATIC_RUSTDOC_EVENTS=str(events))
+            observed = root / "arguments.json"
+            arguments = ["rustdoc", "a spaced path", "quoted\"argument", "percent%bang!amp&pipe|",
+                         "trailing\\", "", "unicode-λ"]
+            script = "import json,pathlib,sys; pathlib.Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))"
+            result = supervised(str(root / ("driver" + extension)),
+                                ["-c", script, str(observed), *arguments], "forward", environment)
+            self.assertEqual(result.get("code"), 0, result)
+            self.assertTrue(result["cleanup"]["verifiedEmpty"])
+            self.assertEqual(json.loads(observed.read_text()), arguments)
+            self.assertEqual(json.loads(events.read_text().splitlines()[-1])["event"], "finished")
+            control.write_text(json.dumps({"mode": "failure"}))
+            result = supervised(str(root / ("driver" + extension)), ["rustdoc"], "failure", environment)
+            self.assertEqual(result.get("code"), 42, result)
+            self.assertTrue(result["cleanup"]["verifiedEmpty"])
+
     def test_record_does_not_require_posix_process_groups(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -135,6 +186,7 @@ class Proxy(unittest.TestCase):
                     "AUTOMATIC_RUSTDOC_EVENTS": str(root / "events"),
                     "AUTOMATIC_RUSTDOC_REAL_CARGO": sys.executable}), \
                     mock.patch.object(sys, "argv", ["cargo", "rustdoc"]), \
+                    mock.patch.object(sys, "platform", "win32"), \
                     mock.patch.object(proxy.os, "getpgrp", create=True, side_effect=AttributeError("Windows")):
                 proxy.CargoProbe().record("started")
             event = json.loads((root / "events").read_text())

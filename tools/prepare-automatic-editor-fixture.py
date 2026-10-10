@@ -62,13 +62,19 @@ async def main():
     tools.mkdir()
     proxy = ROOT / "tools/automatic-rustdoc-cargo.py"
     if sys.platform == "win32":
-        # Cargo lookup on Windows uses PATHEXT. Keep batch expansion out of interpreter paths.
-        paths = [str(Path(sys.executable).resolve()), str(proxy)]
-        if any('"' in path or "\n" in path or "\r" in path for path in paths):
-            raise ValueError("Cargo proxy paths cannot be represented in a Windows command file")
-        interpreter, script = [path.replace("%", "%%") for path in paths]
-        (tools / "cargo.cmd").write_text(
-            f'@echo off\nsetlocal DisableDelayedExpansion\n"{interpreter}" "{script}" %*\nexit /b %errorlevel%\n')
+        # std::process::Command finds cargo.exe; a batch file would bypass the probe.
+        rustc = shutil.which("rustc")
+        if not rustc:
+            raise ValueError("Rust compiler executable unavailable for Cargo proxy preparation")
+        command = runner.CommandSpec(rustc, [str(ROOT / "tools/automatic-rustdoc-cargo-shim.rs"),
+            "--edition=2024", "--crate-name", "automatic_rustdoc_cargo", "-o", str(tools / "cargo.exe")])
+        result = windows.run_supervised(command, fixture, environment, directory / "proxy", 120_000)
+        result["phase"] = "proxy"
+        commands.append(result)
+        runner.write_json(directory / "summary.json", {"commands": commands,
+            "processCleanup": runner.summarize_cleanup(commands)})
+        if result.get("code") != 0 or not result["cleanup"].get("verifiedEmpty"):
+            raise ValueError(f"proxy fixture preparation failed; inspect {directory / 'proxy/stderr.log'}")
     else:
         (tools / "cargo").symlink_to(proxy)
     artifacts = directory / "compiler-artifacts"
@@ -78,6 +84,7 @@ async def main():
     print(json.dumps({"SUPRNOVA_LSP_AUTOMATIC_RUSTDOC_FIXTURE": str(fixture),
         "SUPRNOVA_LSP_AUTOMATIC_RUSTDOC_ARTIFACTS": str(artifacts),
         "AUTOMATIC_RUSTDOC_CONTROL": str(control), "AUTOMATIC_RUSTDOC_EVENTS": str(directory / "events.jsonl"),
+        "AUTOMATIC_RUSTDOC_PYTHON": str(Path(sys.executable).resolve()), "AUTOMATIC_RUSTDOC_PROXY": str(proxy),
         "AUTOMATIC_RUSTDOC_REAL_CARGO": real_cargo, "PATH": str(tools) + os.pathsep + os.environ["PATH"],
         "CARGO_TARGET_DIR": str(directory / "consumer-target"), "CARGO_NET_OFFLINE": "true",
         "CARGO_BUILD_JOBS": "2", "RUSTUP_TOOLCHAIN": "nightly-2026-08-19", "RUSTUP_AUTO_INSTALL": "0"}))

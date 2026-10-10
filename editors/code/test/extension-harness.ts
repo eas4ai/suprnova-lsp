@@ -5,6 +5,10 @@ import * as vscode from "vscode";
 import { EXTENSION_COMMANDS } from "../src/commands";
 import type { ExtensionControllerSnapshot } from "../src/extension-controller";
 import { waitFor, withTimeout } from "./async";
+import { DocumentRouteReadiness, ResponsivenessProtocol } from "./responsiveness-protocol";
+export { serverOutput } from "./responsiveness-protocol";
+
+const documentRoutes = new DocumentRouteReadiness();
 
 export async function clientState(): Promise<ExtensionControllerSnapshot> {
   const state = await withTimeout(
@@ -15,26 +19,22 @@ export async function clientState(): Promise<ExtensionControllerSnapshot> {
   return state;
 }
 
-export async function serverOutput(): Promise<string> {
-  const output = await withTimeout(
-    vscode.commands.executeCommand<string>(EXTENSION_COMMANDS.testGetOutput),
-    "read server output",
-  );
-  assert.equal(typeof output, "string", "extension test output should be available");
-  return output;
-}
-
 export async function waitForReadyWorkspace(name: string, timeoutMs = 30_000): Promise<void> {
   // Readiness comes from the active engine's status, so a log line from an earlier server
   // session cannot make a restarted workspace appear ready.
   await waitFor(
     `${name} ready`,
-    clientState,
-    ({ session }) =>
+    async () => {
+      const state = await clientState();
+      const routesReady = documentRoutes.observe(await ResponsivenessProtocol.snapshot());
+      return { state, routesReady };
+    },
+    ({ state: { session }, routesReady }) =>
       session?.running === true &&
       session.hasClient &&
       session.status.state === "ready" &&
-      path.basename(session.status.details.activeWorkspaceRoot ?? "") === name,
+      path.basename(session.status.details.activeWorkspaceRoot ?? "") === name &&
+      routesReady,
     timeoutMs,
   );
 }

@@ -25,10 +25,7 @@ class CargoProbe:
                   "args": self.args, "toolchain": os.environ.get("RUSTUP_TOOLCHAIN"),
                   "buildDirectory": os.environ.get("CARGO_BUILD_BUILD_DIR"), **values}
         if sys.platform != "win32":
-            try:
-                record.update(pgid=os.getpgrp(), sessionId=os.getsid(0))
-            except AttributeError:
-                pass
+            record.update(pgid=os.getpgrp(), sessionId=os.getsid(0))
         with self.events.open("a") as stream:
             stream.write(json.dumps(record) + "\n")
 
