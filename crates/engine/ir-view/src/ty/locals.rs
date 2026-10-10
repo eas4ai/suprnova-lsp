@@ -1,0 +1,674 @@
+//! Generic body-local facts projected out of Body IR.
+//!
+//! Body IR owns lowered expression, scope, and local declaration storage. This view exposes the
+//! parts that higher analysis features need without making them know the Body IR query vocabulary.
+
+use std::collections::HashSet;
+
+use anyhow::Context as _;
+use rg_body_ir::{BindingKind, ExprKind};
+use rg_def_map::ItemSourceKind;
+use rg_ir_model::{
+    BindingId, BodyBindingRef, BodyRef, CrateRef, DefMapRef, ExprId, FileId, FunctionRef,
+    GenericDefRef, ModuleId, ModuleRef, ScopeId, SemanticItemKind, SemanticItemRef, Span,
+    identity::DeclarationRef,
+};
+use rg_semantic_ir::ItemStoreQuery;
+use rg_ty::Ty;
+
+use crate::{IndexedViewDb, lookup::name::ValueOrTypeNamespace, ty::IndexedType};
+
+/// Body scope together with the visible binding boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BodyNameScope {
+    body: BodyRef,
+    scope: ScopeId,
+    namespace: ValueOrTypeNamespace,
+    visible_bindings: usize,
+}
+
+impl BodyNameScope {
+    pub fn new(
+        body: BodyRef,
+        scope: ScopeId,
+        namespace: ValueOrTypeNamespace,
+        visible_bindings: usize,
+    ) -> Self {
+        Self {
+            body,
+            scope,
+            namespace,
+            visible_bindings,
+        }
+    }
+}
+
+/// One name visible from a body lexical scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BodyLexicalName {
+    Binding {
+        binding: BodyBindingRef,
+        label: String,
+        scope_distance: usize,
+    },
+    TypeItem {
+        item: SemanticItemRef,
+        kind: SemanticItemKind,
+        label: String,
+        scope_distance: usize,
+        has_value_constructor: bool,
+    },
+    ValueItem {
+        item: SemanticItemRef,
+        kind: SemanticItemKind,
+        label: String,
+        scope_distance: usize,
+    },
+    Function {
+        function: rg_ir_model::FunctionRef,
+        label: String,
+        scope_distance: usize,
+    },
+}
+
+/// Body binding with a known inferred type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InferredBindingTy {
+    file_id: FileId,
+    span: Span,
+    ty: IndexedType,
+}
+
+impl InferredBindingTy {
+    pub fn file_id(&self) -> FileId {
+        self.file_id
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
+    }
+
+    pub fn ty(&self) -> &IndexedType {
+        &self.ty
+    }
+}
+
+/// One resolved call argument span.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedCallArg {
+    span: Span,
+}
+
+impl ResolvedCallArg {
+    pub fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// A call site whose arguments can be related back to one function signature.
+///
+/// This gives higher analysis features a stable way to talk about call-site arguments in
+/// declaration terms, regardless of whether the source used a free call, an associated call, or a
+/// receiver method call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedFunctionCall {
+    file_id: FileId,
+    function: FunctionRef,
+    param_offset: usize,
+    args: Vec<ResolvedCallArg>,
+}
+
+impl ResolvedFunctionCall {
+    pub fn file_id(&self) -> FileId {
+        self.file_id
+    }
+
+    pub fn function(&self) -> FunctionRef {
+        self.function
+    }
+
+    pub fn param_offset(&self) -> usize {
+        self.param_offset
+    }
+
+    pub fn args(&self) -> &[ResolvedCallArg] {
+        &self.args
+    }
+}
+
+/// Body and owner declaration for body-local items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BodyLocalGroup {
+    owner: DeclarationRef,
+    body: BodyRef,
+}
+
+impl BodyLocalGroup {
+    pub fn owner(&self) -> DeclarationRef {
+        self.owner
+    }
+
+    pub fn body(&self) -> BodyRef {
+        self.body
+    }
+}
+
+/// Projects body-local facts from Body IR.
+pub struct BodyView<'a, 'db> {
+    db: &'a IndexedViewDb<'db>,
+}
+
+impl<'a, 'db> BodyView<'a, 'db> {
+    pub fn new(db: &'a IndexedViewDb<'db>) -> Self {
+        Self { db }
+    }
+
+    /// Return the module that owns a body.
+    pub fn owner_module(&self, body_ref: BodyRef) -> anyhow::Result<Option<ModuleRef>> {
+        Ok(self
+            .db
+            .body_ir
+            .body(body_ref)
+            .context("read body owner module")?
+            .map(|body| body.owner_module()))
+    }
+
+    /// Return the signature owner whose generic parameters are visible inside a body.
+    ///
+    /// A method body starts from the function owner; generic lookup can then follow the semantic
+    /// parent chain to parameters declared by its enclosing trait or impl.
+    pub fn generic_owner(&self, body_ref: BodyRef) -> anyhow::Result<Option<GenericDefRef>> {
+        Ok(self
+            .db
+            .body_ir
+            .body(body_ref)
+            .context("read body generic owner")?
+            .map(|body| body.owner().generic_def()))
+    }
+
+    /// Return body-local module refs from a scope to its parents.
+    pub fn lexical_scope_modules(
+        &self,
+        body_ref: BodyRef,
+        scope: ScopeId,
+    ) -> anyhow::Result<Vec<(ScopeId, ModuleRef)>> {
+        let Some(body) = self
+            .db
+            .body_ir
+            .body(body_ref)
+            .context("read body lexical scopes")?
+        else {
+            return Ok(Vec::new());
+        };
+        let mut modules = Vec::new();
+        let mut scope_id = Some(scope);
+
+        while let Some(current_scope) = scope_id {
+            let Some(scope_data) = body.scope(current_scope) else {
+                break;
+            };
+            let module = ModuleRef {
+                origin: DefMapRef::Body(body_ref),
+                module: ModuleId(current_scope.0),
+            };
+            modules.push((current_scope, module));
+            scope_id = scope_data.parent;
+        }
+
+        Ok(modules)
+    }
+
+    /// Return item names declared directly in one body scope.
+    pub fn direct_item_names(
+        &self,
+        body_ref: BodyRef,
+        scope: ScopeId,
+    ) -> anyhow::Result<HashSet<String>> {
+        let Some(body) = self
+            .db
+            .body_ir
+            .body(body_ref)
+            .context("read body scope items")?
+        else {
+            return Ok(HashSet::new());
+        };
+        let Some(scope_data) = body.scope(scope) else {
+            return Ok(HashSet::new());
+        };
+
+        let mut names = HashSet::new();
+        for item_id in &scope_data.source_items {
+            rg_std::check_cancel!(self.db, "local declaration candidates");
+            let Some(item) = body.source_item(*item_id) else {
+                continue;
+            };
+            if let Some(name) = &item.name {
+                names.insert(name.to_string());
+            }
+        }
+
+        Ok(names)
+    }
+
+    /// Return the stored type for a body expression.
+    pub fn expr_ty(&self, body_ref: BodyRef, expr: ExprId) -> anyhow::Result<Option<IndexedType>> {
+        Ok(self
+            .db
+            .body_ir
+            .body(body_ref)
+            .context("read body expression type")?
+            .and_then(|body| body.expr_ty(expr).cloned())
+            .map(IndexedType::new))
+    }
+
+    /// Return the stored type for a body binding.
+    pub fn binding_ty(&self, binding: BodyBindingRef) -> anyhow::Result<Option<IndexedType>> {
+        Ok(self
+            .db
+            .body_ir
+            .body(binding.body)
+            .context("read body binding type")?
+            .and_then(|body| body.binding_ty(binding.binding).cloned())
+            .map(IndexedType::new))
+    }
+
+    /// Return names visible from a body scope, ordered by lexical distance.
+    #[rg_std::cancelable("lexical name lookup", token = self.db)]
+    pub fn lexical_names(&self, scope: BodyNameScope) -> anyhow::Result<Vec<BodyLexicalName>> {
+        let Some(body) = self
+            .db
+            .body_ir
+            .body(scope.body)
+            .context("read body lexical names")?
+        else {
+            return Ok(Vec::new());
+        };
+        let body_item_store = self
+            .db
+            .body_ir
+            .body_item_store(scope.body)
+            .context("read body item store for lexical names")?;
+        let mut names = Vec::new();
+        let mut seen_values = HashSet::<String>::new();
+        let mut seen_types = HashSet::<String>::new();
+        let mut scope_id = Some(scope.scope);
+        let mut scope_distance = 0;
+
+        // Lexical names are visible from the innermost scope outward. The first name wins in each
+        // namespace, matching normal shadowing while keeping the result useful for ranking.
+        while let Some(current_scope) = scope_id {
+            let Some(scope_data) = body.scope(current_scope) else {
+                break;
+            };
+
+            if matches!(scope.namespace, ValueOrTypeNamespace::Values) {
+                for binding_id in scope_data.bindings.iter().rev().copied() {
+                    rg_std::check_cancel!(self.db, "local declaration candidates");
+                    if binding_id.0 >= scope.visible_bindings {
+                        continue;
+                    }
+                    let Some(binding) = body.binding(binding_id) else {
+                        continue;
+                    };
+                    let Some(name) = binding.name.as_ref() else {
+                        continue;
+                    };
+                    if !seen_values.insert(name.to_string()) {
+                        continue;
+                    }
+                    names.push(BodyLexicalName::Binding {
+                        binding: BodyBindingRef {
+                            body: scope.body,
+                            binding: binding_id,
+                        },
+                        label: name.to_string(),
+                        scope_distance,
+                    });
+                }
+
+                for item_id in scope_data.source_items.iter().rev().copied() {
+                    rg_std::check_cancel!(self.db, "local declaration candidates");
+                    let Some(view) = body_item_store.and_then(|items| {
+                        items.semantic_items().find(|view| {
+                            matches!(
+                                view.source().kind,
+                                ItemSourceKind::Body(source)
+                                    if source.body == scope.body && source.item == item_id
+                            )
+                        })
+                    }) else {
+                        continue;
+                    };
+                    let Some(name) = view.name() else {
+                        continue;
+                    };
+
+                    match view.item() {
+                        SemanticItemRef::Function(function) => {
+                            if !seen_values.insert(name.to_string()) {
+                                continue;
+                            }
+                            names.push(BodyLexicalName::Function {
+                                function,
+                                label: name.to_string(),
+                                scope_distance,
+                            });
+                        }
+                        SemanticItemRef::Const(_) | SemanticItemRef::Static(_) => {
+                            if !seen_values.insert(name.to_string()) {
+                                continue;
+                            }
+                            names.push(BodyLexicalName::ValueItem {
+                                item: view.item(),
+                                kind: view.kind(),
+                                label: name.to_string(),
+                                scope_distance,
+                            });
+                        }
+                        SemanticItemRef::TypeDef(ty) => {
+                            let has_value_constructor = ItemStoreQuery::new(self.db)
+                                .type_def_has_value_constructor(ty)
+                                .context("read lexical type constructor shape")?;
+                            if !has_value_constructor || !seen_values.insert(name.to_string()) {
+                                continue;
+                            }
+                            names.push(BodyLexicalName::TypeItem {
+                                item: view.item(),
+                                kind: view.kind(),
+                                label: name.to_string(),
+                                scope_distance,
+                                has_value_constructor,
+                            });
+                        }
+                        SemanticItemRef::Trait(_)
+                        | SemanticItemRef::Impl(_)
+                        | SemanticItemRef::TypeAlias(_) => {}
+                    }
+                }
+            }
+
+            if matches!(scope.namespace, ValueOrTypeNamespace::Types) {
+                for item_id in scope_data.source_items.iter().rev().copied() {
+                    rg_std::check_cancel!(self.db, "local declaration candidates");
+                    let Some(view) = body_item_store.and_then(|items| {
+                        items.semantic_items().find(|view| {
+                            matches!(
+                                view.source().kind,
+                                ItemSourceKind::Body(source)
+                                    if source.body == scope.body && source.item == item_id
+                            )
+                        })
+                    }) else {
+                        continue;
+                    };
+                    if !matches!(
+                        view.item(),
+                        SemanticItemRef::TypeDef(_)
+                            | SemanticItemRef::Trait(_)
+                            | SemanticItemRef::TypeAlias(_)
+                    ) {
+                        continue;
+                    }
+                    let Some(name) = view.name() else {
+                        continue;
+                    };
+                    if !seen_types.insert(name.to_string()) {
+                        continue;
+                    }
+                    let has_value_constructor = match view.item() {
+                        SemanticItemRef::TypeDef(ty) => ItemStoreQuery::new(self.db)
+                            .type_def_has_value_constructor(ty)
+                            .context("read lexical type constructor shape")?,
+                        _ => false,
+                    };
+                    names.push(BodyLexicalName::TypeItem {
+                        item: view.item(),
+                        kind: view.kind(),
+                        label: name.to_string(),
+                        scope_distance,
+                        has_value_constructor,
+                    });
+                }
+            }
+
+            scope_id = scope_data.parent;
+            scope_distance += 1;
+        }
+
+        Ok(names)
+    }
+
+    /// Return let-like bindings whose type is already known from body facts.
+    ///
+    /// These are the local pattern bindings that can carry inferred type hints: ordinary `let`
+    /// bindings, `let else` and match-pattern bindings, and `for` loop pattern bindings.
+    pub fn inferred_binding_tys(
+        &self,
+        crate_ref: CrateRef,
+        file_id: FileId,
+        range: Option<Span>,
+    ) -> anyhow::Result<Vec<InferredBindingTy>> {
+        let mut bindings = Vec::new();
+        for (_, body) in self
+            .db
+            .body_ir
+            .bodies(crate_ref, Some(file_id))
+            .context("read bodies for inferred bindings")?
+        {
+            for (binding_idx, binding) in body.bindings().iter().enumerate() {
+                rg_std::check_cancel!(self.db, "local declaration candidates");
+                if !binding.source.is_written_in_file(file_id) {
+                    continue;
+                }
+                if !matches!(binding.kind, BindingKind::Let) {
+                    continue;
+                }
+                if binding.name.is_none() || binding.annotation.is_some() {
+                    continue;
+                }
+                let ty = body
+                    .binding_ty(BindingId(binding_idx))
+                    .cloned()
+                    .unwrap_or(Ty::Unknown);
+                if matches!(ty, Ty::Unknown) {
+                    continue;
+                }
+                if range.is_some_and(|range| !range.touches(binding.source.span.end)) {
+                    continue;
+                }
+
+                bindings.push(InferredBindingTy {
+                    file_id: binding.source.file_id,
+                    span: binding.source.span,
+                    ty: IndexedType::new(ty),
+                });
+            }
+        }
+
+        Ok(bindings)
+    }
+
+    /// Return call sites in one file that resolve to a single known function.
+    ///
+    /// This is the body-local view used by features that need to project declaration metadata, such
+    /// as parameter names, onto concrete argument expressions without owning call resolution.
+    pub fn resolved_function_calls(
+        &self,
+        crate_ref: CrateRef,
+        file_id: FileId,
+    ) -> anyhow::Result<Vec<ResolvedFunctionCall>> {
+        let mut calls = Vec::new();
+        for (body_ref, body) in self
+            .db
+            .body_ir
+            .bodies(crate_ref, Some(file_id))
+            .context("read bodies for resolved calls")?
+        {
+            for (expr_idx, expr) in body.exprs().iter().enumerate() {
+                rg_std::check_cancel!(self.db, "local declaration candidates");
+                if !expr.source.is_written_in_file(file_id) {
+                    continue;
+                }
+
+                match &expr.kind {
+                    ExprKind::Call { callee, args } => {
+                        let Some(callee) = *callee else {
+                            continue;
+                        };
+                        let Some(function) = self
+                            .single_function(body.expr_declarations(body_ref, callee))
+                            .context("resolve call target function")?
+                        else {
+                            continue;
+                        };
+                        calls.push(ResolvedFunctionCall {
+                            file_id: expr.source.file_id,
+                            function,
+                            param_offset: 0,
+                            args: Self::resolved_call_args(body, args),
+                        });
+                    }
+                    ExprKind::MethodCall { args, .. } => {
+                        let Some(function) = self
+                            .single_function(body.expr_declarations(body_ref, ExprId(expr_idx)))
+                            .context("resolve method call target function")?
+                        else {
+                            continue;
+                        };
+                        calls.push(ResolvedFunctionCall {
+                            file_id: expr.source.file_id,
+                            function,
+                            param_offset: 1,
+                            args: Self::resolved_call_args(body, args),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(calls)
+    }
+
+    /// Return bodies that own body-local item groups in one file.
+    pub fn local_groups(
+        &self,
+        crate_ref: CrateRef,
+        file_id: FileId,
+    ) -> anyhow::Result<Vec<BodyLocalGroup>> {
+        let mut groups = Vec::new();
+        for (body_ref, body) in self
+            .db
+            .body_ir
+            .bodies(crate_ref, Some(file_id))
+            .context("read body-local item groups")?
+        {
+            groups.push(BodyLocalGroup {
+                owner: body.owner().declaration(),
+                body: body_ref,
+            });
+        }
+
+        Ok(groups)
+    }
+
+    /// Return body-local item declarations that appear in one file.
+    #[rg_std::cancelable("body-local declaration collection", token = self.db)]
+    pub fn local_scope_declarations(
+        &self,
+        body_ref: BodyRef,
+        file_id: FileId,
+    ) -> anyhow::Result<Vec<DeclarationRef>> {
+        let Some(body) = self
+            .db
+            .body_ir
+            .body(body_ref)
+            .context("read body-local declarations")?
+        else {
+            return Ok(Vec::new());
+        };
+        let body_item_store = self
+            .db
+            .body_ir
+            .body_item_store(body_ref)
+            .context("read body item store for declarations")?;
+        let mut declarations = Vec::new();
+
+        for scope in body.scopes() {
+            rg_std::check_cancel!(self.db, "local declaration candidates");
+            for item_id in &scope.source_items {
+                rg_std::check_cancel!(self.db, "local declaration candidates");
+                let Some(view) = body_item_store.and_then(|items| {
+                    items.semantic_items().find(|view| {
+                        matches!(
+                            view.source().kind,
+                            ItemSourceKind::Body(source)
+                                if source.body == body_ref && source.item == *item_id
+                        )
+                    })
+                }) else {
+                    continue;
+                };
+                if view.source().file_id == file_id {
+                    declarations.push(DeclarationRef::from(view.item()));
+                }
+            }
+        }
+
+        Ok(declarations)
+    }
+
+    /// Return one function when declarations resolve to exactly one function.
+    fn single_function(
+        &self,
+        declarations: Vec<DeclarationRef>,
+    ) -> anyhow::Result<Option<FunctionRef>> {
+        let mut functions = Vec::new();
+        for declaration in declarations {
+            rg_std::check_cancel!(self.db, "local declaration candidates");
+            match declaration {
+                DeclarationRef::LocalDef(local_def) => {
+                    let Some(SemanticItemRef::Function(function)) = ItemStoreQuery::new(self.db)
+                        .semantic_item_for_local_def(local_def)
+                        .context("resolve body-local function")?
+                    else {
+                        continue;
+                    };
+                    functions.push(function);
+                }
+                DeclarationRef::Item(SemanticItemRef::Function(function)) => {
+                    functions.push(function);
+                }
+                DeclarationRef::Module(_)
+                | DeclarationRef::Item(
+                    SemanticItemRef::TypeDef(_)
+                    | SemanticItemRef::Trait(_)
+                    | SemanticItemRef::Impl(_)
+                    | SemanticItemRef::TypeAlias(_)
+                    | SemanticItemRef::Const(_)
+                    | SemanticItemRef::Static(_),
+                )
+                | DeclarationRef::Field(_)
+                | DeclarationRef::EnumVariant(_)
+                | DeclarationRef::BodyBinding(_) => {}
+            }
+        }
+
+        let mut functions = functions.into_iter();
+        let Some(function) = functions.next() else {
+            return Ok(None);
+        };
+        Ok(functions.next().is_none().then_some(function))
+    }
+
+    /// Convert expression ids into call argument spans.
+    fn resolved_call_args(body: rg_body_ir::BodyView<'_>, args: &[ExprId]) -> Vec<ResolvedCallArg> {
+        args.iter()
+            .filter_map(|arg| {
+                body.expr(*arg).map(|expr| ResolvedCallArg {
+                    span: expr.source.span,
+                })
+            })
+            .collect()
+    }
+}

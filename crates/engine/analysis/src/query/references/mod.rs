@@ -1,0 +1,351 @@
+//! Reference searches over the facts already held by the analysis graph.
+//!
+//! Reference lookup intentionally scans known source facts instead of building a separate index.
+//! The query owns the search surface, declaration-inclusion policy, and declaration projection.
+
+use std::collections::HashSet;
+
+use rg_ir_model::{CrateRef, FileId, identity::DeclarationRef};
+use rg_ir_view::IndexedViewDb;
+use rg_std::UniqueVec;
+
+use crate::{
+    Analysis, SavedSourceRelationship,
+    model::{ReferenceLocation, SymbolAt},
+    source_symbol::{SourceSymbol, SourceSymbolIndex, SourceSymbolResolver, SourceSymbolRole},
+};
+
+mod search;
+mod subject;
+
+pub use self::search::{ReferenceQuery, ReferenceSearchFile, ReferenceSearchLabel};
+use self::{
+    search::{ReferenceScanTarget, ReferenceSearchScope},
+    subject::{ReferenceSearchHints, ReferenceSubject},
+};
+
+pub(crate) struct ReferenceResolver<'a, 'db, 'scope> {
+    analysis: &'a Analysis<'db>,
+    query: ReferenceQuery<'scope>,
+}
+
+impl<'a, 'db, 'scope> ReferenceResolver<'a, 'db, 'scope> {
+    pub(crate) fn new(analysis: &'a Analysis<'db>, query: ReferenceQuery<'scope>) -> Self {
+        Self { analysis, query }
+    }
+
+    /// Returns source labels that are safe for request-local text prefiltering.
+    pub(crate) fn reference_search_labels(
+        analysis: &Analysis<'db>,
+        crate_ref: CrateRef,
+        file_id: FileId,
+        offset: u32,
+    ) -> anyhow::Result<Vec<ReferenceSearchLabel>> {
+        let Some(symbol) = analysis.symbol_at_for_query(crate_ref, file_id, offset)? else {
+            return Ok(Vec::new());
+        };
+        let declarations = Self::unique_declarations_for_analysis(analysis, symbol)?;
+        let (_, hints) = ReferenceSubject::resolve(analysis.view_db(), &declarations)?;
+        if hints.local_scan_target().is_some() {
+            return Ok(Vec::new());
+        }
+        Ok(hints.exact_labels())
+    }
+
+    /// Finds references for the symbol under `offset` by scanning the requested use-site surface.
+    ///
+    /// Declaration locations are projected from the selected symbol before use-site scanning when
+    /// requested, using the resolver's declaration scope policy.
+    pub(crate) fn references(
+        &self,
+        crate_ref: CrateRef,
+        file_id: FileId,
+        offset: u32,
+    ) -> anyhow::Result<Vec<ReferenceLocation>> {
+        let symbols = self.matching_source_symbols(crate_ref, file_id, offset)?;
+        let mut locations = symbols
+            .into_iter()
+            .map(|symbol| ReferenceLocation {
+                crate_ref: symbol.crate_ref(),
+                file_id: symbol.file_id(),
+                span: symbol.span(),
+            })
+            .collect::<Vec<_>>();
+
+        locations.sort_by_key(|location| {
+            (
+                location.crate_ref.package.0,
+                location.crate_ref.crate_id.0,
+                location.file_id.0,
+                location.span.start,
+                location.span.end,
+            )
+        });
+        locations.dedup();
+        Ok(locations)
+    }
+
+    pub(crate) fn matching_source_symbols(
+        &self,
+        crate_ref: CrateRef,
+        file_id: FileId,
+        offset: u32,
+    ) -> anyhow::Result<Vec<SourceSymbol>> {
+        let Some(symbol) = self
+            .analysis
+            .source_symbol_at_for_query(crate_ref, file_id, offset)?
+        else {
+            return Ok(Vec::new());
+        };
+        let declarations = self.unique_declarations_for_symbol(symbol.symbol().clone())?;
+        if declarations.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut symbols = self.source_symbols_matching_declarations(&declarations)?;
+        let cursor_belongs_to_result = match symbol.role() {
+            SourceSymbolRole::Reference => self.query.accepts_scan_target(ReferenceScanTarget {
+                crate_ref: symbol.crate_ref(),
+                file_id: Some(symbol.file_id()),
+            }),
+            SourceSymbolRole::Declaration => {
+                self.query.includes_declarations()
+                    && self
+                        .query
+                        .accepts_declaration(symbol.crate_ref(), symbol.file_id())
+            }
+            SourceSymbolRole::Structural => false,
+        };
+        if cursor_belongs_to_result && !symbols.contains(&symbol) {
+            // An associated edited header is a real current-source occurrence, even though its
+            // semantic fact comes from the saved project. A body-only scan cannot rediscover the
+            // header, so keep the already proven cursor occurrence explicitly.
+            symbols.push(symbol);
+        }
+        Ok(symbols)
+    }
+
+    pub(crate) fn source_symbols_matching_declarations(
+        &self,
+        declarations: &[DeclarationRef],
+    ) -> anyhow::Result<Vec<SourceSymbol>> {
+        if declarations.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let (subject, hints) = ReferenceSubject::resolve(self.analysis.view_db(), declarations)?;
+        self.source_symbols_matching_subject(&subject, &hints)
+    }
+
+    fn source_symbols_matching_subject(
+        &self,
+        subject: &ReferenceSubject,
+        hints: &ReferenceSearchHints,
+    ) -> anyhow::Result<Vec<SourceSymbol>> {
+        let matcher = ReferenceDeclarationMatcher::new(self.analysis.view_db(), subject);
+        let mut symbols = Vec::new();
+        self.push_matching_reference_candidates(&matcher, hints, &mut symbols)?;
+
+        // Rename needs declaration occurrences with their source-surface metadata. Prefer scanned
+        // source symbols when they exist, and project a plain declaration only for declarations
+        // outside the requested scan surface.
+        if self.query.includes_declarations() {
+            for location in subject.declaration_locations() {
+                rg_std::check_cancel!(self.analysis, "reference declarations");
+                if !self
+                    .query
+                    .accepts_declaration(location.crate_ref, location.file_id)
+                {
+                    continue;
+                }
+                if self
+                    .analysis
+                    .current_source_relationship(location.crate_ref.package, location.file_id)
+                    == Some(SavedSourceRelationship::Different)
+                {
+                    // A current Body IR scan already contains declarations that exist in the
+                    // editor. Projecting a saved fallback here would attach a saved range to
+                    // different current text.
+                    continue;
+                }
+                if symbols.iter().any(|symbol| {
+                    symbol.role() == SourceSymbolRole::Declaration
+                        && symbol.crate_ref() == location.crate_ref
+                        && symbol.file_id() == location.file_id
+                        && symbol.span() == location.span
+                }) {
+                    continue;
+                }
+                symbols.push(SourceSymbol::plain_declaration(
+                    location.declaration,
+                    location.crate_ref,
+                    location.file_id,
+                    location.span,
+                ));
+            }
+        }
+
+        symbols.sort_by_key(|symbol| {
+            (
+                symbol.crate_ref().package.0,
+                symbol.crate_ref().crate_id.0,
+                symbol.file_id().0,
+                symbol.span().start,
+                symbol.span().end,
+            )
+        });
+        symbols.dedup();
+        Ok(symbols)
+    }
+
+    fn unique_declarations_for_symbol(
+        &self,
+        symbol: SymbolAt,
+    ) -> anyhow::Result<Vec<DeclarationRef>> {
+        Self::unique_declarations_for_analysis(self.analysis, symbol)
+    }
+
+    fn unique_declarations_for_analysis(
+        analysis: &Analysis<'db>,
+        symbol: SymbolAt,
+    ) -> anyhow::Result<Vec<DeclarationRef>> {
+        let declarations =
+            SourceSymbolResolver::new(analysis.view_db()).declarations_for_symbol(symbol)?;
+        let mut unique = UniqueVec::new();
+        for declaration in declarations {
+            unique.push(declaration);
+        }
+        Ok(unique.into_vec())
+    }
+
+    fn push_matching_reference_candidates(
+        &self,
+        matcher: &ReferenceDeclarationMatcher<'_, 'db>,
+        hints: &ReferenceSearchHints,
+        symbols: &mut Vec<SourceSymbol>,
+    ) -> anyhow::Result<()> {
+        let mut visited = Vec::new();
+
+        if let Some(scan) = hints.local_scan_target() {
+            if self.query.accepts_scan_target(scan) {
+                self.push_matching_scan_target_candidates(scan, matcher, hints, symbols)?;
+            }
+            return Ok(());
+        }
+
+        match self.query.search_scope() {
+            ReferenceSearchScope::Crates(crates) => {
+                for crate_ref in crates {
+                    rg_std::check_cancel!(self.analysis, "reference crate scan");
+                    let scan = ReferenceScanTarget {
+                        crate_ref: *crate_ref,
+                        file_id: None,
+                    };
+                    if visited.contains(&scan) {
+                        continue;
+                    }
+                    visited.push(scan);
+                    self.push_matching_scan_target_candidates(scan, matcher, hints, symbols)?;
+                }
+            }
+            ReferenceSearchScope::Files(files) => {
+                for file in files {
+                    rg_std::check_cancel!(self.analysis, "reference file scan");
+                    let scan = ReferenceScanTarget {
+                        crate_ref: file.crate_ref,
+                        file_id: Some(file.file_id),
+                    };
+                    if visited.contains(&scan) {
+                        continue;
+                    }
+                    visited.push(scan);
+                    self.push_matching_scan_target_candidates(scan, matcher, hints, symbols)?;
+                }
+            }
+            ReferenceSearchScope::File { crate_ref, file_id } => {
+                self.push_matching_scan_target_candidates(
+                    ReferenceScanTarget {
+                        crate_ref,
+                        file_id: Some(file_id),
+                    },
+                    matcher,
+                    hints,
+                    symbols,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn push_matching_scan_target_candidates(
+        &self,
+        scan: ReferenceScanTarget,
+        matcher: &ReferenceDeclarationMatcher<'_, 'db>,
+        hints: &ReferenceSearchHints,
+        symbols: &mut Vec<SourceSymbol>,
+    ) -> anyhow::Result<()> {
+        let source_symbols = SourceSymbolIndex::new(self.analysis.view_db());
+        let candidates = match scan.file_id {
+            Some(file_id)
+                if self
+                    .analysis
+                    .current_source_relationship(scan.crate_ref.package, file_id)
+                    == Some(SavedSourceRelationship::Different) =>
+            {
+                source_symbols.body_symbols_in_crate(scan.crate_ref, Some(file_id))?
+            }
+            Some(_) | None => source_symbols.symbols_in_crate(scan.crate_ref, scan.file_id)?,
+        };
+
+        for candidate in candidates {
+            rg_std::check_cancel!(self.analysis, "reference candidate matching");
+            if !self.accepts_candidate_role(candidate.role()) {
+                continue;
+            }
+            if hints.rejects_candidate(self.analysis.view_db(), &candidate)? {
+                continue;
+            }
+            if matcher.matches(candidate.symbol())? {
+                symbols.push(candidate);
+            }
+        }
+        Ok(())
+    }
+
+    fn accepts_candidate_role(&self, role: SourceSymbolRole) -> bool {
+        match role {
+            SourceSymbolRole::Reference => true,
+            SourceSymbolRole::Declaration => self.query.includes_declarations(),
+            SourceSymbolRole::Structural => false,
+        }
+    }
+}
+
+/// Request-local declaration matcher used while scanning source occurrences.
+struct ReferenceDeclarationMatcher<'a, 'db> {
+    resolver: SourceSymbolResolver<'a, 'db>,
+    declarations: HashSet<DeclarationRef>,
+}
+
+impl<'a, 'db> ReferenceDeclarationMatcher<'a, 'db> {
+    fn new(db: &'a IndexedViewDb<'db>, subject: &ReferenceSubject) -> Self {
+        Self {
+            resolver: SourceSymbolResolver::new(db),
+            declarations: subject.declarations().clone(),
+        }
+    }
+
+    fn matches(&self, symbol: &SymbolAt) -> anyhow::Result<bool> {
+        if let SymbolAt::Declaration { declaration, .. } = symbol
+            && self.declarations.contains(declaration)
+        {
+            return Ok(true);
+        }
+
+        let candidate_declarations = self.resolver.declarations_for_symbol(symbol.clone())?;
+        Ok(candidate_declarations
+            .iter()
+            .any(|candidate| self.declarations.contains(candidate)))
+    }
+}
