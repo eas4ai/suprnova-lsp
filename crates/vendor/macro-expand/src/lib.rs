@@ -1,7 +1,7 @@
-//! Declarative macro expansion for rust-glancer.
+//! Declarative macro expansion for suprnova-lsp.
 //!
 //! This crate keeps the rust-analyzer-derived MBE engine behind a small API that
-//! works with rust-glancer's syntax and def-map data. Callers pass parsed macro
+//! works with suprnova-lsp's syntax and def-map data. Callers pass parsed macro
 //! nodes or stored token trees, then receive generated syntax parsed directly
 //! from the expanded token tree.
 

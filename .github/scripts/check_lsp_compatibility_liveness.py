@@ -75,9 +75,9 @@ def liveness_failures(report: Any) -> list[str]:
             failures.append(f"{method} is missing from the report")
             continue
 
-        result_count = aggregate.get("rust_glancer_count")
+        result_count = aggregate.get("suprnova_lsp_count")
         if not isinstance(result_count, int) or isinstance(result_count, bool):
-            failures.append(f"{method} has no integer rust_glancer_count")
+            failures.append(f"{method} has no integer suprnova_lsp_count")
         elif result_count <= 0:
             failures.append(f"{method} returned no suprnova-lsp results")
 

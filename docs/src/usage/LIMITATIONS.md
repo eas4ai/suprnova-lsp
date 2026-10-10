@@ -1,15 +1,15 @@
 # Limitations
 
-Rust Glancer is incomplete, and has a bunch of quirks that are worth knowing about.
+Suprnova LSP is incomplete, and has a bunch of quirks that are worth knowing about.
 
 ## Ultimate advice
 
 If something unexpected happens: you start getting a lot of errors, index is messed up, LSP stops responding, etc:
-- Try hitting `ctrl/cmd+shift+P` and sending `Rust Glancer: Reindex workspace` command.
-- Try restarting the server: click on `Rust Glancer` on the bottom left of VS Code.
-- If that doesn't help, stop the editor, remove `target/rust_glancer`, and start again.
+- Try hitting `ctrl/cmd+shift+P` and sending `Suprnova LSP: Reindex workspace` command.
+- Try restarting the server: click on `Suprnova LSP` on the bottom left of VS Code.
+- If that doesn't help, stop the editor, remove `target/suprnova_lsp`, and start again.
 
-If you know how to reproduce the issue, it would be great if you also [report it](https://github.com/rust-glancer/rust-glancer/issues).
+If you know how to reproduce the issue, it would be great if you also [report it](https://github.com/eas4ai/suprnova-lsp/issues).
 
 It shouldn't happen often, but you know how it is with young software.
 I intentionally don't implement any sophisticated recovery mechanisms: the idea is that the LSP should never fail,
@@ -50,33 +50,19 @@ you need a change you made to take effect outside of the place where you type.
 If it sounds scary, just try it -- it really isn't,
 and you can get used to it pretty quickly. And thanks to that, editing experience remains smooth.
 
-## Build scripts
+## Build scripts and compiler exports
 
-Rust Glancer has an intentional policy where aims not to execute code. Part of it is performance-related,
-part of it is security-related. This is also the reason why diagnostics are disabled by default -- the
-project philosophy is that enabling diagnostics must be a user's decision, not something shipped by default.
+Source-only indexing reads existing Cargo build artifacts. It does not execute
+build scripts to produce missing outputs. If the project has never been built,
+or its artifacts were removed, some generated imports may remain unresolved.
+Run `cargo check` or `cargo build`, then reindex to pick up the outputs.
 
-Because of that, we don't proactively execute build scripts for projects.
-Instead, we try to observe the existing artifacts and use them.
-This stage is optional, so failure to discover cargo build artifacts does not stop or fail indexing.
+Automatic Suprnova model support uses a different path: its background worker
+runs `cargo rustdoc`, which can execute build scripts and proc macros. Saved
+input changes trigger a debounced refresh. Configure `suprnova-lsp.rustdoc.automatic`
+to disable automatic exports, or use prepared inputs when you want to supply
+compiler declarations explicitly. These declarations describe saved code;
+unsaved macro or global declaration changes still need a save before export.
 
-So the logic is roughly:
-
-- if the code has never been built or `cargo clean` has been run, the analysis
-will not contain any build script outputs, and most likely it will result in some imports not being resolved.
-The analysis will still finish and be available to the possilbe extent.
-- if the code has been built a while ago, outdated artifacts may be used for analysis. In many cases it's fine,
-since build script outputs do not change that often.
-- if newest possible build script outputs should be used for indexing, a manual reindexing command can be sent
-to the server after running `cargo check` / `cargo build` (e.g. through `ctrl/cmd+shift+P` in VS Code and
-"Rust Glancer: Reindex Workspace" chosen there). This way user will first make sure that cargo build artifacts
-are updated, and then will prompt the LSP to observe them.
-
-Note that if newer artifacts appear during normal reindexing flow, they will NOT necessarily be utilized.
-Standard reindex-on-save does not check if there is a newer cargo build output. The reason for that is because
-in most cases reusing past outputs is acceptable, and eager reindexing could make user experience significantly
-worse.
-
-This is a somewhat manual workflow where user is responsible for providing the outputs that need to be used
-by Rust Glancer. This model is a compromose to make build scripts supported, while not making LSP responsible
-for building the actual project to work.
+Cargo diagnostics are separate and remain disabled by default. Enable them
+through the diagnostics settings when you want compiler error reports.

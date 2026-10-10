@@ -1,9 +1,9 @@
-# Rust Glancer for Zed
+# Suprnova LSP for Zed
 
 This extension connects Zed's built-in Rust language support to
-`rust-glancer lsp`. It uses an explicitly configured executable or one installed
-on `PATH` when available. Otherwise, the extension downloads its pinned Rust
-Glancer release and keeps it in Zed's extension work directory.
+`suprnova-lsp lsp`. It uses an explicitly configured executable or one installed
+on `PATH` when available. Otherwise, the extension downloads its pinned
+Suprnova LSP release and keeps it in Zed's extension work directory.
 
 Managed installation is available for:
 
@@ -12,14 +12,14 @@ Managed installation is available for:
 - Windows on x86-64
 
 Other platforms can still use the extension by configuring a compatible
-`rust-glancer` executable explicitly.
+`suprnova-lsp` executable explicitly.
 
 ## Development
 
 Build the language server first:
 
 ```text
-cargo build --release -p rust-glancer
+cargo build --release -p suprnova-lsp
 ```
 
 In Zed, run `zed: extensions`, choose **Install Dev Extension**, and select the
@@ -32,13 +32,13 @@ the binary path with the path to this checkout:
 {
   "languages": {
     "Rust": {
-      "language_servers": ["rust-glancer", "!rust-analyzer"]
+      "language_servers": ["suprnova-lsp", "!rust-analyzer"]
     }
   },
   "lsp": {
-    "rust-glancer": {
+    "suprnova-lsp": {
       "binary": {
-        "path": "/absolute/path/to/rust-glancer/target/release/rust-glancer",
+        "path": "/absolute/path/to/suprnova-lsp/target/release/suprnova-lsp",
         "arguments": ["lsp"]
       }
     }
@@ -48,20 +48,20 @@ the binary path with the path to this checkout:
 
 The extension uses `["lsp"]` when `binary.arguments` is omitted. If arguments
 are configured, they replace that default and must retain the `lsp` subcommand.
-When `binary.path` is omitted, the extension looks for `rust-glancer` on the
+When `binary.path` is omitted, the extension looks for `suprnova-lsp` on the
 project's `PATH` and then falls back to its managed binary. Managed downloads
 are versioned, so restarting Zed can use an already installed server without
 network access. A new extension release pins a new server release instead of
 following the latest GitHub release automatically.
 
-Rust Glancer applies its server-side configuration defaults when no
+Suprnova LSP applies its server-side configuration defaults when no
 initialization options are provided. Overrides use Zed's standard
 `initialization_options` object:
 
 ```json
 {
   "lsp": {
-    "rust-glancer": {
+    "suprnova-lsp": {
       "initialization_options": {
         "cfg": {
           "test": true,
@@ -88,10 +88,10 @@ binary:
 ```json
 {
   "lsp": {
-    "rust-glancer": {
+    "suprnova-lsp": {
       "binary": {
         "env": {
-          "RUST_GLANCER_LOG": "rg_lsp_server=debug,rg_lsp_engine=debug"
+          "SUPRNOVA_LSP_LOG": "rg_lsp_server=debug,rg_lsp_engine=debug"
         }
       }
     }
@@ -109,5 +109,5 @@ build directly:
 
 ```text
 rustup target add wasm32-wasip2
-cargo build -p rust-glancer-zed --target wasm32-wasip2
+cargo build -p suprnova-lsp-zed --target wasm32-wasip2
 ```

@@ -1,6 +1,6 @@
 //! Passive recovery of generated Rust sources from builds the user already ran.
 //!
-//! Build-script output is not part of Cargo metadata, and rust-glancer deliberately does not run
+//! Build-script output is not part of Cargo metadata, and suprnova-lsp deliberately does not run
 //! Cargo or project code to obtain it. Instead, this module looks for evidence left by a completed
 //! rustc unit. A dep-info rule can contain both the package target root and a generated input:
 //!

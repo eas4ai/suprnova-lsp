@@ -30,6 +30,11 @@ jobs:
           components: clippy,rustfmt
       - name: Check release versions
         run: python3 .github/scripts/check_release_versions.py
+      - name: Check project identity
+        run: |
+          python3 -B .github/scripts/check_project_identity.py
+          python3 -B tools/test_project_identity.py
+          python3 -B tools/test_sudus_identity.py
       - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
           tool: cargo-dylint@6.0.4,dylint-link@6.0.4,just@1.48.1
@@ -55,7 +60,7 @@ jobs:
       - name: Install Zed WebAssembly target
         run: rustup target add wasm32-wasip2
       - name: Check Zed WebAssembly extension
-        run: cargo check -p rust-glancer-zed --target wasm32-wasip2
+        run: cargo check -p suprnova-lsp-zed --target wasm32-wasip2
 
   tests:
     name: tests (${{ matrix.os }})

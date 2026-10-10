@@ -8,7 +8,7 @@ use crate::{MemoryRecorder, MemorySize};
 
 /// An OS string encoded without a UTF-8 or display-text conversion.
 ///
-/// The encoding is deliberately host-local because rust-glancer caches are not portable between
+/// The encoding is deliberately host-local because suprnova-lsp caches are not portable between
 /// operating systems. Unix stores native bytes; Windows stores little-endian UTF-16 code units.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, SchemaRead, SchemaWrite)]
 pub struct NativeOsString(Vec<u8>);

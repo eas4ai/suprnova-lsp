@@ -26,5 +26,5 @@
 
 - [Development guidelines](development/DEVELOPMENT.md)
 - [Memory approach](development/MEMORY.md)
-- [Profiling rust-glancer](development/PROFILING.md)
+- [Profiling suprnova-lsp](development/PROFILING.md)
 - [Project vocabulary](development/VOCABULARY.md)

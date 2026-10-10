@@ -1,6 +1,6 @@
 ## rg_syntax
 
-Rust Glancer fork of [`syntax`](https://github.com/rust-lang/rust-analyzer/tree/master/crates/syntax) crate.
+Suprnova LSP fork of [`syntax`](https://github.com/rust-lang/rust-analyzer/tree/master/crates/syntax) crate.
 It is a vendored part, originally a part of the `rust-analyzer` project, licensed under [MIT](https://github.com/rust-lang/rust-analyzer/blob/master/LICENSE-MIT) and [Apache 2.0](https://github.com/rust-lang/rust-analyzer/blob/master/LICENSE-APACHE) license.
 
 ## Upstream and regeneration
@@ -14,7 +14,7 @@ Grammar and inline-test generation live in `crates/tools/codegen`. Run
 test comments; `just codegen-check` verifies checked-in output. Review parser
 `.rast` goldens separately, including removed or renamed upstream tests.
 
-The syntax tree is rust-glancer's immutable tree. Keep its ownership, source
+The syntax tree is suprnova-lsp's immutable tree. Keep its ownership, source
 mapping, and generated-syntax builder when merging upstream AST/parser changes;
 Rowan editing and incremental reparsing APIs are intentionally absent.
 

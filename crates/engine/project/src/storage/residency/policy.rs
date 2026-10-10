@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 /// Decides which package artifacts should remain resident after a project build.
 ///
 /// This is cache policy, not Cargo metadata. `PackageSource` says where Cargo resolved a package
-/// from; residency policy decides how eagerly rust-glancer should keep that package in memory.
+/// from; residency policy decides how eagerly suprnova-lsp should keep that package in memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, MemorySize)]
 #[memsize(leaf)]
 pub enum PackageResidencyPolicy {

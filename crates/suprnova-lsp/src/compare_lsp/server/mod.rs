@@ -1,0 +1,206 @@
+//! Paired process lifecycle for the compared LSP servers.
+//!
+//! This module owns the shared setup for both sides of the comparison: spawn each server, send
+//! initialize/didOpen, forward query requests, and shut both processes down. Query construction and
+//! raw result collection live outside this module so process handling stays independent of the
+//! request family being compared.
+
+mod command;
+mod process;
+mod stderr;
+mod uri;
+
+use std::time::Duration;
+
+use anyhow::Context as _;
+use serde_json::Value;
+
+pub(crate) use self::uri::file_uri;
+use self::{command::ServerKind, process::RunningServer};
+use crate::compare_lsp::{fixture::Fixture, lsp_client::RequestOutcome, query::QueryCase};
+
+/// Two initialized servers that have opened the same fixture files.
+#[derive(Debug)]
+pub(crate) struct StartedServers {
+    suprnova_lsp_server: RunningServer,
+    rust_analyzer_server: RunningServer,
+    suprnova_lsp_readiness: ServerReadiness,
+    rust_analyzer_readiness: ServerReadiness,
+    opened_files: usize,
+}
+
+impl StartedServers {
+    /// Spawn both servers and prepare them to answer the fixture query vector.
+    pub(crate) async fn start(fixture: &Fixture) -> anyhow::Result<Self> {
+        let source_paths = Self::unique_source_paths(fixture.query_cases());
+        let mut suprnova_lsp_server = RunningServer::spawn(ServerKind::SuprnovaLsp).await?;
+        let mut rust_analyzer_server = RunningServer::spawn(ServerKind::RustAnalyzer).await?;
+
+        let suprnova_lsp_readiness = suprnova_lsp_server
+            .initialize_fixture(fixture.root(), &source_paths)
+            .await?;
+        let rust_analyzer_readiness = rust_analyzer_server
+            .initialize_fixture(fixture.root(), &source_paths)
+            .await?;
+        let suprnova_lsp_readiness = suprnova_lsp_readiness.with_settle_latency(
+            suprnova_lsp_server
+                .settle_after_readiness()
+                .await
+                .context("Waiting for suprnova-lsp post-ready settle failed")?,
+        );
+        let rust_analyzer_readiness = rust_analyzer_readiness.with_settle_latency(
+            rust_analyzer_server
+                .settle_after_readiness()
+                .await
+                .context("Waiting for rust-analyzer post-ready settle failed")?,
+        );
+
+        // Index the saved project first, then move both editors to the same stable unsaved text.
+        // Query latency should measure dirty-source analysis, not startup or a project rebuild.
+        if fixture.uses_dirty_editor_text() {
+            for source_path in &source_paths {
+                let text = fixture
+                    .editor_source_text(source_path)
+                    .context("Preparing dirty compare-lsp editor source failed")?;
+                suprnova_lsp_server
+                    .change_source_file(fixture.root(), source_path, text.clone())
+                    .await?;
+                rust_analyzer_server
+                    .change_source_file(fixture.root(), source_path, text)
+                    .await?;
+            }
+            tracing::info!(
+                changed_files = source_paths.len(),
+                "compare-lsp dirty editor state prepared"
+            );
+        }
+
+        Ok(Self {
+            suprnova_lsp_server,
+            rust_analyzer_server,
+            suprnova_lsp_readiness,
+            rust_analyzer_readiness,
+            opened_files: source_paths.len(),
+        })
+    }
+
+    pub(crate) fn suprnova_lsp_readiness(&self) -> &ServerReadiness {
+        &self.suprnova_lsp_readiness
+    }
+
+    pub(crate) fn rust_analyzer_readiness(&self) -> &ServerReadiness {
+        &self.rust_analyzer_readiness
+    }
+
+    pub(crate) fn suprnova_lsp_command_label(&self) -> &str {
+        self.suprnova_lsp_server.command_label()
+    }
+
+    pub(crate) fn rust_analyzer_command_label(&self) -> &str {
+        self.rust_analyzer_server.command_label()
+    }
+
+    pub(crate) async fn request_suprnova_lsp(
+        &mut self,
+        method: &'static str,
+        params: Value,
+        timeout: Duration,
+    ) -> RequestOutcome {
+        self.suprnova_lsp_server
+            .request(method, params, timeout)
+            .await
+    }
+
+    pub(crate) async fn request_rust_analyzer(
+        &mut self,
+        method: &'static str,
+        params: Value,
+        timeout: Duration,
+    ) -> RequestOutcome {
+        self.rust_analyzer_server
+            .request(method, params, timeout)
+            .await
+    }
+
+    pub(crate) fn opened_files(&self) -> usize {
+        self.opened_files
+    }
+
+    /// Ask both servers to shut down, even if one side reports an error first.
+    pub(crate) async fn shutdown(self) -> anyhow::Result<()> {
+        let (suprnova_lsp_shutdown, rust_analyzer_shutdown) = futures::future::join(
+            self.suprnova_lsp_server.shutdown(),
+            self.rust_analyzer_server.shutdown(),
+        )
+        .await;
+        match (suprnova_lsp_shutdown, rust_analyzer_shutdown) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(suprnova_lsp_error), Err(rust_analyzer_error)) => {
+                anyhow::bail!(
+                    "both LSP servers failed during shutdown\n\
+                     suprnova-lsp: {suprnova_lsp_error}\n\
+                     rust-analyzer: {rust_analyzer_error}",
+                );
+            }
+        }
+    }
+
+    fn unique_source_paths(query_cases: &[QueryCase]) -> Vec<&'static str> {
+        let mut source_paths = Vec::new();
+        for query_case in query_cases {
+            let Some(source_path) = query_case.source_path() else {
+                continue;
+            };
+            if !source_paths.contains(&source_path) {
+                source_paths.push(source_path);
+            }
+        }
+        source_paths
+    }
+}
+
+/// Initialization facts reported with the comparison run.
+#[derive(Debug)]
+pub(crate) struct ServerReadiness {
+    name: &'static str,
+    initialize_latency: Duration,
+    ready_latency: Duration,
+    settle_latency: Duration,
+}
+
+impl ServerReadiness {
+    pub(super) fn new(
+        name: &'static str,
+        initialize_latency: Duration,
+        ready_latency: Duration,
+    ) -> Self {
+        Self {
+            name,
+            initialize_latency,
+            ready_latency,
+            settle_latency: Duration::ZERO,
+        }
+    }
+
+    pub(super) fn with_settle_latency(mut self, settle_latency: Duration) -> Self {
+        self.settle_latency = settle_latency;
+        self
+    }
+
+    pub(crate) fn name(&self) -> &'static str {
+        self.name
+    }
+
+    pub(crate) fn initialize_latency(&self) -> Duration {
+        self.initialize_latency
+    }
+
+    pub(crate) fn ready_latency(&self) -> Duration {
+        self.ready_latency
+    }
+
+    pub(crate) fn settle_latency(&self) -> Duration {
+        self.settle_latency
+    }
+}

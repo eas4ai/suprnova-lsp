@@ -1,6 +1,6 @@
 //! Track missing information when asking the compiler trait solver a question.
 //!
-//! To solve a goal such as `Widget: Render`, the compiler solver calls back into Rust Glancer for
+//! To solve a goal such as `Widget: Render`, the compiler solver calls back into Suprnova LSP for
 //! impl headers, bounds, generic parameters, and associated types. These are the callbacks we
 //! track here. Some must return a value even when we cannot provide the requested information:
 //! for example, a missing declaration's generic metadata is returned as an empty parameter list.

@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
-description = "Rust Glancer cfg predicate lowering and evaluation."
+description = "Suprnova LSP cfg predicate lowering and evaluation."
 
 [dependencies]
 rg_std.workspace = true

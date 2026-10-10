@@ -1,6 +1,6 @@
 //! Owned declaration parts shared between operations in one immutable lexical context.
 //!
-//! These entries use owned Rust Glancer types. For `fn id<T>(value: T) -> T`, the signature keeps `T`;
+//! These entries use owned Suprnova LSP types. For `fn id<T>(value: T) -> T`, the signature keeps `T`;
 //! the inference variable chosen for a particular call never enters this cache. Each operation
 //! imports the parts it needs into its own temporary solver storage.
 //!

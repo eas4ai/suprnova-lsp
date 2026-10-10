@@ -150,7 +150,7 @@ mod tests {
         fn new() -> Self {
             let id = NEXT_FIXTURE_ID.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
-                "rust-glancer-normalized-path-{}-{id}",
+                "suprnova-lsp-normalized-path-{}-{id}",
                 std::process::id()
             ));
             fs::create_dir_all(&path).expect("test fixture directory should be created");

@@ -43,7 +43,7 @@ TERMINATION_GRACE_SECONDS = 3
 MAX_LOG_BYTES = 512 * 1024 * 1024
 MAX_REPETITIONS = 20
 MAX_WARMUPS = 10
-FIXTURE_MARKER = ".rust-glancer-agent-debug-fixture"
+FIXTURE_MARKER = ".suprnova-lsp-agent-debug-fixture"
 
 ACTIVE_STOP: Optional[Callable[[Dict[str, str]], "asyncio.Task[None]"]] = None
 RECEIVED_SIGNAL: Optional[signal.Signals] = None
@@ -115,7 +115,7 @@ Runner options (must appear before the mode):
   -h, --help                    Show this help
 
 Examples:
-  just agent-debug --measure analyze ~/workspace/rust-glancer/reference/rust-analyzer --profile -m
+  just agent-debug --measure analyze ~/workspace/suprnova-lsp/reference/rust-analyzer --profile -m
   just agent-debug --log 'rg_lsp_engine=debug' lsp-query --file crates/example.rs hover --marker 'let value'
   just agent-debug --timeout 60s --sample-on-timeout test -p rg_analysis inference_test
 
@@ -307,7 +307,7 @@ def host_target() -> str:
     return HOST_TARGET
 
 
-def rust_glancer_binary(profile: str) -> Path:
+def suprnova_lsp_binary(profile: str) -> Path:
     return BUILD_ROOT / host_target() / profile / "suprnova-lsp"
 
 
@@ -325,7 +325,7 @@ def runtime_spec(mode: str, mode_args: Sequence[str], options: RunnerOptions) ->
     arguments = normalized_mode_arguments(mode, mode_args)
     if mode in {"analyze", "compare-lsp"}:
         return CommandSpec(
-            str(rust_glancer_binary(options.build_profile)), [mode] + arguments
+            str(suprnova_lsp_binary(options.build_profile)), [mode] + arguments
         )
     if mode == "lsp-query":
         return CommandSpec(
@@ -333,7 +333,7 @@ def runtime_spec(mode: str, mode_args: Sequence[str], options: RunnerOptions) ->
             [
                 str(WORKSPACE_ROOT / "tools" / "lsp-query.py"),
                 "--binary",
-                str(rust_glancer_binary(options.build_profile)),
+                str(suprnova_lsp_binary(options.build_profile)),
             ]
             + arguments,
         )
@@ -549,12 +549,12 @@ async def sample_owned_processes(snapshot: Dict[str, Any], output_directory: Pat
         return []
 
     engines = [entry for entry in snapshot["processes"] if "lsp-engine" in entry["command"]]
-    rust_glancer = [
+    suprnova_lsp = [
         entry
         for entry in snapshot["processes"]
         if "suprnova-lsp" in entry["command"] and "lsp-engine" not in entry["command"]
     ]
-    targets = (engines if engines else rust_glancer)[:2]
+    targets = (engines if engines else suprnova_lsp)[:2]
     results = []
     for entry in targets:
         output = output_directory / "sample-{}.txt".format(entry["pid"])
@@ -980,12 +980,12 @@ async def run_managed_workflow(
             return summary["exitCode"]
 
     runtime = runtime_spec(mode, mode_args, options)
-    if mode in {"analyze", "compare-lsp"} and not rust_glancer_binary(
+    if mode in {"analyze", "compare-lsp"} and not suprnova_lsp_binary(
         options.build_profile
     ).exists():
         raise CliError(
             "{} does not exist; remove --no-build or build it first".format(
-                rust_glancer_binary(options.build_profile)
+                suprnova_lsp_binary(options.build_profile)
             )
         )
 

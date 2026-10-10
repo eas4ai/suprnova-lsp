@@ -1,8 +1,8 @@
-//! Zed adapter for starting Rust Glancer as the Rust language server.
+//! Zed adapter for starting Suprnova LSP as the Rust language server.
 //!
 //! This crate owns the small amount of editor-specific policy around the server. It chooses a
 //! user-configured binary, a binary from the worktree environment, or the managed fallback. Once
-//! the command is chosen, Rust Glancer still owns its command-line and LSP configuration behavior.
+//! the command is chosen, Suprnova LSP still owns its command-line and LSP configuration behavior.
 
 use zed_extension_api::{self as zed, settings::LspSettings};
 
@@ -10,9 +10,9 @@ mod server;
 
 const SERVER_SUBCOMMAND: &str = "lsp";
 
-struct RustGlancerExtension;
+struct SuprnovaLspExtension;
 
-impl zed::Extension for RustGlancerExtension {
+impl zed::Extension for SuprnovaLspExtension {
     fn new() -> Self {
         Self
     }
@@ -60,7 +60,7 @@ impl zed::Extension for RustGlancerExtension {
         language_server_id: &zed::LanguageServerId,
         worktree: &zed::Worktree,
     ) -> zed::Result<Option<zed::serde_json::Value>> {
-        // Rust Glancer owns its defaults and validation, so the adapter only transports
+        // Suprnova LSP owns its defaults and validation, so the adapter only transports
         // editor settings instead of maintaining a second configuration model.
         Ok(
             LspSettings::for_worktree(language_server_id.as_ref(), worktree)?
@@ -69,4 +69,4 @@ impl zed::Extension for RustGlancerExtension {
     }
 }
 
-zed::register_extension!(RustGlancerExtension);
+zed::register_extension!(SuprnovaLspExtension);

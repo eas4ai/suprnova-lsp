@@ -10,7 +10,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
-description = "Rust Glancer token-tree and macro syntax bridge primitives."
+description = "Suprnova LSP token-tree and macro syntax bridge primitives."
 
 [dependencies]
 parser.workspace = true

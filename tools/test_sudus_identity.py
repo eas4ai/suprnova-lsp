@@ -2,6 +2,7 @@
 """Reject incomplete identity evidence and inconsistent real-test results."""
 
 import copy
+import ast
 import importlib.util
 import json
 from pathlib import Path
@@ -45,7 +46,33 @@ class IdentityIntegrity(unittest.TestCase):
                 ("-p suprnova-lsp-zed", f"-p {selector}"),
                 ("-p rust-glancer-zed", f"-p {selector}"),
             ])
-            self.assertEqual(results["IDN-004"], selector == "rust-glancer-zed", selector)
+            self.assertEqual(results["IDN-004"], selector == "suprnova-lsp-zed", selector)
+
+    def test_zed_identity_and_release_resolution_reject_upstream_values(self):
+        controls = [
+            ("editors/zed/extension.toml", [( 'id = "suprnova-lsp"', 'id = "rust-glancer"')]),
+            ("editors/zed/extension.toml", [( 'name = "Suprnova LSP"', 'name = "Rust Glancer"')]),
+            ("editors/zed/extension.toml", [( '[language_servers.suprnova-lsp]', '[language_servers.rust-glancer]')]),
+            ("editors/zed/extension.toml", [( 'path = ["eas4ai", "suprnova-lsp"', 'path = ["rust-glancer", "rust-glancer"')]),
+            ("editors/zed/src/server/mod.rs", [( 'SERVER_BINARY: &str = "suprnova-lsp"', 'SERVER_BINARY: &str = "rust-glancer"')]),
+            ("editors/zed/src/server/mod.rs", [( 'GITHUB_REPOSITORY: &str = "eas4ai/suprnova-lsp"', 'GITHUB_REPOSITORY: &str = "rust-glancer/rust-glancer"')]),
+            ("editors/zed/src/server/mod.rs", [( 'suprnova-v{MANAGED_SERVER_VERSION}', 'v{MANAGED_SERVER_VERSION}')]),
+            ("editors/zed/src/server/mod.rs", [( 'suprnova-lsp-{MANAGED_SERVER_VERSION}-{}.tar.gz', 'rust-glancer-{MANAGED_SERVER_VERSION}-{}.tar.gz')]),
+        ]
+        self.assertTrue(all(identity.source_observations()["results"].values()))
+        for path, replacements in controls:
+            with self.subTest(path=path, replacements=replacements):
+                self.assertFalse(self.source_results_with_replacement(path, replacements)["IDN-004"])
+
+    def test_identity_driver_calls_existing_runner_entry_points(self):
+        runner = identity.module("identity_test_runner", ROOT / "tools/agent-debug.py")
+        syntax = ast.parse((ROOT / "tools/sudus-identity.py").read_text())
+        main = next(node for node in syntax.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "main")
+        names = {node.attr for node in ast.walk(main) if isinstance(node, ast.Attribute)
+                 and isinstance(node.value, ast.Name) and node.value.id == "runner"}
+        self.assertTrue(names)
+        for name in names:
+            self.assertTrue(hasattr(runner, name), f"identity driver calls missing runner API {name}")
 
     def test_codspeed_environment_must_reach_the_benchmark_consumer(self):
         for variable in ["RUST_GLANCER_BENCH_TARGETS", "SUPRNOVA_LSP_BENCH_TARGETS"]:

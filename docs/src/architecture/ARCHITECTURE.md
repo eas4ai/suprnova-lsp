@@ -157,7 +157,7 @@ layout is stable.
 
 ## Code layout
 
-- `crates/rust-glancer` defines the binary
+- `crates/suprnova-lsp` defines the binary
 - `crates/lsp` defines the components of the LSP server, e.g. the server implementation
   itself, engine LSP adapter, and shared protocol.
 - `crates/engine` defines the engine components.

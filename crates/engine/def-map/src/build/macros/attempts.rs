@@ -367,7 +367,7 @@ impl MacroExpansionAttempt {
         )
     }
 
-    /// A proc macro is visible for resolution and completion, but rust-glancer deliberately does
+    /// A proc macro is visible for resolution and completion, but suprnova-lsp deliberately does
     /// not load or execute compiler plugin code while building DefMap.
     fn unsupported_proc_macro(
         crate_ref: CrateRef,

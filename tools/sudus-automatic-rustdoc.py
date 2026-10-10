@@ -268,7 +268,7 @@ async def main():
         code, _ = await run("build", build.command, [*build.args, "--locked", "--offline"], env=build_env)
         if code != 0:
             raise ValueError("current LSP executable failed to compile")
-        binary = runner.rust_glancer_binary("debug")
+        binary = runner.suprnova_lsp_binary("debug")
         real_cargo = shutil.which("cargo")
         if not real_cargo:
             raise ValueError("Cargo executable unavailable")

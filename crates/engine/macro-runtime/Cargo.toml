@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
-description = "Rust Glancer declarative macro runtime."
+description = "Suprnova LSP declarative macro runtime."
 
 [dependencies]
 anyhow.workspace = true

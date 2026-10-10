@@ -2,7 +2,7 @@
 //!
 //! The LSP can continue without rust-src, so discovery returns `None` when the selected toolchain
 //! has no complete source tree. A usable tree must contain every compiler-provided crate that
-//! rust-glancer models.
+//! suprnova-lsp models.
 
 use std::{
     fmt,
@@ -12,7 +12,7 @@ use std::{
 
 use rg_std::MemorySize;
 
-/// Sysroot crates that rust-glancer can model as ordinary library roots.
+/// Sysroot crates that suprnova-lsp can model as ordinary library roots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, MemorySize)]
 #[memsize(leaf)]
 pub enum SysrootCrate {
@@ -23,7 +23,7 @@ pub enum SysrootCrate {
 }
 
 impl SysrootCrate {
-    /// Every sysroot crate that rust-glancer models from an installed rust-src component.
+    /// Every sysroot crate that suprnova-lsp models from an installed rust-src component.
     pub(crate) const ALL: [Self; 4] = [Self::Core, Self::Alloc, Self::Std, Self::ProcMacro];
 
     pub fn name(self) -> &'static str {

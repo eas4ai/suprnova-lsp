@@ -1,9 +1,9 @@
 ---
 name: rust-glancer-debugging
-description: Debug rust-glancer through its repo-owned bounded runner. Use when investigating analysis, indexing, memory or peak-RSS behavior; comparing rust-glancer with rust-analyzer; querying hover or inlay hints through the real LSP; reproducing hangs; running focused tests with custom environment or logging; or creating an ad-hoc Cargo fixture.
+description: Debug suprnova-lsp through its repo-owned bounded runner. Use when investigating analysis, indexing, memory or peak-RSS behavior; comparing suprnova-lsp with rust-analyzer; querying hover or inlay hints through the real LSP; reproducing hangs; running focused tests with custom environment or logging; or creating an ad-hoc Cargo fixture.
 ---
 
-# Rust Glancer Debugging
+# Suprnova LSP Debugging
 
 Use `just agent-debug` from the workspace root for the common debugging path. Let the runner build
 the current binary, preserve argv boundaries, record artifacts, enforce a per-run timeout, and
@@ -13,7 +13,7 @@ clean up its complete process group. The runner supports macOS and Linux.
 
 - Use `analyze` for indexing, profiling, residency, cache, and memory questions.
 - Use `compare-lsp` for the established rust-analyzer comparison fixture.
-- Use `lsp-query` for real hover or inlay results from rust-glancer.
+- Use `lsp-query` for real hover or inlay results from suprnova-lsp.
 - Use `test` for focused `cargo nextest run` arguments plus managed environment and timeout.
 - Use `fixture init <name>` for an ad-hoc Cargo project under `target/agent-debug/fixtures`.
 
@@ -26,7 +26,7 @@ Read `just agent-debug --help` before constructing an unusual invocation. Runner
 the mode; every argument after the mode is forwarded literally to that mode. `--timeout` applies
 to each warm-up and measured run. The Cargo build has a separate fixed 20-minute timeout.
 Test mode inherits the system temporary directory so tempfile-backed Cargo fixtures remain outside
-the rust-glancer workspace. Other runtime modes keep scratch files in their managed run directory.
+the suprnova-lsp workspace. Other runtime modes keep scratch files in their managed run directory.
 Use `--env TMPDIR=<path>` before the mode only when a test intentionally needs an override.
 
 ```bash
@@ -56,7 +56,7 @@ is resolved relative to that workspace root. Do not write a one-off JSON-RPC cli
 
 ## Add diagnostics without changing the command shape
 
-- Use `--log <filter>` instead of prefixing `RUST_GLANCER_LOG`. LSP server logs are retained as
+- Use `--log <filter>` instead of prefixing `SUPRNOVA_LSP_LOG`. LSP server logs are retained as
   `lsp-server.stderr.log` in the numbered run directory without flooding successful query output.
 - Use `--env NAME=VALUE`, `--backtrace`, or `--full-backtrace` for runtime diagnostics.
 - Use `--measure` instead of shell `time`; read parsed peak RSS with `just agent-debug last`.
@@ -68,7 +68,7 @@ is resolved relative to that workspace root. Do not write a one-off JSON-RPC cli
 
 Keep managed commands in the foreground. On a suspected hang, let the runner reach its deadline or
 interrupt its execution session. It records the owned process group, optionally samples the stuck
-rust-glancer engine on macOS, sends a bounded graceful termination, then force-kills survivors.
+suprnova-lsp engine on macOS, sends a bounded graceful termination, then force-kills survivors.
 An active numbered run also contains `process.json`, so inspect that artifact instead of discovering
 PIDs with a separate process-list command. The result's `cleanup.verifiedEmpty` field and the
 top-level `processCleanup` summary record whether the owned groups were observed empty after each

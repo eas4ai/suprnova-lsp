@@ -1,6 +1,6 @@
 //! Immutable Rust syntax trees and typed AST accessors.
 //!
-//! rust-glancer parses full source files, traverses their concrete syntax while lowering, and then
+//! suprnova-lsp parses full source files, traverses their concrete syntax while lowering, and then
 //! drops the syntax trees before steady-state queries. The supported API is therefore intentionally
 //! read-only and non-incremental: parsing, validation diagnostics, source ranges, token text, and
 //! typed AST traversal.

@@ -1,4 +1,4 @@
 interface:
-  display_name: "Rust Glancer Debugging"
-  short_description: "Run bounded rust-glancer debugging workflows"
-  default_prompt: "Use $rust-glancer-debugging to reproduce and diagnose this rust-glancer issue safely."
+  display_name: "Suprnova LSP Debugging"
+  short_description: "Run bounded suprnova-lsp debugging workflows"
+  default_prompt: "Use $rust-glancer-debugging to reproduce and diagnose this suprnova-lsp issue safely."

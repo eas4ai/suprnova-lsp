@@ -5,7 +5,7 @@ Shared token-tree primitives adapted from rust-analyzer `v0.3.3057`, tag
 upstream MIT and Apache-2.0 licenses.
 
 `tt/storage.rs` uses upstream's variable-length byte encoding with per-tree symbol
-and span tables. Symbols remain locally owned, and spans retain rust-glancer's
+and span tables. Symbols remain locally owned, and spans retain suprnova-lsp's
 file and edition semantics. Memory accounting includes the encoded buffer, span
 table, and owned symbols. The syntax bridge uses the custom immutable syntax tree
 and desugars doc comments into attributes before macro matching.
@@ -16,9 +16,9 @@ editions before re-encoding on load. It does not deserialize an unchecked byte
 buffer. Development package caches from older representations should be discarded
 and rebuilt; the cache schema version intentionally stays unchanged.
 
-For an existing editor workspace, run `Rust Glancer: Reindex Workspace` to rebuild
+For an existing editor workspace, run `Suprnova LSP: Reindex Workspace` to rebuild
 from source. For automated runs, stop the server and move aside that fixture's
-`target/rust_glancer` directory, or use a fresh isolated cache as below. Keep Cargo
+`target/suprnova_lsp` directory, or use a fresh isolated cache as below. Keep Cargo
 build outputs and source files intact.
 
 Use `just agent-debug --isolated-cache ra-upgrade analyze <fixture>` for a fresh

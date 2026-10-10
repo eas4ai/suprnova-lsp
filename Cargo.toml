@@ -1,7 +1,7 @@
 [workspace]
 members = [
   "editors/zed",
-  "crates/rust-glancer",
+  "crates/suprnova-lsp",
   "crates/lsp/server",
   "crates/lsp/proto",
   "crates/lsp/engine",

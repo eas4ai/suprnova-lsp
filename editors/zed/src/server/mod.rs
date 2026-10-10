@@ -1,4 +1,4 @@
-//! Managed Rust Glancer installation for Zed.
+//! Managed Suprnova LSP installation for Zed.
 //!
 //! The extension entry point first checks settings and the worktree environment for a server.
 //! This module owns the fallback. It maps the host platform to one release asset, reuses a
@@ -15,9 +15,9 @@ use std::{
 
 use zed_extension_api as zed;
 
-pub(crate) const SERVER_BINARY: &str = "rust-glancer";
+pub(crate) const SERVER_BINARY: &str = "suprnova-lsp";
 
-const GITHUB_REPOSITORY: &str = "rust-glancer/rust-glancer";
+const GITHUB_REPOSITORY: &str = "eas4ai/suprnova-lsp";
 const SERVER_CACHE_ROOT: &str = "servers";
 
 // An extension build requests one exact server release instead of following "latest". Release
@@ -25,7 +25,7 @@ const SERVER_CACHE_ROOT: &str = "servers";
 const MANAGED_SERVER_VERSION: &str = "0.3.0"; // x-release-please-version
 
 const MANUAL_INSTALLATION_HINT: &str =
-    "install rust-glancer manually and configure lsp.rust-glancer.binary.path to use it";
+    "install suprnova-lsp manually and configure lsp.suprnova-lsp.binary.path to use it";
 
 /// Reuses or installs the extension-owned server while reporting progress through Zed.
 pub(crate) struct ManagedServer;
@@ -78,10 +78,10 @@ impl ManagedServer {
 
         // The pin determines the GitHub tag, asset name, and cache directory together. We never
         // ask GitHub for "latest", so one extension build always resolves to the same server.
-        let release_tag = format!("v{MANAGED_SERVER_VERSION}");
+        let release_tag = format!("suprnova-v{MANAGED_SERVER_VERSION}");
         let release =
             zed::github_release_by_tag_name(GITHUB_REPOSITORY, &release_tag).map_err(|error| {
-                format!("failed to find Rust Glancer release {release_tag}: {error}")
+                format!("failed to find Suprnova LSP release {release_tag}: {error}")
             })?;
         let asset_name = platform.asset_name();
         let asset = release
@@ -89,7 +89,7 @@ impl ManagedServer {
             .into_iter()
             .find(|asset| asset.name == asset_name)
             .ok_or_else(|| {
-                format!("Rust Glancer release {release_tag} does not contain asset {asset_name}")
+                format!("Suprnova LSP release {release_tag} does not contain asset {asset_name}")
             })?;
 
         zed::set_language_server_installation_status(
@@ -104,8 +104,8 @@ impl ManagedServer {
 /// Turns one supported Zed host platform into a Rust release target.
 ///
 /// The target string feeds both the release asset name and the cache path. The executable name is
-/// kept beside it because Windows archives contain `rust-glancer.exe`, while Unix archives contain
-/// `rust-glancer`. Keeping both choices here prevents the downloaded asset and extracted path from
+/// kept beside it because Windows archives contain `suprnova-lsp.exe`, while Unix archives contain
+/// `suprnova-lsp`. Keeping both choices here prevents the downloaded asset and extracted path from
 /// describing different platforms.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ServerPlatform {
@@ -121,20 +121,20 @@ impl ServerPlatform {
 
     fn from_zed(os: zed::Os, architecture: zed::Architecture) -> zed::Result<Self> {
         let (target, executable) = match (os, architecture) {
-            (zed::Os::Mac, zed::Architecture::Aarch64) => ("aarch64-apple-darwin", "rust-glancer"),
-            (zed::Os::Mac, zed::Architecture::X8664) => ("x86_64-apple-darwin", "rust-glancer"),
+            (zed::Os::Mac, zed::Architecture::Aarch64) => ("aarch64-apple-darwin", "suprnova-lsp"),
+            (zed::Os::Mac, zed::Architecture::X8664) => ("x86_64-apple-darwin", "suprnova-lsp"),
             (zed::Os::Linux, zed::Architecture::Aarch64) => {
-                ("aarch64-unknown-linux-gnu", "rust-glancer")
+                ("aarch64-unknown-linux-gnu", "suprnova-lsp")
             }
             (zed::Os::Linux, zed::Architecture::X8664) => {
-                ("x86_64-unknown-linux-gnu", "rust-glancer")
+                ("x86_64-unknown-linux-gnu", "suprnova-lsp")
             }
             (zed::Os::Windows, zed::Architecture::X8664) => {
-                ("x86_64-pc-windows-msvc", "rust-glancer.exe")
+                ("x86_64-pc-windows-msvc", "suprnova-lsp.exe")
             }
             _ => {
                 return Err(format!(
-                    "managed Rust Glancer binaries are unavailable for {os:?}/{architecture:?}"
+                    "managed Suprnova LSP binaries are unavailable for {os:?}/{architecture:?}"
                 ));
             }
         };
@@ -144,7 +144,7 @@ impl ServerPlatform {
 
     fn asset_name(self) -> String {
         format!(
-            "rust-glancer-{MANAGED_SERVER_VERSION}-{}.tar.gz",
+            "suprnova-lsp-{MANAGED_SERVER_VERSION}-{}.tar.gz",
             self.target
         )
     }
@@ -223,12 +223,12 @@ impl ServerPlatform {
             staging_path.as_ref(),
             zed::DownloadedFileType::GzipTar,
         )
-        .map_err(|error| format!("failed to download Rust Glancer asset {asset_name}: {error}"))?;
+        .map_err(|error| format!("failed to download Suprnova LSP asset {asset_name}: {error}"))?;
 
         let downloaded_binary = staging_dir.join(self.executable);
         if !downloaded_binary.is_file() {
             return Err(format!(
-                "Rust Glancer asset {asset_name} did not contain {} at its root",
+                "Suprnova LSP asset {asset_name} did not contain {} at its root",
                 self.executable,
             ));
         }
@@ -263,31 +263,31 @@ mod tests {
                 zed::Os::Mac,
                 zed::Architecture::Aarch64,
                 "aarch64-apple-darwin",
-                "rust-glancer",
+                "suprnova-lsp",
             ),
             (
                 zed::Os::Mac,
                 zed::Architecture::X8664,
                 "x86_64-apple-darwin",
-                "rust-glancer",
+                "suprnova-lsp",
             ),
             (
                 zed::Os::Linux,
                 zed::Architecture::Aarch64,
                 "aarch64-unknown-linux-gnu",
-                "rust-glancer",
+                "suprnova-lsp",
             ),
             (
                 zed::Os::Linux,
                 zed::Architecture::X8664,
                 "x86_64-unknown-linux-gnu",
-                "rust-glancer",
+                "suprnova-lsp",
             ),
             (
                 zed::Os::Windows,
                 zed::Architecture::X8664,
                 "x86_64-pc-windows-msvc",
-                "rust-glancer.exe",
+                "suprnova-lsp.exe",
             ),
         ];
 
@@ -298,7 +298,7 @@ mod tests {
             assert_eq!(platform.target, expected_target);
             assert_eq!(
                 platform.asset_name(),
-                format!("rust-glancer-{MANAGED_SERVER_VERSION}-{expected_target}.tar.gz")
+                format!("suprnova-lsp-{MANAGED_SERVER_VERSION}-{expected_target}.tar.gz")
             );
             assert_eq!(
                 platform.binary_path(),

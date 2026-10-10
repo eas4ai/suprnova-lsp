@@ -42,7 +42,7 @@ pub struct Package {
 }
 
 impl Package {
-    /// Returns the target set that rust-glancer analyzes for one Cargo package.
+    /// Returns the target set that suprnova-lsp analyzes for one Cargo package.
     ///
     /// Workspace packages keep all user-facing targets, while dependencies keep only their library
     /// target. This selection must stay shared by parse construction and cache planning, because

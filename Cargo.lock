@@ -2261,13 +2261,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-glancer-zed"
-version = "0.0.0"
-dependencies = [
- "zed_extension_api",
-]
-
-[[package]]
 name = "rustc-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2547,6 +2540,13 @@ dependencies = [
  "tower-lsp-server",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "suprnova-lsp-zed"
+version = "0.0.0"
+dependencies = [
+ "zed_extension_api",
 ]
 
 [[package]]

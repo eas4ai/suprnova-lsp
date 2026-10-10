@@ -1,6 +1,6 @@
 ## rg_macro_expand
 
-Rust Glancer declarative macro expansion crate.
+Suprnova LSP declarative macro expansion crate.
 
 The matcher, transcriber, and token-tree internals are adapted from
 [`tt`](https://github.com/rust-lang/rust-analyzer/tree/master/crates/tt) and

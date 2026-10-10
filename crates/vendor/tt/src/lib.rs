@@ -1,6 +1,6 @@
 //! Token-tree primitives used by declarative macro expansion.
 //!
-//! The core token-tree representation is adapted from rust-analyzer. rust-glancer keeps it in a
+//! The core token-tree representation is adapted from rust-analyzer. suprnova-lsp keeps it in a
 //! shared crate because macro definitions are lowered in item-tree, expanded by `rg_macro_expand`,
 //! and collected by def-map after parsing the generated token stream back into syntax.
 

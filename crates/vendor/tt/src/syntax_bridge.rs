@@ -1,4 +1,4 @@
-//! Conversion between rust-glancer syntax trees and macro token trees.
+//! Conversion between suprnova-lsp syntax trees and macro token trees.
 //!
 //! Macro expansion should not be lowered through source text. The bridge below feeds token trees
 //! directly into the parser and then builds a frozen syntax tree from parser events and known token
