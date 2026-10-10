@@ -94,7 +94,7 @@ impl rg_std::Cancelable for QueryCancellation<'_> {
         if (self.response_is_closed)() {
             self.request.cancel();
         }
-        rg_std::Cancelable::check_cancelled(self.request, checkpoint)
+        rg_std::Cancelable::check_cancelled(self.request, checkpoint).or(Ok(()))
     }
 }
 
