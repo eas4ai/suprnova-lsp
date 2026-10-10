@@ -48,10 +48,12 @@ writeFileSync(
 export default defineConfig({
   files: "out/test/**/*.test.js",
   version: vscodeTestVersion(),
-  extensionDevelopmentPath:
-    process.env.SUPRNOVA_LSP_IDENTITY_FIXTURE === undefined
-      ? extensionRoot
-      : [extensionRoot, process.env.SUPRNOVA_LSP_IDENTITY_FIXTURE],
+  // Every acceptance run checks coexistence, including ordinary platform CI.
+  extensionDevelopmentPath: [
+    extensionRoot,
+    process.env.SUPRNOVA_LSP_IDENTITY_FIXTURE ??
+      resolve(extensionRoot, "test/fixtures/upstream-identity"),
+  ],
   workspaceFolder: workspaceFile,
   env: {
     SUPRNOVA_LSP_VSCODE_USER_DATA_DIR: userDataDir,

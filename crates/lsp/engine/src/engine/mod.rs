@@ -279,7 +279,8 @@ pub fn value() { let selected = 7_u64; }
             rg_lsp_proto::DocumentRevision::new(1),
             Some(1),
             source.clone(),
-        );
+        )
+        .with_source_path(fixture.path("src/lib.rs").canonicalize().unwrap());
         let input = rg_lsp_proto::GlobalPositionSnapshot::new(
             document.target().clone(),
             rg_lsp_proto::OpenDocumentsRevision::new(1),

@@ -225,12 +225,13 @@ fn rustdoc_candidates_use_the_captured_graph_and_reject_late_inputs() {
     )
     .unwrap();
     let manifest = std::fs::read(fixture.path("Cargo.toml")).unwrap();
-    let saved_inputs = rg_workspace::SavedWorkspaceInputs::read(&fixture.path(""), &[])
+    let workspace_root = fixture.path("").canonicalize().unwrap();
+    let saved_inputs = rg_workspace::SavedWorkspaceInputs::read(&workspace_root, &[])
         .unwrap()
         .digest();
     let input = rg_lsp_proto::RustdocGenerationInput {
         generation: 1,
-        workspace_root: fixture.path(""),
+        workspace_root,
         saved_inputs,
         artifact_directories: Vec::new(),
         metadata_path,

@@ -1,0 +1,29 @@
+{
+  "name": "rust-glancer",
+  "publisher": "rust-glancer",
+  "displayName": "Upstream identity fixture",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.119.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onCommand:rust-glancer.reindexWorkspace"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "rust-glancer.reindexWorkspace",
+        "title": "Upstream Fixture: Reindex"
+      }
+    ],
+    "configuration": {
+      "properties": {
+        "rust-glancer.cargo.target": {
+          "type": "string",
+          "default": "upstream-default"
+        }
+      }
+    }
+  }
+}

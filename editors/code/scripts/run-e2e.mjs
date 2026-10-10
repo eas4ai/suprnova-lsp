@@ -23,13 +23,16 @@ if (!existsSync(testCli)) {
 let fixtureEnvironment = {};
 if (process.env.SUPRNOVA_LSP_AUTOMATIC_RUSTDOC_FIXTURE === undefined) {
   const prepared = spawnSync(
-    "python3",
-    [join(workspaceRoot, "tools/prepare-automatic-editor-fixture.py")],
+    process.platform === "win32" ? "python" : "python3",
+    [
+      join(workspaceRoot, "tools/prepare-automatic-editor-fixture.py"),
+      ...(process.env.SUPRNOVA_LSP_FIXTURE_FETCH === "1" ? ["--fetch"] : []),
+    ],
     {
       cwd: workspaceRoot,
       env: process.env,
       encoding: "utf8",
-      timeout: 150_000,
+      timeout: process.env.SUPRNOVA_LSP_FIXTURE_FETCH === "1" ? 390_000 : 270_000,
     },
   );
   if (prepared.error !== undefined || prepared.status !== 0) {

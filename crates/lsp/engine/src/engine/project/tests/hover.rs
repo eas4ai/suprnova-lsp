@@ -73,7 +73,8 @@ fn declaration_hover_preserves_pending_saved_bodies_and_current_header_coordinat
             DocumentRevision::new(line + 1),
             Some(line as i32 + 1),
             text,
-        );
+        )
+        .with_source_path(fixture.path("src/lib.rs").canonicalize().unwrap());
         let input = GlobalPositionSnapshot::new(
             document.target().clone(),
             OpenDocumentsRevision::new(line + 1),
@@ -242,7 +243,8 @@ fn binding_hover_prepares_source_once_across_declaration_probe_and_body_fallback
             DocumentRevision::new(revision),
             Some(revision as i32),
             text,
-        );
+        )
+        .with_source_path(fixture.path("src/lib.rs").canonicalize().unwrap());
         let input = GlobalPositionSnapshot::new(
             document.target().clone(),
             OpenDocumentsRevision::new(revision),
