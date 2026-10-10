@@ -58,10 +58,13 @@ class HoverFixture {
   public link(hover: vscode.Hover, kind: "type" | "implementation" = "type") {
     const markdown = hover.contents.at(-1);
     assert.ok(markdown instanceof vscode.MarkdownString);
-    const links = [...markdown.value.matchAll(/\[([^\]]+)\]\(command:([^?]+)\?([^)]+)\)/g)];
+    const links = [
+      ...markdown.value.matchAll(/\[([^\]]+)\]\(command:([^?]+)\?([^\s)]+) "([^"]+)"\)/g),
+    ];
     assert.equal(links.length, 2);
     const link = links.find((entry) => entry[1] === kind);
     assert.ok(link);
+    assert.equal(link[4], `Go to ${kind}`);
     const args: unknown = JSON.parse(decodeURIComponent(link[3]!));
     assert.ok(Array.isArray(args));
     assert.equal(args.length, 1);
