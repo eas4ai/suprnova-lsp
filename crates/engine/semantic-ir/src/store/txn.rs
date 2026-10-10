@@ -4,9 +4,12 @@
 //! Exact accessors preserve the artifact boundaries between declarations and lookup indexes;
 //! [`SemanticIrReadTxn::package`] is the explicit path that reconstructs the broad package value.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
+use std::{
+    num::NonZeroUsize,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use anyhow::Context as _;
@@ -110,12 +113,13 @@ impl<'db> SemanticIrReadTxn<'db> {
     /// Load selected lookup indexes into this frozen transaction before composing a query.
     ///
     /// A cursor query may need indexes from hundreds of dependencies. Their artifact reads are
-    /// independent, so up to eight temporary readers overlap them. These readers do not perform
-    /// semantic queries or publish state; their decoded indexes belong to this transaction, and all
-    /// readers finish before it can be released. Ordinary lookup still chooses visibility order.
+    /// independent, so the caller bounds how many temporary readers overlap them. These readers do
+    /// not perform semantic queries or publish state; their decoded indexes belong to this transaction.
+    /// All readers finish before it can be released. Ordinary lookup still chooses visibility order.
     pub fn prefetch_lookup_indexes(
         &self,
         crates: &[CrateRef],
+        reader_limit: NonZeroUsize,
         cancellation: &rg_std::CancellationToken,
     ) -> anyhow::Result<()> {
         rg_std::check_cancel!(cancellation, "before lookup artifact prefetch");
@@ -128,7 +132,7 @@ impl<'db> SemanticIrReadTxn<'db> {
         let next = AtomicUsize::new(0);
         std::thread::scope(|scope| {
             let mut readers = Vec::new();
-            for _ in 0..crates.len().min(8) {
+            for _ in 0..crates.len().min(reader_limit.get()) {
                 let next = &next;
                 readers.push(
                     std::thread::Builder::new()
