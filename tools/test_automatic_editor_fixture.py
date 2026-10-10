@@ -204,7 +204,7 @@ class Proxy(unittest.TestCase):
                 if platform == "win32":
                     self.assertEqual(command, [value.real_cargo, *value.args])
                 else:
-                    self.assertEqual(command[:1 + len(flags)], ["/usr/bin/time", *flags])
+                    self.assertEqual(command[:1 + len(flags)], [str(Path("/usr/bin/time")), *flags])
                     self.assertEqual(command[-1 - len(value.args):], [value.real_cargo, *value.args])
 
     def test_prior_child_liveness_is_observed_without_procfs(self):

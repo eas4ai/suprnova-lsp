@@ -2,7 +2,10 @@
 """Guard current product names while retaining genuine upstream records."""
 
 import importlib.util
+import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -96,6 +99,36 @@ class ProjectIdentity(unittest.TestCase):
         for entry in report["aggregates"]:
             entry["rust_glancer_count"] = entry.pop("suprnova_lsp_count")
         self.assertEqual(len(liveness.liveness_failures(report)), len(liveness.EXPECTED_CLEAN_METHODS))
+
+
+class CompatibilityReportEncoding(unittest.TestCase):
+    def test_compatibility_report_reader_accepts_native_json_encodings(self):
+        script = ROOT / ".github/scripts/check_lsp_compatibility_liveness.py"
+        spec = importlib.util.spec_from_file_location("liveness", script)
+        liveness = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(liveness)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "report.json"
+            # PowerShell redirects JSON as UTF-16 with a BOM. Keep the CLI's liveness
+            # rejection separate from its ability to read the report's encoding.
+            for encoding in ("utf-8", "utf-16", "utf-32"):
+                for hover_count in (1, 0):
+                    with self.subTest(encoding=encoding, hover_count=hover_count):
+                        report = {"fixture": {"kind": "rust_analyzer"}, "aggregates": [
+                            {"method": method, "suprnova_lsp_count":
+                             hover_count if method == "textDocument/hover" else 1}
+                            for method in liveness.EXPECTED_CLEAN_METHODS]}
+                        path.write_bytes(json.dumps(report).encode(encoding))
+                        result = subprocess.run(
+                            [sys.executable, str(script), "--report", str(path)],
+                            capture_output=True, text=True, timeout=10)
+                        if hover_count:
+                            self.assertEqual(result.returncode, 0, result.stderr)
+                        else:
+                            self.assertNotEqual(result.returncode, 0)
+                            self.assertIn(
+                                "textDocument/hover returned no suprnova-lsp results",
+                                result.stderr)
 
 
 if __name__ == "__main__":
