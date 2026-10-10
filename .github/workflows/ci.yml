@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -52,13 +53,20 @@ jobs:
 
   tests:
     name: tests (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    # PRs and non-owner reruns use hosted runners, even when their author is the owner.
+    runs-on: ${{ fromJSON(github.repository == 'eas4ai/suprnova-lsp' && (true) && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && (matrix.os == 'ubuntu-latest' && '["self-hosted","Linux","X64","rust-ci"]' || matrix.os == 'windows-latest' && '["self-hosted","Windows","X64","rust-ci"]' || matrix.os == 'macos-latest' && '["self-hosted","macOS","ARM64","rust-ci"]') || toJSON(matrix.os)) }}
+    env:
+      RUSTUP_TOOLCHAIN: 1.98.1
+    defaults:
+      run:
+        shell: ${{ matrix.os == 'windows-latest' && 'powershell' || 'bash' }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/cargo-cache
         with:
           scope: ci-${{ github.job }}

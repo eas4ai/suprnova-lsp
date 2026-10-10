@@ -1,0 +1,35 @@
+name: Set up explicit Rust toolchain
+description: Install the job's Rust version without changing the runner owner's default.
+
+inputs:
+  components:
+    description: Optional comma-separated Rust components.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain on Unix
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        COMPONENTS: ${{ inputs.components }}
+      run: |
+        set -euo pipefail
+        args=(toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --no-self-update)
+        if [ -n "$COMPONENTS" ]; then
+          args+=(--component "$COMPONENTS")
+        fi
+        rustup "${args[@]}"
+    - name: Install Rust toolchain on Windows
+      if: runner.os == 'Windows'
+      shell: powershell
+      env:
+        COMPONENTS: ${{ inputs.components }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $arguments = @('toolchain', 'install', $env:RUSTUP_TOOLCHAIN, '--profile', 'minimal', '--no-self-update')
+        if ($env:COMPONENTS) { $arguments += @('--component', $env:COMPONENTS) }
+        & rustup @arguments
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

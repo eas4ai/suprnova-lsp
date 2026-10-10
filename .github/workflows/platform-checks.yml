@@ -20,12 +20,19 @@ jobs:
   client:
     name: client
     needs: build-server
-    runs-on: ${{ inputs.os }}
+    runs-on: ${{ fromJSON(github.repository == 'eas4ai/suprnova-lsp' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && (inputs.os == 'ubuntu-latest' && '["self-hosted","Linux","X64","rust-ci"]' || inputs.os == 'windows-latest' && '["self-hosted","Windows","X64","rust-ci"]' || inputs.os == 'macos-latest' && '["self-hosted","macOS","ARM64","rust-ci"]') || toJSON(inputs.os)) }}
+    env:
+      RUSTUP_TOOLCHAIN: 1.98.1
     defaults:
       run:
         working-directory: editors/code
+        shell: ${{ inputs.os == 'windows-latest' && 'powershell' || 'bash' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ./.github/actions/setup-rust
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
       - uses: ./.github/actions/download-server
         with:
           name: suprnova-lsp-${{ inputs.os }}
@@ -58,11 +65,20 @@ jobs:
   build-editor-packages:
     name: build-editor-packages
     needs: build-server
-    runs-on: ${{ inputs.os }}
+    runs-on: ${{ fromJSON(github.repository == 'eas4ai/suprnova-lsp' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && (inputs.os == 'ubuntu-latest' && '["self-hosted","Linux","X64","rust-ci"]' || inputs.os == 'windows-latest' && '["self-hosted","Windows","X64","rust-ci"]' || inputs.os == 'macos-latest' && '["self-hosted","macOS","ARM64","rust-ci"]') || toJSON(inputs.os)) }}
+    env:
+      RUSTUP_TOOLCHAIN: 1.98.1
+    defaults:
+      run:
+        shell: ${{ inputs.os == 'windows-latest' && 'powershell' || 'bash' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
       - uses: ./.github/actions/download-server
         with:
           name: suprnova-lsp-${{ inputs.os }}
@@ -98,10 +114,21 @@ jobs:
     name: compare-lsp (windows)
     if: inputs.os == 'windows-latest'
     needs: build-server
-    runs-on: ${{ inputs.os }}
+    runs-on: ${{ fromJSON(github.repository == 'eas4ai/suprnova-lsp' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && (inputs.os == 'ubuntu-latest' && '["self-hosted","Linux","X64","rust-ci"]' || inputs.os == 'windows-latest' && '["self-hosted","Windows","X64","rust-ci"]' || inputs.os == 'macos-latest' && '["self-hosted","macOS","ARM64","rust-ci"]') || toJSON(inputs.os)) }}
+    env:
+      RUSTUP_TOOLCHAIN: 1.98.1
+    defaults:
+      run:
+        shell: powershell
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: rust-analyzer,rust-src
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
       - uses: ./.github/actions/download-server
         with:
           name: suprnova-lsp-${{ inputs.os }}
@@ -111,7 +138,7 @@ jobs:
       - name: Install rust-analyzer and standard-library sources
         run: rustup component add rust-analyzer rust-src
       - name: Run LSP comparison
-        shell: pwsh
+        shell: powershell
         run: |
           New-Item -ItemType Directory -Force .ci/lsp | Out-Null
           $env:SUPRNOVA_LSP_COMPARE_LSP_RUST_ANALYZER = rustup which rust-analyzer

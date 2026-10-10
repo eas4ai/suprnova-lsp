@@ -64,6 +64,28 @@ class RunnerControls(unittest.TestCase):
             with self.assertRaises(ValueError):
                 Acceptance.smoke(self.run, self.jobs, self.artifacts, observations, "digest")
 
+    def test_pr_and_nonowner_routing_controls_are_rejected(self):
+        workflows = Acceptance.workflows(observer.ROOT)
+        Acceptance.routing(workflows)
+        for guard in ("github.event_name == 'push' || github.event_name == 'workflow_dispatch'", "github.triggering_actor == github.repository_owner", "github.actor == github.repository_owner"):
+            changed = copy.deepcopy(workflows)
+            expression = changed["ci.yml"]["jobs"]["tests"]["runs-on"]
+            changed["ci.yml"]["jobs"]["tests"]["runs-on"] = expression.replace(guard, "true")
+            with self.assertRaises(ValueError):
+                Acceptance.routing(changed)
+
+    def test_unsupported_release_architecture_and_unreviewed_job_are_rejected(self):
+        workflows = Acceptance.workflows(observer.ROOT)
+        changed = copy.deepcopy(workflows)
+        matrix = changed["github-release.yml"]["jobs"]["packages"]["strategy"]["matrix"]["include"]
+        next(row for row in matrix if row["vscode_target"] == "darwin-x64")["local_runner"] = '["self-hosted","macOS","ARM64","rust-ci"]'
+        with self.assertRaises(ValueError):
+            Acceptance.routing(changed)
+        changed = copy.deepcopy(workflows)
+        changed["ci.yml"]["jobs"]["unexpected"] = {"runs-on": ["self-hosted", "Linux", "X64", "rust-ci"]}
+        with self.assertRaises(ValueError):
+            Acceptance.routing(changed)
+
 
 if __name__ == "__main__":
     unittest.main()
