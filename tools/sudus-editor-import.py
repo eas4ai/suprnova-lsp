@@ -261,7 +261,7 @@ async def main():
         code, _ = await run("build", build.command, [*build.args, "--locked", "--offline"], env=build_env)
         if code != 0:
             raise ValueError("current LSP executable failed to compile")
-        binary = runner.rust_glancer_binary("debug")
+        binary = runner.suprnova_lsp_binary("debug")
         binary_hash = user.digest(binary.read_bytes())
         editor_report = directory / "editor-results.json"
         editor_env = dict(build_env, SUPRNOVA_LSP_TEST_SERVER=str(binary), SUPRNOVA_LSP_EXTENSION_TEST_GREP="EDT-001 sends",

@@ -1,4 +1,4 @@
-//! Small project-wide foundations for rust-glancer.
+//! Small project-wide foundations for suprnova-lsp.
 //!
 //! This crate keeps low-level utilities that are useful across engine layers without belonging to
 //! one of those layers. Root re-exports cover the common ergonomic imports; modules keep the actual

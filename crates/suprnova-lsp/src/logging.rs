@@ -47,7 +47,7 @@ impl LogComponent {
 
 /// Initializes the logger in a human-readable form.
 pub(crate) fn init_plain_tracing() {
-    let filter = rust_glancer_log_filter();
+    let filter = suprnova_lsp_log_filter();
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
@@ -58,7 +58,7 @@ pub(crate) fn init_plain_tracing() {
 
 /// Initializes the structured JSON logger consumed by the editor extension.
 pub(crate) fn init_lsp_tracing(component: LogComponent) {
-    let filter = rust_glancer_log_filter();
+    let filter = suprnova_lsp_log_filter();
     tracing_subscriber::registry()
         .with(filter)
         .with(JsonLogLayer {
@@ -69,12 +69,12 @@ pub(crate) fn init_lsp_tracing(component: LogComponent) {
         .ok();
 }
 
-fn rust_glancer_log_filter() -> EnvFilter {
+fn suprnova_lsp_log_filter() -> EnvFilter {
     let env_filter = std::env::var(LOG_FILTER_ENV).ok();
-    rust_glancer_log_filter_from(env_filter.as_deref())
+    suprnova_lsp_log_filter_from(env_filter.as_deref())
 }
 
-fn rust_glancer_log_filter_from(env_filter: Option<&str>) -> EnvFilter {
+fn suprnova_lsp_log_filter_from(env_filter: Option<&str>) -> EnvFilter {
     let directives = log_filter_directives(env_filter);
     EnvFilter::try_new(&directives).unwrap_or_else(|_| EnvFilter::new(log_filter_directives(None)))
 }
@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn default_log_filter_keeps_info_but_guards_noisy_dependencies() {
-        let records = capture_lsp_logs(rust_glancer_log_filter_from(None), || {
+        let records = capture_lsp_logs(suprnova_lsp_log_filter_from(None), || {
             tracing::info!(target: "rg_lsp_engine", "suprnova-lsp info should pass");
             tracing::debug!(target: "rg_lsp_engine", "suprnova-lsp debug should not pass");
             tracing::info!(target: "ra_ap_rustc_next_trait_solver", "solver info should not pass");
@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn blanket_log_filter_keeps_noisy_dependencies_guarded() {
-        let records = capture_lsp_logs(rust_glancer_log_filter_from(Some("debug")), || {
+        let records = capture_lsp_logs(suprnova_lsp_log_filter_from(Some("debug")), || {
             tracing::debug!(target: "rg_lsp_engine", "suprnova-lsp debug should pass");
             tracing::info!(target: "ra_ap_rustc_next_trait_solver", "solver info should not pass");
             tracing::debug!(target: "ra_ap_rustc_type_ir", "solver debug should not pass");
@@ -378,7 +378,7 @@ mod tests {
     #[test]
     fn explicit_dependency_filter_can_override_dependency_guard() {
         let records = capture_lsp_logs(
-            rust_glancer_log_filter_from(Some(
+            suprnova_lsp_log_filter_from(Some(
                 "debug,ra_ap_rustc_next_trait_solver=info,log=debug",
             )),
             || {

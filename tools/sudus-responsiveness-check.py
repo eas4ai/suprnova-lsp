@@ -42,7 +42,7 @@ class ResponsivenessCheck:
             after = observer.Diagnostic.runtime_fingerprint()
             if after != before:
                 raise ValueError("native source changed during the current build")
-            binary = runner.rust_glancer_binary("release")
+            binary = runner.suprnova_lsp_binary("release")
             proof = {"runtimeSourcesSha256": after,
                 "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "report": str(report_path)}
             return proof

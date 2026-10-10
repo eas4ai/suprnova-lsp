@@ -16,7 +16,7 @@ use crate::compare_lsp::{
 
 #[derive(Debug)]
 pub(crate) struct PrepareRenameComparison {
-    rust_glancer_count: usize,
+    suprnova_lsp_count: usize,
     rust_analyzer_count: usize,
     matched: Vec<NormalizedPrepareRenameTarget>,
     compatible: Vec<(NormalizedPrepareRenameTarget, NormalizedPrepareRenameTarget)>,
@@ -26,10 +26,10 @@ pub(crate) struct PrepareRenameComparison {
 
 impl PrepareRenameComparison {
     pub(super) fn new(
-        rust_glancer: &NormalizedPrepareRenameSet,
+        suprnova_lsp: &NormalizedPrepareRenameSet,
         rust_analyzer: &NormalizedPrepareRenameSet,
     ) -> Self {
-        let rust_glancer_targets = rust_glancer
+        let suprnova_lsp_targets = suprnova_lsp
             .targets()
             .iter()
             .cloned()
@@ -40,15 +40,15 @@ impl PrepareRenameComparison {
             .cloned()
             .collect::<BTreeSet<_>>();
 
-        let mut matched = rust_glancer_targets
+        let mut matched = suprnova_lsp_targets
             .intersection(&rust_analyzer_targets)
             .cloned()
             .collect::<Vec<_>>();
         let mut missing = rust_analyzer_targets
-            .difference(&rust_glancer_targets)
+            .difference(&suprnova_lsp_targets)
             .cloned()
             .collect::<Vec<_>>();
-        let unmatched_extra = rust_glancer_targets
+        let unmatched_extra = suprnova_lsp_targets
             .difference(&rust_analyzer_targets)
             .cloned()
             .collect::<Vec<_>>();
@@ -58,23 +58,23 @@ impl PrepareRenameComparison {
         // still reported as a loss.
         let mut compatible = Vec::new();
         let mut extra = Vec::new();
-        for rust_glancer_target in unmatched_extra {
+        for suprnova_lsp_target in unmatched_extra {
             let Some(reference_index) = missing
                 .iter()
-                .position(|reference| rust_glancer_target.is_no_worse_match_for(reference))
+                .position(|reference| suprnova_lsp_target.is_no_worse_match_for(reference))
             else {
-                extra.push(rust_glancer_target);
+                extra.push(suprnova_lsp_target);
                 continue;
             };
 
             let rust_analyzer_target = missing.remove(reference_index);
-            matched.push(rust_glancer_target.clone());
-            compatible.push((rust_glancer_target, rust_analyzer_target));
+            matched.push(suprnova_lsp_target.clone());
+            compatible.push((suprnova_lsp_target, rust_analyzer_target));
         }
         matched.sort();
 
         Self {
-            rust_glancer_count: rust_glancer_targets.len(),
+            suprnova_lsp_count: suprnova_lsp_targets.len(),
             rust_analyzer_count: rust_analyzer_targets.len(),
             matched,
             compatible,
@@ -85,7 +85,7 @@ impl PrepareRenameComparison {
 
     pub(crate) fn metrics(&self) -> SetComparisonMetrics {
         SetComparisonMetrics::new_with_compatible_matches(
-            self.rust_glancer_count,
+            self.suprnova_lsp_count,
             self.rust_analyzer_count,
             self.matched.len() - self.compatible.len(),
             self.compatible.len(),
@@ -114,7 +114,7 @@ pub(crate) struct PrepareRenameAggregate {
     query_count: usize,
     comparable_count: usize,
     non_comparable_count: usize,
-    rust_glancer_targets: usize,
+    suprnova_lsp_targets: usize,
     rust_analyzer_targets: usize,
     matched_targets: usize,
     compatible_targets: usize,
@@ -128,7 +128,7 @@ impl PrepareRenameAggregate {
         match query.result() {
             QueryComparisonResult::PrepareRenames(comparison) => {
                 self.comparable_count += 1;
-                self.rust_glancer_targets += comparison.rust_glancer_count;
+                self.suprnova_lsp_targets += comparison.suprnova_lsp_count;
                 self.rust_analyzer_targets += comparison.rust_analyzer_count;
                 self.matched_targets += comparison.matched.len();
                 self.compatible_targets += comparison.compatible.len();
@@ -154,7 +154,7 @@ impl PrepareRenameAggregate {
 
     pub(crate) fn metrics(&self) -> SetComparisonMetrics {
         SetComparisonMetrics::new_with_compatible_matches(
-            self.rust_glancer_targets,
+            self.suprnova_lsp_targets,
             self.rust_analyzer_targets,
             self.matched_targets - self.compatible_targets,
             self.compatible_targets,
@@ -166,23 +166,23 @@ impl PrepareRenameAggregate {
 
 #[derive(Debug)]
 pub(crate) struct RenameEditComparison {
-    rust_glancer_count: usize,
+    suprnova_lsp_count: usize,
     rust_analyzer_count: usize,
     matched: Vec<NormalizedTextEdit>,
     missing: Vec<NormalizedTextEdit>,
     extra: Vec<NormalizedTextEdit>,
-    rust_glancer_unmapped_count: usize,
+    suprnova_lsp_unmapped_count: usize,
     rust_analyzer_unmapped_count: usize,
-    rust_glancer_unmapped: Vec<String>,
+    suprnova_lsp_unmapped: Vec<String>,
     rust_analyzer_unmapped: Vec<String>,
 }
 
 impl RenameEditComparison {
     pub(super) fn new(
-        rust_glancer: &NormalizedTextEditSet,
+        suprnova_lsp: &NormalizedTextEditSet,
         rust_analyzer: &NormalizedTextEditSet,
     ) -> Self {
-        let rust_glancer_edits = rust_glancer
+        let suprnova_lsp_edits = suprnova_lsp
             .edits()
             .iter()
             .cloned()
@@ -193,28 +193,28 @@ impl RenameEditComparison {
             .cloned()
             .collect::<BTreeSet<_>>();
 
-        let matched = rust_glancer_edits
+        let matched = suprnova_lsp_edits
             .intersection(&rust_analyzer_edits)
             .cloned()
             .collect();
         let missing = rust_analyzer_edits
-            .difference(&rust_glancer_edits)
+            .difference(&suprnova_lsp_edits)
             .cloned()
             .collect();
-        let extra = rust_glancer_edits
+        let extra = suprnova_lsp_edits
             .difference(&rust_analyzer_edits)
             .cloned()
             .collect();
 
         Self {
-            rust_glancer_count: rust_glancer_edits.len(),
+            suprnova_lsp_count: suprnova_lsp_edits.len(),
             rust_analyzer_count: rust_analyzer_edits.len(),
             matched,
             missing,
             extra,
-            rust_glancer_unmapped_count: rust_glancer.unmapped_count(),
+            suprnova_lsp_unmapped_count: suprnova_lsp.unmapped_count(),
             rust_analyzer_unmapped_count: rust_analyzer.unmapped_count(),
-            rust_glancer_unmapped: rust_glancer.unmapped_summaries(),
+            suprnova_lsp_unmapped: suprnova_lsp.unmapped_summaries(),
             rust_analyzer_unmapped: rust_analyzer.unmapped_summaries(),
         }
     }
@@ -222,15 +222,15 @@ impl RenameEditComparison {
     pub(crate) fn metrics(&self) -> MappedSetComparisonMetrics {
         MappedSetComparisonMetrics {
             set: SetComparisonMetrics::new(
-                self.rust_glancer_count,
+                self.suprnova_lsp_count,
                 self.rust_analyzer_count,
                 self.matched.len(),
                 self.missing.len(),
                 self.extra.len(),
             ),
-            rust_glancer_unmapped_count: self.rust_glancer_unmapped_count,
+            suprnova_lsp_unmapped_count: self.suprnova_lsp_unmapped_count,
             rust_analyzer_unmapped_count: self.rust_analyzer_unmapped_count,
-            rust_glancer_unmapped: self.rust_glancer_unmapped.clone(),
+            suprnova_lsp_unmapped: self.suprnova_lsp_unmapped.clone(),
             rust_analyzer_unmapped: self.rust_analyzer_unmapped.clone(),
         }
     }
@@ -249,12 +249,12 @@ pub(crate) struct RenameEditAggregate {
     query_count: usize,
     comparable_count: usize,
     non_comparable_count: usize,
-    rust_glancer_edits: usize,
+    suprnova_lsp_edits: usize,
     rust_analyzer_edits: usize,
     matched_edits: usize,
     missing_edits: usize,
     extra_edits: usize,
-    rust_glancer_unmapped_edits: usize,
+    suprnova_lsp_unmapped_edits: usize,
     rust_analyzer_unmapped_edits: usize,
 }
 
@@ -264,12 +264,12 @@ impl RenameEditAggregate {
         match query.result() {
             QueryComparisonResult::RenameEdits(comparison) => {
                 self.comparable_count += 1;
-                self.rust_glancer_edits += comparison.rust_glancer_count;
+                self.suprnova_lsp_edits += comparison.suprnova_lsp_count;
                 self.rust_analyzer_edits += comparison.rust_analyzer_count;
                 self.matched_edits += comparison.matched.len();
                 self.missing_edits += comparison.missing.len();
                 self.extra_edits += comparison.extra.len();
-                self.rust_glancer_unmapped_edits += comparison.rust_glancer_unmapped_count;
+                self.suprnova_lsp_unmapped_edits += comparison.suprnova_lsp_unmapped_count;
                 self.rust_analyzer_unmapped_edits += comparison.rust_analyzer_unmapped_count;
             }
             QueryComparisonResult::NonComparable(_) => self.non_comparable_count += 1,
@@ -292,13 +292,13 @@ impl RenameEditAggregate {
     pub(crate) fn metrics(&self) -> MappedSetAggregateMetrics {
         MappedSetAggregateMetrics {
             set: SetComparisonMetrics::new(
-                self.rust_glancer_edits,
+                self.suprnova_lsp_edits,
                 self.rust_analyzer_edits,
                 self.matched_edits,
                 self.missing_edits,
                 self.extra_edits,
             ),
-            rust_glancer_unmapped_count: self.rust_glancer_unmapped_edits,
+            suprnova_lsp_unmapped_count: self.suprnova_lsp_unmapped_edits,
             rust_analyzer_unmapped_count: self.rust_analyzer_unmapped_edits,
         }
     }
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn accepts_a_valid_placeholder_when_the_reference_returns_only_a_range() {
         let range = Some(NormalizedRange::test_new(3, 8, 3, 17));
-        let rust_glancer = targets(vec![NormalizedPrepareRenameTarget::test_new(
+        let suprnova_lsp = targets(vec![NormalizedPrepareRenameTarget::test_new(
             range,
             Some("user_name"),
             true,
@@ -323,7 +323,7 @@ mod tests {
             range, None, true,
         )]);
 
-        let comparison = PrepareRenameComparison::new(&rust_glancer, &rust_analyzer);
+        let comparison = PrepareRenameComparison::new(&suprnova_lsp, &rust_analyzer);
         let metrics = comparison.metrics();
 
         assert_eq!(metrics.matched_count, 1);
@@ -335,7 +335,7 @@ mod tests {
     #[test]
     fn rejects_dropping_a_reference_placeholder() {
         let range = Some(NormalizedRange::test_new(3, 8, 3, 17));
-        let rust_glancer = targets(vec![NormalizedPrepareRenameTarget::test_new(
+        let suprnova_lsp = targets(vec![NormalizedPrepareRenameTarget::test_new(
             range, None, true,
         )]);
         let rust_analyzer = targets(vec![NormalizedPrepareRenameTarget::test_new(
@@ -344,7 +344,7 @@ mod tests {
             true,
         )]);
 
-        let comparison = PrepareRenameComparison::new(&rust_glancer, &rust_analyzer);
+        let comparison = PrepareRenameComparison::new(&suprnova_lsp, &rust_analyzer);
         let metrics = comparison.metrics();
 
         assert_eq!(metrics.matched_count, 0);
@@ -356,7 +356,7 @@ mod tests {
     #[test]
     fn rejects_a_placeholder_that_does_not_match_source() {
         let range = Some(NormalizedRange::test_new(3, 8, 3, 17));
-        let rust_glancer = targets(vec![NormalizedPrepareRenameTarget::test_new(
+        let suprnova_lsp = targets(vec![NormalizedPrepareRenameTarget::test_new(
             range,
             Some("other_name"),
             false,
@@ -365,7 +365,7 @@ mod tests {
             range, None, true,
         )]);
 
-        let comparison = PrepareRenameComparison::new(&rust_glancer, &rust_analyzer);
+        let comparison = PrepareRenameComparison::new(&suprnova_lsp, &rust_analyzer);
         let metrics = comparison.metrics();
 
         assert_eq!(metrics.matched_count, 0);

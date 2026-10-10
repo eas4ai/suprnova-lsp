@@ -34,7 +34,7 @@ techniques we use _outside_ of purging and offloading.
 
 ### Allocator choice
 
-Rust Glancer supports two main allocators:
+Suprnova LSP supports two main allocators:
 - `jemalloc`
 - `mimalloc`
 
@@ -137,7 +137,7 @@ Important caveat: this table prints data _after the phase_, so it does not repre
 allocation, which can be much higher during the phase because of transient allocations.
 For peak RSS, extra profiling might be required.
 
-[ra]: https://github.com/rust-glancer/rust-glancer/blob/main/test_targets/bench_fixtures/fetch-rust-analyzer.sh
+[ra]: https://github.com/eas4ai/suprnova-lsp/blob/main/test_targets/bench_fixtures/fetch-rust-analyzer.sh
 
 ### Layered allocations
 

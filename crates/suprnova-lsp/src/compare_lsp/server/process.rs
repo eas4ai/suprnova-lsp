@@ -45,7 +45,7 @@ pub(super) struct RunningServer {
     client: TowerLspTransport,
     stderr: StderrCapture,
     exited: bool,
-    rust_glancer_indexing_status: Option<IndexingStatus>,
+    suprnova_lsp_indexing_status: Option<IndexingStatus>,
 }
 
 impl RunningServer {
@@ -94,7 +94,7 @@ impl RunningServer {
             client,
             stderr,
             exited: false,
-            rust_glancer_indexing_status: None,
+            suprnova_lsp_indexing_status: None,
         })
     }
 
@@ -170,7 +170,7 @@ impl RunningServer {
 
     /// Wait for any background work that should not be charged to measured query latency.
     ///
-    /// Rust-glancer reports structural readiness before deferred body indexes finish. That is the
+    /// Suprnova LSP reports structural readiness before deferred body indexes finish. That is the
     /// behavior users care about for editor responsiveness, so `ready_ms` stops there. The
     /// comparison harness then waits for healthy, quiescent server status before firing measured
     /// body-sensitive queries, and reports that extra wait as `settle_ms`. Unlike a work-finished
@@ -185,8 +185,8 @@ impl RunningServer {
                 );
                 Ok(Duration::ZERO)
             }
-            ServerKind::RustGlancer => {
-                match &self.rust_glancer_indexing_status {
+            ServerKind::SuprnovaLsp => {
+                match &self.suprnova_lsp_indexing_status {
                     Some(IndexingStatus::Idle) => {
                         tracing::info!(
                             server = self.kind.display_name(),
@@ -489,17 +489,17 @@ impl RunningServer {
         &mut self,
         notification: &ServerNotification,
     ) -> Option<IndexingStatus> {
-        if !matches!(self.kind, ServerKind::RustGlancer) {
+        if !matches!(self.kind, ServerKind::SuprnovaLsp) {
             return None;
         }
-        let status = Self::rust_glancer_indexing_status(notification)?;
-        self.rust_glancer_indexing_status = Some(status.clone());
+        let status = Self::suprnova_lsp_indexing_status(notification)?;
+        self.suprnova_lsp_indexing_status = Some(status.clone());
         Some(status)
     }
 
     fn readiness_notification(&self, notification: &ServerNotification) -> ReadinessNotification {
         match self.kind {
-            ServerKind::RustGlancer => Self::rust_glancer_readiness(notification),
+            ServerKind::SuprnovaLsp => Self::suprnova_lsp_readiness(notification),
             ServerKind::RustAnalyzer => Self::rust_analyzer_readiness(notification),
         }
     }
@@ -590,7 +590,7 @@ impl RunningServer {
         serde_json::to_value(params).with_context(|| format!("Serializing {description} failed"))
     }
 
-    fn rust_glancer_indexing_status(notification: &ServerNotification) -> Option<IndexingStatus> {
+    fn suprnova_lsp_indexing_status(notification: &ServerNotification) -> Option<IndexingStatus> {
         if notification.method() != SERVER_STATUS_METHOD {
             return None;
         }
@@ -614,7 +614,7 @@ impl RunningServer {
         })
     }
 
-    fn rust_glancer_readiness(notification: &ServerNotification) -> ReadinessNotification {
+    fn suprnova_lsp_readiness(notification: &ServerNotification) -> ReadinessNotification {
         if notification.method() != SUPRNOVA_LSP_READY_METHOD {
             return ReadinessNotification::Ignore;
         }

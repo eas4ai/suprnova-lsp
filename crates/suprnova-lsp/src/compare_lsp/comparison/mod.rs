@@ -92,7 +92,7 @@ impl ComparisonSummary {
 pub(crate) struct QueryComparison {
     label: &'static str,
     method: QueryMethod,
-    rust_glancer_latency: Duration,
+    suprnova_lsp_latency: Duration,
     rust_analyzer_latency: Duration,
     result: QueryComparisonResult,
 }
@@ -101,105 +101,105 @@ impl QueryComparison {
     fn from_normalized(
         query: &crate::compare_lsp::normalization::NormalizedQueryExecution,
     ) -> Self {
-        let rust_glancer = query.outcome(ServerUnderTest::RustGlancer).value();
+        let suprnova_lsp = query.outcome(ServerUnderTest::SuprnovaLsp).value();
         let rust_analyzer = query.outcome(ServerUnderTest::RustAnalyzer).value();
         let result = match query.kind() {
             QueryKind::References { .. }
             | QueryKind::GotoDefinition
             | QueryKind::TypeDefinition
-            | QueryKind::Implementation => match (rust_glancer, rust_analyzer) {
+            | QueryKind::Implementation => match (suprnova_lsp, rust_analyzer) {
                 (
-                    NormalizedOutcome::Locations(rust_glancer),
+                    NormalizedOutcome::Locations(suprnova_lsp),
                     NormalizedOutcome::Locations(rust_analyzer),
                 ) => QueryComparisonResult::Locations(LocationComparison::new(
-                    rust_glancer,
+                    suprnova_lsp,
                     rust_analyzer,
                 )),
                 _ => QueryComparisonResult::NonComparable(NonComparableComparison::new(
-                    rust_glancer,
+                    suprnova_lsp,
                     rust_analyzer,
                 )),
             },
-            QueryKind::PrepareRename => match (rust_glancer, rust_analyzer) {
+            QueryKind::PrepareRename => match (suprnova_lsp, rust_analyzer) {
                 (
-                    NormalizedOutcome::PrepareRenames(rust_glancer),
+                    NormalizedOutcome::PrepareRenames(suprnova_lsp),
                     NormalizedOutcome::PrepareRenames(rust_analyzer),
                 ) => QueryComparisonResult::PrepareRenames(PrepareRenameComparison::new(
-                    rust_glancer,
+                    suprnova_lsp,
                     rust_analyzer,
                 )),
                 _ => QueryComparisonResult::NonComparable(NonComparableComparison::new(
-                    rust_glancer,
+                    suprnova_lsp,
                     rust_analyzer,
                 )),
             },
-            QueryKind::Rename => match (rust_glancer, rust_analyzer) {
+            QueryKind::Rename => match (suprnova_lsp, rust_analyzer) {
                 (
-                    NormalizedOutcome::RenameEdits(rust_glancer),
+                    NormalizedOutcome::RenameEdits(suprnova_lsp),
                     NormalizedOutcome::RenameEdits(rust_analyzer),
                 ) => QueryComparisonResult::RenameEdits(RenameEditComparison::new(
-                    rust_glancer,
+                    suprnova_lsp,
                     rust_analyzer,
                 )),
                 _ => QueryComparisonResult::NonComparable(NonComparableComparison::new(
-                    rust_glancer,
+                    suprnova_lsp,
                     rust_analyzer,
                 )),
             },
-            QueryKind::DocumentHighlight => match (rust_glancer, rust_analyzer) {
+            QueryKind::DocumentHighlight => match (suprnova_lsp, rust_analyzer) {
                 (
-                    NormalizedOutcome::Ranges(rust_glancer),
+                    NormalizedOutcome::Ranges(suprnova_lsp),
                     NormalizedOutcome::Ranges(rust_analyzer),
                 ) => {
-                    QueryComparisonResult::Ranges(RangeComparison::new(rust_glancer, rust_analyzer))
+                    QueryComparisonResult::Ranges(RangeComparison::new(suprnova_lsp, rust_analyzer))
                 }
                 _ => QueryComparisonResult::NonComparable(NonComparableComparison::new(
-                    rust_glancer,
+                    suprnova_lsp,
                     rust_analyzer,
                 )),
             },
             QueryKind::DocumentSymbol | QueryKind::WorkspaceSymbol => {
-                match (rust_glancer, rust_analyzer) {
+                match (suprnova_lsp, rust_analyzer) {
                     (
-                        NormalizedOutcome::Symbols(rust_glancer),
+                        NormalizedOutcome::Symbols(suprnova_lsp),
                         NormalizedOutcome::Symbols(rust_analyzer),
                     ) => QueryComparisonResult::Symbols(SymbolComparison::new(
-                        rust_glancer,
+                        suprnova_lsp,
                         rust_analyzer,
                     )),
                     _ => QueryComparisonResult::NonComparable(NonComparableComparison::new(
-                        rust_glancer,
+                        suprnova_lsp,
                         rust_analyzer,
                     )),
                 }
             }
-            QueryKind::InlayHint => match (rust_glancer, rust_analyzer) {
+            QueryKind::InlayHint => match (suprnova_lsp, rust_analyzer) {
                 (
-                    NormalizedOutcome::InlayHints(rust_glancer),
+                    NormalizedOutcome::InlayHints(suprnova_lsp),
                     NormalizedOutcome::InlayHints(rust_analyzer),
                 ) => QueryComparisonResult::InlayHints(InlayHintComparison::new(
-                    rust_glancer,
+                    suprnova_lsp,
                     rust_analyzer,
                 )),
                 _ => QueryComparisonResult::NonComparable(NonComparableComparison::new(
-                    rust_glancer,
+                    suprnova_lsp,
                     rust_analyzer,
                 )),
             },
-            QueryKind::Hover => match (rust_glancer, rust_analyzer) {
+            QueryKind::Hover => match (suprnova_lsp, rust_analyzer) {
                 (
                     NormalizedOutcome::Hover {
-                        present: rust_glancer_present,
+                        present: suprnova_lsp_present,
                     },
                     NormalizedOutcome::Hover {
                         present: rust_analyzer_present,
                     },
                 ) => QueryComparisonResult::Hover(HoverComparison::new(
-                    *rust_glancer_present,
+                    *suprnova_lsp_present,
                     *rust_analyzer_present,
                 )),
                 _ => QueryComparisonResult::NonComparable(NonComparableComparison::new(
-                    rust_glancer,
+                    suprnova_lsp,
                     rust_analyzer,
                 )),
             },
@@ -208,14 +208,14 @@ impl QueryComparison {
         // Detailed result lists are useful while investigating semantic gaps, but far too noisy for
         // the normal comparison report. Keep one structured record per divergent query behind a
         // dedicated debug target so `agent-debug --log ...` can capture it in the run artifact.
-        if tracing::enabled!(target: "rust_glancer::compare_lsp::divergence", tracing::Level::DEBUG)
+        if tracing::enabled!(target: "suprnova_lsp::compare_lsp::divergence", tracing::Level::DEBUG)
         {
             match &result {
                 QueryComparisonResult::Locations(comparison)
                     if !comparison.missing().is_empty() || !comparison.extra().is_empty() =>
                 {
                     tracing::debug!(
-                        target: "rust_glancer::compare_lsp::divergence",
+                        target: "suprnova_lsp::compare_lsp::divergence",
                         query = query.label(),
                         method = query.kind().lsp_method(),
                         missing_count = comparison.missing().len(),
@@ -231,7 +231,7 @@ impl QueryComparison {
                         || !comparison.extra().is_empty() =>
                 {
                     tracing::debug!(
-                        target: "rust_glancer::compare_lsp::divergence",
+                        target: "suprnova_lsp::compare_lsp::divergence",
                         query = query.label(),
                         method = query.kind().lsp_method(),
                         compatible_count = comparison.compatible().len(),
@@ -247,7 +247,7 @@ impl QueryComparison {
                     if !comparison.missing().is_empty() || !comparison.extra().is_empty() =>
                 {
                     tracing::debug!(
-                        target: "rust_glancer::compare_lsp::divergence",
+                        target: "suprnova_lsp::compare_lsp::divergence",
                         query = query.label(),
                         method = query.kind().lsp_method(),
                         missing_count = comparison.missing().len(),
@@ -261,7 +261,7 @@ impl QueryComparison {
                     if !comparison.missing().is_empty() || !comparison.extra().is_empty() =>
                 {
                     tracing::debug!(
-                        target: "rust_glancer::compare_lsp::divergence",
+                        target: "suprnova_lsp::compare_lsp::divergence",
                         query = query.label(),
                         method = query.kind().lsp_method(),
                         missing_count = comparison.missing().len(),
@@ -277,7 +277,7 @@ impl QueryComparison {
                         || !comparison.extra().is_empty() =>
                 {
                     tracing::debug!(
-                        target: "rust_glancer::compare_lsp::divergence",
+                        target: "suprnova_lsp::compare_lsp::divergence",
                         query = query.label(),
                         method = query.kind().lsp_method(),
                         compatible_count = comparison.compatible().len(),
@@ -296,7 +296,7 @@ impl QueryComparison {
         Self {
             label: query.label(),
             method: QueryMethod::from_kind(query.kind()),
-            rust_glancer_latency: query.outcome(ServerUnderTest::RustGlancer).latency(),
+            suprnova_lsp_latency: query.outcome(ServerUnderTest::SuprnovaLsp).latency(),
             rust_analyzer_latency: query.outcome(ServerUnderTest::RustAnalyzer).latency(),
             result,
         }
@@ -310,8 +310,8 @@ impl QueryComparison {
         self.method
     }
 
-    pub(crate) fn rust_glancer_latency(&self) -> Duration {
-        self.rust_glancer_latency
+    pub(crate) fn suprnova_lsp_latency(&self) -> Duration {
+        self.suprnova_lsp_latency
     }
 
     pub(crate) fn rust_analyzer_latency(&self) -> Duration {
@@ -609,7 +609,7 @@ mod tests {
             panic!("first query should compare locations");
         };
         let query_metrics = query.metrics();
-        assert_eq!(query_metrics.set.rust_glancer_count, 2);
+        assert_eq!(query_metrics.set.suprnova_lsp_count, 2);
         assert_eq!(query_metrics.set.rust_analyzer_count, 2);
         assert_eq!(query.matched(), &[shared]);
         assert_eq!(query.missing(), &[missing]);
@@ -631,7 +631,7 @@ mod tests {
         assert_eq!(summary.query_count, 2);
         assert_eq!(summary.comparable_count, 1);
         assert_eq!(summary.non_comparable_count, 1);
-        assert_eq!(metrics.set.rust_glancer_count, 2);
+        assert_eq!(metrics.set.suprnova_lsp_count, 2);
         assert_eq!(metrics.set.rust_analyzer_count, 2);
         assert_eq!(metrics.set.matched_count, 1);
         assert_eq!(metrics.set.missing_count, 1);
@@ -682,7 +682,7 @@ mod tests {
         let metrics = aggregate.metrics();
         assert_eq!(summary.query_count, 3);
         assert_eq!(summary.comparable_count, 2);
-        assert_eq!(metrics.rust_glancer_count, 1);
+        assert_eq!(metrics.suprnova_lsp_count, 1);
         assert_eq!(metrics.rust_analyzer_count, 2);
         assert_eq!(metrics.matched_count, 1);
         assert_eq!(metrics.missing_count, 1);

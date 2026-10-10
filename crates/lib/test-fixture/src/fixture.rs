@@ -318,7 +318,7 @@ impl CrateFixture {
         Self::from_parsed_fixture(FixtureSpec::parse(spec))
     }
 
-    /// Adds rust-glancer's small shared fake sysroot under `/sysroot/library`.
+    /// Adds suprnova-lsp's small shared fake sysroot under `/sysroot/library`.
     ///
     /// The fake sysroot contains every compiler-provided crate root expected by discovery, but
     /// exposes only the small API surface needed by name resolution and type inference tests. For
@@ -418,7 +418,7 @@ impl CrateFixture {
 
     fn create_root_directory() -> TempDir {
         tempfile::Builder::new()
-            .prefix("rust-glancer-test-fixture-")
+            .prefix("suprnova-lsp-test-fixture-")
             .tempdir()
             .expect("fixture root directory should be created")
     }

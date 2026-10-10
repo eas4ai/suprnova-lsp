@@ -59,7 +59,7 @@ impl MethodAggregateReport {
             .count_column("comparable")
             .count_column("non_comparable")
             .column_as("scored", "Scored", ReportAlign::Center, None)
-            .count_column("rust_glancer")
+            .count_column("suprnova_lsp")
             .count_column("rust_analyzer")
             .count_column("matched")
             .count_column("compatible")
@@ -147,13 +147,13 @@ impl MethodAggregateDataReport {
 
 #[derive(Debug, Serialize)]
 struct LocationAggregateReport {
-    rust_glancer_count: usize,
+    suprnova_lsp_count: usize,
     rust_analyzer_count: usize,
     matched_count: usize,
     compatible_count: usize,
     missing_count: usize,
     extra_count: usize,
-    rust_glancer_unmapped_count: usize,
+    suprnova_lsp_unmapped_count: usize,
     rust_analyzer_unmapped_count: usize,
     match_score_percent: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -164,7 +164,7 @@ struct LocationAggregateReport {
 
 impl LocationAggregateReport {
     fn append_row_cells(&self, row: &mut ReportRowBuilder) {
-        row.value("rust_glancer", ReportValue::count(self.rust_glancer_count))
+        row.value("suprnova_lsp", ReportValue::count(self.suprnova_lsp_count))
             .value(
                 "rust_analyzer",
                 ReportValue::count(self.rust_analyzer_count),
@@ -181,7 +181,7 @@ impl LocationAggregateReport {
             .value("precision", optional_percent(self.precision_percent))
             .value(
                 "unmapped_rg",
-                ReportValue::count(self.rust_glancer_unmapped_count),
+                ReportValue::count(self.suprnova_lsp_unmapped_count),
             )
             .value(
                 "unmapped_ra",
@@ -193,13 +193,13 @@ impl LocationAggregateReport {
 impl From<MappedSetAggregateMetrics> for LocationAggregateReport {
     fn from(metrics: MappedSetAggregateMetrics) -> Self {
         Self {
-            rust_glancer_count: metrics.set.rust_glancer_count,
+            suprnova_lsp_count: metrics.set.suprnova_lsp_count,
             rust_analyzer_count: metrics.set.rust_analyzer_count,
             matched_count: metrics.set.matched_count,
             compatible_count: metrics.set.compatible_count,
             missing_count: metrics.set.missing_count,
             extra_count: metrics.set.extra_count,
-            rust_glancer_unmapped_count: metrics.rust_glancer_unmapped_count,
+            suprnova_lsp_unmapped_count: metrics.suprnova_lsp_unmapped_count,
             rust_analyzer_unmapped_count: metrics.rust_analyzer_unmapped_count,
             match_score_percent: metrics.set.match_score_percent,
             recall_percent: metrics.set.recall_percent,
@@ -210,7 +210,7 @@ impl From<MappedSetAggregateMetrics> for LocationAggregateReport {
 
 #[derive(Debug, Serialize)]
 struct RangeAggregateReport {
-    rust_glancer_count: usize,
+    suprnova_lsp_count: usize,
     rust_analyzer_count: usize,
     matched_count: usize,
     compatible_count: usize,
@@ -225,7 +225,7 @@ struct RangeAggregateReport {
 
 impl RangeAggregateReport {
     fn append_row_cells(&self, row: &mut ReportRowBuilder) {
-        row.value("rust_glancer", ReportValue::count(self.rust_glancer_count))
+        row.value("suprnova_lsp", ReportValue::count(self.suprnova_lsp_count))
             .value(
                 "rust_analyzer",
                 ReportValue::count(self.rust_analyzer_count),
@@ -246,7 +246,7 @@ impl RangeAggregateReport {
 impl From<SetComparisonMetrics> for RangeAggregateReport {
     fn from(metrics: SetComparisonMetrics) -> Self {
         Self {
-            rust_glancer_count: metrics.rust_glancer_count,
+            suprnova_lsp_count: metrics.suprnova_lsp_count,
             rust_analyzer_count: metrics.rust_analyzer_count,
             matched_count: metrics.matched_count,
             compatible_count: metrics.compatible_count,
@@ -261,13 +261,13 @@ impl From<SetComparisonMetrics> for RangeAggregateReport {
 
 #[derive(Debug, Serialize)]
 struct SymbolAggregateReport {
-    rust_glancer_count: usize,
+    suprnova_lsp_count: usize,
     rust_analyzer_count: usize,
     matched_count: usize,
     compatible_count: usize,
     missing_count: usize,
     extra_count: usize,
-    rust_glancer_unmapped_count: usize,
+    suprnova_lsp_unmapped_count: usize,
     rust_analyzer_unmapped_count: usize,
     match_score_percent: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -278,7 +278,7 @@ struct SymbolAggregateReport {
 
 impl SymbolAggregateReport {
     fn append_row_cells(&self, row: &mut ReportRowBuilder) {
-        row.value("rust_glancer", ReportValue::count(self.rust_glancer_count))
+        row.value("suprnova_lsp", ReportValue::count(self.suprnova_lsp_count))
             .value(
                 "rust_analyzer",
                 ReportValue::count(self.rust_analyzer_count),
@@ -295,7 +295,7 @@ impl SymbolAggregateReport {
             .value("precision", optional_percent(self.precision_percent))
             .value(
                 "unmapped_rg",
-                ReportValue::count(self.rust_glancer_unmapped_count),
+                ReportValue::count(self.suprnova_lsp_unmapped_count),
             )
             .value(
                 "unmapped_ra",
@@ -307,13 +307,13 @@ impl SymbolAggregateReport {
 impl From<MappedSetAggregateMetrics> for SymbolAggregateReport {
     fn from(metrics: MappedSetAggregateMetrics) -> Self {
         Self {
-            rust_glancer_count: metrics.set.rust_glancer_count,
+            suprnova_lsp_count: metrics.set.suprnova_lsp_count,
             rust_analyzer_count: metrics.set.rust_analyzer_count,
             matched_count: metrics.set.matched_count,
             compatible_count: metrics.set.compatible_count,
             missing_count: metrics.set.missing_count,
             extra_count: metrics.set.extra_count,
-            rust_glancer_unmapped_count: metrics.rust_glancer_unmapped_count,
+            suprnova_lsp_unmapped_count: metrics.suprnova_lsp_unmapped_count,
             rust_analyzer_unmapped_count: metrics.rust_analyzer_unmapped_count,
             match_score_percent: metrics.set.match_score_percent,
             recall_percent: metrics.set.recall_percent,

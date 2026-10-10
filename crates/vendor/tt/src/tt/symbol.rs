@@ -1,6 +1,6 @@
 //! Minimal symbol support for vendored macro expansion modules.
 //!
-//! rust-glancer already has project-wide text interning in `rg_text`. Macro
+//! suprnova-lsp already has project-wide text interning in `rg_text`. Macro
 //! expansion only needs a small local vocabulary of static keywords plus cheap
 //! owned symbols, so this module keeps that compatibility surface close to the
 //! vendored macro code instead of becoming another general text subsystem.

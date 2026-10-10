@@ -29,12 +29,12 @@ pub(crate) async fn run(
     let fixture = Fixture::resolve(fixture, path)?;
     let mut servers = server::StartedServers::start(&fixture).await?;
     let opened_files = servers.opened_files();
-    let rust_glancer = report::ServerReport::capture(
-        servers.rust_glancer_readiness().name(),
-        servers.rust_glancer_command_label(),
-        servers.rust_glancer_readiness().initialize_latency(),
-        servers.rust_glancer_readiness().ready_latency(),
-        servers.rust_glancer_readiness().settle_latency(),
+    let suprnova_lsp = report::ServerReport::capture(
+        servers.suprnova_lsp_readiness().name(),
+        servers.suprnova_lsp_command_label(),
+        servers.suprnova_lsp_readiness().initialize_latency(),
+        servers.suprnova_lsp_readiness().ready_latency(),
+        servers.suprnova_lsp_readiness().settle_latency(),
     );
     let rust_analyzer = report::ServerReport::capture(
         servers.rust_analyzer_readiness().name(),
@@ -55,7 +55,7 @@ pub(crate) async fn run(
     let report = report::LspComparisonReport::build(
         &fixture,
         opened_files,
-        rust_glancer,
+        suprnova_lsp,
         rust_analyzer,
         &comparison,
     );

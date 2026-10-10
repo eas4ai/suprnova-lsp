@@ -42,7 +42,7 @@ impl ExecutionSummary {
 /// Identifies which side of the comparison a stored outcome came from.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ServerUnderTest {
-    RustGlancer,
+    SuprnovaLsp,
     RustAnalyzer,
 }
 
@@ -51,7 +51,7 @@ pub(crate) struct QueryExecution {
     label: &'static str,
     kind: QueryKind,
     target: QueryTarget,
-    rust_glancer: RawServerOutcome,
+    suprnova_lsp: RawServerOutcome,
     rust_analyzer: RawServerOutcome,
 }
 
@@ -70,7 +70,7 @@ impl QueryExecution {
 
     pub(crate) fn outcome(&self, server: ServerUnderTest) -> &RawServerOutcome {
         match server {
-            ServerUnderTest::RustGlancer => &self.rust_glancer,
+            ServerUnderTest::SuprnovaLsp => &self.suprnova_lsp,
             ServerUnderTest::RustAnalyzer => &self.rust_analyzer,
         }
     }
@@ -146,15 +146,15 @@ pub(crate) async fn run(
             method = request.method,
             "compare-lsp query started"
         );
-        let rust_glancer = execute_rust_glancer(servers, query_case.kind(), &request).await;
+        let suprnova_lsp = execute_suprnova_lsp(servers, query_case.kind(), &request).await;
         tracing::debug!(
             query_index = query_index + 1,
             total_queries,
             label = query_case.label(),
             method = request.method,
             server = "suprnova-lsp",
-            elapsed_ms = rust_glancer.latency().as_millis(),
-            status = rust_glancer.value().status_label(),
+            elapsed_ms = suprnova_lsp.latency().as_millis(),
+            status = suprnova_lsp.value().status_label(),
             "compare-lsp query server completed"
         );
         let rust_analyzer = execute_rust_analyzer(servers, query_case.kind(), &request).await;
@@ -173,7 +173,7 @@ pub(crate) async fn run(
             label: query_case.label(),
             kind: query_case.kind(),
             target: query_case.target(),
-            rust_glancer,
+            suprnova_lsp,
             rust_analyzer,
         });
     }
@@ -422,14 +422,14 @@ impl QueryRequest {
     }
 }
 
-async fn execute_rust_glancer(
+async fn execute_suprnova_lsp(
     servers: &mut StartedServers,
     kind: QueryKind,
     request: &QueryRequest,
 ) -> RawServerOutcome {
     let started_at = Instant::now();
     let outcome = servers
-        .request_rust_glancer(request.method, request.params.clone(), QUERY_TIMEOUT)
+        .request_suprnova_lsp(request.method, request.params.clone(), QUERY_TIMEOUT)
         .await;
     RawServerOutcome {
         latency: started_at.elapsed(),

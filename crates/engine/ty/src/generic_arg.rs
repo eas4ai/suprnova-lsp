@@ -14,7 +14,7 @@ use crate::{ProjectionTy, Ty};
 
 /// Lifetime argument retained by the semantic type model.
 ///
-/// rust-glancer does not solve regions. Parameter identity and `'static` remain meaningful, while
+/// suprnova-lsp does not solve regions. Parameter identity and `'static` remain meaningful, while
 /// every other concrete lifetime is deliberately erased instead of using source text as semantic
 /// identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SchemaRead, SchemaWrite, MemorySize, Shrink)]
@@ -36,7 +36,7 @@ impl fmt::Display for Lifetime {
 
 /// Const argument retained by the semantic type model.
 ///
-/// Literal integers are enough for the array/generic identities rust-glancer already models.
+/// Literal integers are enough for the array/generic identities suprnova-lsp already models.
 /// Paths and expressions remain explicitly unknown until const evaluation is in scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SchemaRead, SchemaWrite, MemorySize, Shrink)]
 #[shrink(leaf)]

@@ -25,9 +25,9 @@ ENVIRONMENT_MUST_BE_UNSET = ("CARGO_BUILD_BUILD_DIR", "RUSTFLAGS", "CARGO_ENCODE
     "RUSTC", "RUSTDOC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER")
 PINS = {
     "lsp-query.py": "67f3701804c25b8d8f556cd37e17d9beb3ee26364482e0c9d34f1f9bd93a1695",
-    "sudus-responsiveness.py": "a759bcb20edfb3789e1086a1d6ca75a6eed0c3a6f2f9260050b353c8be2d45f4",
-    "agent-debug.py": "ee7cc045c60c43dfd0601e6b945d95106c959c94ab84538b72805245b92e1ade",
-    "sudus-editor-import.py": "b4da2f4b49c09f9625ea7c2d2185430803fdd0e0a1e61b58a8ff58178303e11d",
+    "sudus-responsiveness.py": "218eccce43d0c8d0cc79493ee8f6b48b84ddd3a6ad602f79254a3da4988495a4",
+    "agent-debug.py": "023985ba916c0e8b45375517eb41306192889c7b4900ae604c7b649b72bd6314",
+    "sudus-editor-import.py": "d3f72ec0afa19e7390486d38277bab1fdefc1ffa3cf1056858757d63f01b827c",
     "sudus-suprnova-user.py": "dfccc143ae04f789cbe033a8a6223b787d786f07aa791a3a21e602c0b30f4107",
     "responsiveness-cargo-cache.py": "c2561856c4a2d50227df870d2ec177d88de5e93fcd64adcdfb4c9cd85b3de60a",
 }

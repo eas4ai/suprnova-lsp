@@ -6,8 +6,8 @@
 
 ## Development commands
 
-The recommended way to work with the project is via the [project Justfile](https://github.com/rust-glancer/rust-glancer/blob/main/Justfile) and
-the [extension Justfile](https://github.com/rust-glancer/rust-glancer/blob/main/editors/code/Justfile).
+The recommended way to work with the project is via the [project Justfile](https://github.com/eas4ai/suprnova-lsp/blob/main/Justfile) and
+the [extension Justfile](https://github.com/eas4ai/suprnova-lsp/blob/main/editors/code/Justfile).
 
 Extension `just` commands can be invoked via submodules, e.g. `just client build`.
 

@@ -1,65 +1,58 @@
 # Installation
 
-Before anything else, `rust-src` is mandatory for the project to work correctly,
-so don't forget to run `rustup component add rust-src` if you're not sure if you
-have it installed.
+Install `rust-src` for standard-library analysis:
 
-When you install Rust Glancer, do not forget to turn rust-analyzer off. They should work
-together just fine (I've done that and did not have any conflicts), but it's kind of
-meaningless to run both.
+```sh
+rustup component add rust-src
+```
 
-## VS Code
+Suprnova LSP runs independently of rust-analyzer. Choose the Rust provider you
+want enabled in your editor. Automatic generated-model support also needs the
+rustdoc toolchain described in the [repository README](https://github.com/eas4ai/suprnova-lsp#readme).
 
-You have two options:
-1. [Install the extension from the official marketplace](https://marketplace.visualstudio.com/items?itemName=rust-glancer.rust-glancer).
-2. Build and install VSIX from the repository.
+## VS Code, Cursor and VSCodium
 
-The extension is maintained and will be updated, but given that VS Code extensions
-often become targets of attacks nowadays, I'd probably recommend building from source
-(or at least disabling auto-updates). Please do not forget to update it from time
-to time though. There will be good things in updates (probably).
+Download the VSIX matching your platform from the
+[Suprnova LSP GitHub releases](https://github.com/eas4ai/suprnova-lsp/releases).
+Choose **Extensions → Install from VSIX**, then reload the editor. The extension
+ID is `eas4ai.suprnova-lsp`; its settings and commands use `suprnova-lsp`.
 
-### Forks (cursor, vscodium, etc)
-
-[Install the extension from OpenVSX](https://open-vsx.org/extension/rust-glancer/rust-glancer)
-
-### Installing from VSIX
-
-0. (Optional) Install [just](https://github.com/casey/just)
-1. Clone the [repository](https://github.com/rust-glancer/rust-glancer)
-2. Run `just package-vsix` (or go to `editors/code` and build via `npm`)
-3. Open VS Code, navigate to extensions tab, click on `...` and choose `Install from VSIX`.
-4. Install the extension.
-5. ???
-6. PROFIT
+For a local build, clone this repository and run `just package-vsix`. See the
+[VS Code extension guide](https://github.com/eas4ai/suprnova-lsp/blob/main/editors/code/README.md) for development,
+configuration and tests.
 
 ## Zed
 
-Install the `Rust Glancer` extension from the marketplace.
+Use **Install Dev Extension** and select this checkout's `editors/zed` directory.
+The adapter first uses a configured executable, then `suprnova-lsp` on `PATH`.
+Otherwise, it downloads its pinned `suprnova-v<VERSION>` release from this
+repository.
 
-Minimal required configuration in settings (you need to disable rust-analyzer, which is enabled by default, and enable Rust Glancer):
+Enable the adapter in your settings:
 
 ```json
+{
   "languages": {
     "Rust": {
-      "language_servers": ["rust-glancer", "!rust-analyzer"],
-    },
+      "language_servers": ["suprnova-lsp", "!rust-analyzer"]
+    }
   }
+}
 ```
 
-## nvim
+See the [Zed guide](https://github.com/eas4ai/suprnova-lsp/blob/main/editors/zed/README.md) for an explicit binary path
+and initialization options. These instructions do not require a marketplace
+publication.
 
-There exists a [nvim-lspconfig configuration](https://github.com/neovim/nvim-lspconfig/pull/4512) contributed by
-[@h-michael](https://github.com/h-michael).
+## Neovim and other LSP clients
 
-At the time of writing, it does not support automatic fetching of binaries, so you can either
-[get a prebuilt binary from the releases page](https://github.com/rust-glancer/rust-glancer/releases) or build it yourself.
+Configure your client's Rust language server command as `suprnova-lsp lsp`.
+Download the matching server archive from GitHub releases, or build it with:
 
-## Other editors
+```sh
+cargo build --release -p suprnova-lsp
+```
 
-Any editor that supports LSP protocol, should work with Rust Glancer.
-
-Typically all you need is to configure Rust Glancer binary to be the Rust LSP, no special configuration
-should be required. If you'll notice any quirks, please [create an issue](https://github.com/rust-glancer/rust-glancer/issues) in the repository.
-
-Also, contributions with configuration guides for other editors are welcome (but please make sure that they work; do not submit untested LLM-generated PRs).
+Pass server configuration through LSP initialization options. See
+[Configuration](CONFIGURE.md) for the option names. Report editor integration
+issues in the [fork repository](https://github.com/eas4ai/suprnova-lsp/issues).

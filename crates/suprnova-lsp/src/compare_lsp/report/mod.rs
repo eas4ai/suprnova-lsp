@@ -31,7 +31,7 @@ impl LspComparisonReport {
     pub(crate) fn build(
         fixture: &Fixture,
         opened_files: usize,
-        rust_glancer: ServerReport,
+        suprnova_lsp: ServerReport,
         rust_analyzer: ServerReport,
         comparison: &ComparisonSummary,
     ) -> Self {
@@ -41,7 +41,7 @@ impl LspComparisonReport {
                 opened_files,
                 comparison.equivalence_score_percent(),
             ),
-            servers: vec![rust_glancer, rust_analyzer],
+            servers: vec![suprnova_lsp, rust_analyzer],
             aggregates: comparison
                 .aggregates()
                 .iter()

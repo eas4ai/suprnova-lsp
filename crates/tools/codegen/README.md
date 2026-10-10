@@ -2,7 +2,7 @@
 
 Developer-maintenance tool for generated parser and syntax files.
 
-This crate vendors the small parts of `rust-analyzer` codegen that Rust Glancer
+This crate vendors the small parts of `rust-analyzer` codegen that Suprnova LSP
 needs: grammar codegen and parser inline test extraction. It is not part of
 normal builds; generated files stay checked in, and this tool exists so changes
 to `rust.ungram` or parser test comments can be checked and regenerated locally.

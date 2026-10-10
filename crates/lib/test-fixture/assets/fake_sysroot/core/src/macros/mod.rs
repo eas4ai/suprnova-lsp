@@ -1,4 +1,4 @@
-// Builtin bodies are placeholders: rust-glancer dispatches these definitions through the
+// Builtin bodies are placeholders: suprnova-lsp dispatches these definitions through the
 // `rustc_builtin_macro` marker after ordinary macro name resolution has selected them.
 #[rustc_builtin_macro]
 #[macro_export]

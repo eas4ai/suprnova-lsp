@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
-description = "Indexed IR view facade for rust-glancer."
+description = "Indexed IR view facade for suprnova-lsp."
 
 [dependencies]
 anyhow.workspace = true

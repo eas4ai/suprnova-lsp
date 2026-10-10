@@ -1,4 +1,4 @@
-//! Small adapters for rust-glancer's `wincode` schemas.
+//! Small adapters for suprnova-lsp's `wincode` schemas.
 
 use std::marker::PhantomData;
 

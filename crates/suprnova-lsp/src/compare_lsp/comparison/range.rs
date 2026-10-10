@@ -10,7 +10,7 @@ use crate::compare_lsp::{
 
 #[derive(Debug)]
 pub(crate) struct RangeComparison {
-    rust_glancer_count: usize,
+    suprnova_lsp_count: usize,
     rust_analyzer_count: usize,
     matched: Vec<NormalizedRange>,
     missing: Vec<NormalizedRange>,
@@ -19,10 +19,10 @@ pub(crate) struct RangeComparison {
 
 impl RangeComparison {
     pub(super) fn new(
-        rust_glancer: &NormalizedRangeSet,
+        suprnova_lsp: &NormalizedRangeSet,
         rust_analyzer: &NormalizedRangeSet,
     ) -> Self {
-        let rust_glancer_ranges = rust_glancer
+        let suprnova_lsp_ranges = suprnova_lsp
             .ranges()
             .iter()
             .copied()
@@ -36,21 +36,21 @@ impl RangeComparison {
         // Text/Read/Write kinds are a part of protocol, but they have very minor impact on the LSP experience,
         // thus we intentionally ignore them. It is unlikely that anyone will notice, and there are way more
         // high-priority work out there. It's not a TODO, it's a deprioritized item.
-        let matched = rust_glancer_ranges
+        let matched = suprnova_lsp_ranges
             .intersection(&rust_analyzer_ranges)
             .copied()
             .collect();
         let missing = rust_analyzer_ranges
-            .difference(&rust_glancer_ranges)
+            .difference(&suprnova_lsp_ranges)
             .copied()
             .collect();
-        let extra = rust_glancer_ranges
+        let extra = suprnova_lsp_ranges
             .difference(&rust_analyzer_ranges)
             .copied()
             .collect();
 
         Self {
-            rust_glancer_count: rust_glancer_ranges.len(),
+            suprnova_lsp_count: suprnova_lsp_ranges.len(),
             rust_analyzer_count: rust_analyzer_ranges.len(),
             matched,
             missing,
@@ -60,7 +60,7 @@ impl RangeComparison {
 
     pub(crate) fn metrics(&self) -> SetComparisonMetrics {
         SetComparisonMetrics::new(
-            self.rust_glancer_count,
+            self.suprnova_lsp_count,
             self.rust_analyzer_count,
             self.matched.len(),
             self.missing.len(),
@@ -82,7 +82,7 @@ pub(crate) struct RangeAggregate {
     query_count: usize,
     comparable_count: usize,
     non_comparable_count: usize,
-    rust_glancer_ranges: usize,
+    suprnova_lsp_ranges: usize,
     rust_analyzer_ranges: usize,
     matched_ranges: usize,
     missing_ranges: usize,
@@ -95,7 +95,7 @@ impl RangeAggregate {
         match query.result() {
             QueryComparisonResult::Ranges(comparison) => {
                 self.comparable_count += 1;
-                self.rust_glancer_ranges += comparison.rust_glancer_count;
+                self.suprnova_lsp_ranges += comparison.suprnova_lsp_count;
                 self.rust_analyzer_ranges += comparison.rust_analyzer_count;
                 self.matched_ranges += comparison.matched.len();
                 self.missing_ranges += comparison.missing.len();
@@ -120,7 +120,7 @@ impl RangeAggregate {
 
     pub(crate) fn metrics(&self) -> SetComparisonMetrics {
         SetComparisonMetrics::new(
-            self.rust_glancer_ranges,
+            self.suprnova_lsp_ranges,
             self.rust_analyzer_ranges,
             self.matched_ranges,
             self.missing_ranges,

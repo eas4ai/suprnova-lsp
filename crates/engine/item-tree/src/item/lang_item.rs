@@ -7,7 +7,7 @@ use wincode::{SchemaRead, SchemaWrite};
 ///
 /// Rust permits these items to be re-exported or reached through renamed crates, so consumers must
 /// not recognize them from paths such as `core::ops::Deref`. This list is intentionally bounded to
-/// identities rust-glancer consumes. Adding another consumer should extend the list rather than
+/// identities suprnova-lsp consumes. Adding another consumer should extend the list rather than
 /// introducing a second spelling- or path-based lookup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SchemaRead, SchemaWrite, MemorySize, Shrink)]
 #[memsize(leaf)]
@@ -89,7 +89,7 @@ impl LangItem {
 
     /// Recognizes the bounded subset of compiler attribute values that analysis consumes.
     ///
-    /// Unknown `#[lang = "..."]` values remain ordinary items. This lets rust-glancer retain only
+    /// Unknown `#[lang = "..."]` values remain ordinary items. This lets suprnova-lsp retain only
     /// identities with a semantic consumer instead of pretending to implement every rustc lang
     /// item.
     pub fn from_attr_value(value: &str) -> Option<Self> {

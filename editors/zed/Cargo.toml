@@ -1,12 +1,12 @@
 [package]
-name = "rust-glancer-zed"
+name = "suprnova-lsp-zed"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Zed language server adapter for Rust Glancer."
+description = "Zed language server adapter for Suprnova LSP."
 publish = false
 
 [lib]

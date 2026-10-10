@@ -8,7 +8,7 @@ use rg_std::UniqueVec;
 use super::target::NavigationTargetProjection;
 use crate::{Analysis, model::NavigationTarget, source_symbol::SourceSymbolResolver};
 
-/// Implements goto-implementation with the facts rust-glancer already collects.
+/// Implements goto-implementation with the facts suprnova-lsp already collects.
 ///
 /// The query deliberately returns concrete source declarations only: impl blocks for types/traits
 /// and concrete methods for trait-method declarations or calls. It avoids inventing targets for

@@ -374,7 +374,7 @@ class Diagnostic:
             if not no_build:
                 build = runner.build_spec(runner.RunnerOptions(build_profile="release"))
                 await command("build", build.command, [*build.args, "--locked", "--offline"], env=build_environment, timeout=20 * 60_000)
-            binary = getattr(self, "binary", None) or runner.rust_glancer_binary("release")
+            binary = getattr(self, "binary", None) or runner.suprnova_lsp_binary("release")
             identity["binary"] = str(binary)
             identity["binarySha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
             if getattr(self, "compiler_seed_manifest", None):
@@ -883,7 +883,7 @@ if __name__ == "__main__":
                 parser.error("--idle-pairs requires --baseline-manifest and --workload generated-captured, using the managed candidate binary")
             observer.baseline_manifest = options.baseline_manifest.resolve(strict=True)
             runner = helpers.module("idle_pair_runner", ROOT / "tools/agent-debug.py")
-            observer.candidate_binary = runner.rust_glancer_binary("release")
+            observer.candidate_binary = runner.suprnova_lsp_binary("release")
         if options.inner_trace:
             observer.log_filter += ",rg_body_ir::build::current=trace,rg_body_ir::resolution=trace,rg_project::storage::loaders=trace"
         asyncio.run(observer.run(options.mode or MODES, options.no_build, options.nofile_soft, options.workload))

@@ -17,7 +17,7 @@
 //! but their standard LSP encoding also lives in `work_done_progress`.
 
 mod rust_analyzer;
-mod rust_glancer;
+mod suprnova_lsp;
 pub(crate) mod work_done_progress;
 
 use std::{
@@ -30,7 +30,7 @@ use rg_lsp_proto::{DeferredIndexingOutcome, IndexingProgress, ProjectInitializat
 use tokio::sync::Mutex;
 use tower_lsp_server::{Client as LspClient, gen_lsp_types::ClientCapabilities};
 
-pub(crate) use self::rust_glancer::{ActiveWorkspaceState, ActiveWorkspaceStatus};
+pub(crate) use self::suprnova_lsp::{ActiveWorkspaceState, ActiveWorkspaceStatus};
 use self::work_done_progress::WorkspaceProgressState;
 
 /// Client presentation features negotiated during LSP initialization.
@@ -160,7 +160,7 @@ impl ClientStatusPublisher {
     /// Publish the workspace selected by document routing through Suprnova LSP's private protocol.
     pub(crate) async fn active_workspace_changed(&self, status: Option<ActiveWorkspaceStatus>) {
         if let Some(status) = status {
-            rust_glancer::active_workspace_changed(&self.lsp_client, &status).await;
+            suprnova_lsp::active_workspace_changed(&self.lsp_client, &status).await;
         }
     }
 
@@ -207,7 +207,7 @@ impl ClientStatusPublisher {
 
         // The private event is an independent compatibility contract. In particular, it is still
         // sent when a late engine callback no longer changes the aggregate lifecycle above.
-        rust_glancer::deferred_indexing_started(&self.lsp_client, root).await;
+        suprnova_lsp::deferred_indexing_started(&self.lsp_client, root).await;
     }
 
     /// Store and render progress only for the deferred generation that is still active.
@@ -296,7 +296,7 @@ impl ClientStatusPublisher {
             }
         }
 
-        rust_glancer::deferred_indexing_finished(&self.lsp_client, root, &outcome).await;
+        suprnova_lsp::deferred_indexing_finished(&self.lsp_client, root, &outcome).await;
     }
 
     async fn finish_workspace_indexing(
@@ -1087,7 +1087,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rust_glancer_notifications_remain_additive_without_negotiation() {
+    async fn suprnova_lsp_notifications_remain_additive_without_negotiation() {
         let (mut service, mut socket) = LspService::new(|client| TestBackend {
             client_status: ClientStatusPublisher::new(client, ClientStatusCapabilities::default()),
         });

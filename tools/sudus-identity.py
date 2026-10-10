@@ -42,11 +42,11 @@ def source_observations(root=ROOT):
     files = lambda directory, suffix: list((root / directory).rglob(f"*{suffix}"))
     client = "\n".join(path.read_text() for path in files("editors/code/src", ".ts"))
     server = "\n".join(path.read_text() for path in files("crates/lsp", ".rs") if "tests" not in path.parts)
-    log = (root / "crates/rust-glancer/src/logging.rs").read_text()
-    cli = (root / "crates/rust-glancer/src/main.rs").read_text()
+    log = (root / "crates/suprnova-lsp/src/logging.rs").read_text()
+    cli = (root / "crates/suprnova-lsp/src/main.rs").read_text()
     cache = (root / "crates/engine/project/src/storage/cache/instance.rs").read_text()
     worker = (root / "crates/lsp/server/src/rustdoc_worker/task.rs").read_text()
-    cargo = tomllib.loads((root / "crates/rust-glancer/Cargo.toml").read_text())
+    cargo = tomllib.loads((root / "crates/suprnova-lsp/Cargo.toml").read_text())
     workspace_manifest = tomllib.loads((root / "Cargo.toml").read_text())["workspace"]
     workspace = workspace_manifest["package"]
     properties = package["contributes"]["configuration"]["properties"]
@@ -57,8 +57,8 @@ def source_observations(root=ROOT):
         root / "Justfile", root / "editors/code/scripts/package-vsix.mjs",
         root / ".github/scripts/package_server_archive.py", *files(".github/workflows", ".yml"),
         *files(".vscode", ".json")])
-    # The separate Zed package keeps its internal name. Resolve Cargo selectors
-    # against manifests so an invented fork-prefixed name cannot pass this check.
+    # Resolve Cargo selectors against manifests, including the renamed Zed
+    # adapter, so stale workflow package names cannot pass this check.
     package_names = {tomllib.loads((root / member / "Cargo.toml").read_text())["package"]["name"]
                      for member in workspace_manifest["members"]}
     selected_packages = re.findall(r'(?<!\S)-p\s+([\w-]+)', entrypoints)
@@ -70,7 +70,25 @@ def source_observations(root=ROOT):
         f'std::env::var("{variable}")' in benchmark for variable in benchmark_variables)
     valid_benchmark_env = valid_benchmark_env and "RUST_GLANCER_BENCH_TARGETS" not in benchmark
     old_entrypoint = re.search(r'(?<![/\w])rust-glancer(?=[\s"\'`.-]|$)',
-                              entrypoints.replace("rust-glancer-zed", ""))
+                              entrypoints)
+    zed_manifest = tomllib.loads((root / "editors/zed/extension.toml").read_text())
+    zed_cargo = tomllib.loads((root / "editors/zed/Cargo.toml").read_text())
+    zed_server = (root / "editors/zed/src/server/mod.rs").read_text()
+    zed_names = zed_manifest.get("language_servers", {})
+    zed_identity = (zed_manifest.get("id") == "suprnova-lsp"
+        and zed_manifest.get("name") == "Suprnova LSP"
+        and set(zed_names) == {"suprnova-lsp"}
+        and zed_names["suprnova-lsp"].get("name") == "Suprnova LSP"
+        and zed_cargo["package"]["name"] == "suprnova-lsp-zed")
+    zed_release = (zed_manifest.get("repository") == "https://github.com/eas4ai/suprnova-lsp"
+        and zed_manifest.get("capabilities") == [{"kind": "download_file", "host": "github.com",
+            "path": ["eas4ai", "suprnova-lsp", "releases", "download", "**"]}]
+        and 'SERVER_BINARY: &str = "suprnova-lsp"' in zed_server
+        and 'GITHUB_REPOSITORY: &str = "eas4ai/suprnova-lsp"' in zed_server
+        and 'format!("suprnova-v{MANAGED_SERVER_VERSION}")' in zed_server
+        and '"suprnova-lsp-{MANAGED_SERVER_VERSION}-{}.tar.gz"' in zed_server)
+    project_identity = module("project_identity", root / ".github/scripts/check_project_identity.py")
+    current_identity = not project_identity.identity_failures(root)
     licenses = all(hashlib.sha256((root / name).read_bytes()).hexdigest() == digest
                    for name, digest in LICENSE_DIGESTS.items())
     identities = {
@@ -83,14 +101,14 @@ def source_observations(root=ROOT):
             and all(value in client and value in server for value in notifications)
             and "rust-glancer/" not in server and "rust-glancer.internal." not in server
             and "suprnova-lsp-log" in json.dumps(package["contributes"]["languages"])
-            and 'diagnosticCollectionName: "suprnova-lsp"' in client,
+            and 'diagnosticCollectionName: "suprnova-lsp"' in client and zed_identity,
         "IDN-003": cargo["package"]["name"] == "suprnova-lsp" and 'name = "suprnova-lsp"' in cli
             and 'name: "Suprnova LSP"' in server and '"SUPRNOVA_LSP_LOG"' in log
             and '"SUPRNOVA_LSP_ENGINE_ID"' in log and '"suprnova-lsp-log/v1"' in log
             and 'CACHE_DIR_NAME: &str = "suprnova_lsp"' in cache
             and '"target/suprnova-lsp/rustdoc"' in worker and '"rust-glancer"' not in client
             and not re.search(r'"(?:__)?RUST_GLANCER_[A-Z_]+"', client + server + log)
-            and valid_benchmark_env,
+            and valid_benchmark_env and zed_release,
         "IDN-004": package.get("repository", {}).get("url") == "https://github.com/eas4ai/suprnova-lsp"
             and workspace.get("repository") == "https://github.com/eas4ai/suprnova-lsp"
             and workspace.get("license") == "MIT OR Apache-2.0"
@@ -99,7 +117,8 @@ def source_observations(root=ROOT):
             and (root / "README.md").read_text().startswith("# Suprnova LSP")
             and (root / "editors/code/README.md").read_text().startswith("# Suprnova LSP")
             and "Rust Glancer" in (root / "README.md").read_text()
-            and "suprnova-lsp.rustdoc.inputs" in descriptions,
+            and "suprnova-lsp.rustdoc.inputs" in descriptions and zed_identity and zed_release
+            and current_identity,
     }
     return {"results": identities, "manifest": {key: package.get(key) for key in ["name", "displayName", "publisher", "repository"]}}
 
@@ -231,7 +250,7 @@ async def main():
         code, _ = await run("build", build.command, [*build.args, "--locked", "--offline"])
         if code != 0:
             raise ValueError("current server failed to build")
-        binary = runner.rust_glancer_binary("debug")
+        binary = runner.suprnova_lsp_binary("debug")
         manifest = json.loads((ROOT / "editors/code/package.json").read_text())
         prefix = "SUPRNOVA_LSP" if manifest["name"] == "suprnova-lsp" else "RUST_GLANCER"
         upstream = directory / "upstream-identity"

@@ -68,7 +68,7 @@ impl NormalizedSummary {
 pub(crate) struct NormalizedQueryExecution {
     label: &'static str,
     kind: QueryKind,
-    rust_glancer: NormalizedServerOutcome,
+    suprnova_lsp: NormalizedServerOutcome,
     rust_analyzer: NormalizedServerOutcome,
 }
 
@@ -77,11 +77,11 @@ impl NormalizedQueryExecution {
         Self {
             label: query.label(),
             kind: query.kind(),
-            rust_glancer: NormalizedServerOutcome::from_raw(
+            suprnova_lsp: NormalizedServerOutcome::from_raw(
                 fixture_root,
                 query.kind(),
                 query.target(),
-                query.outcome(ServerUnderTest::RustGlancer),
+                query.outcome(ServerUnderTest::SuprnovaLsp),
             ),
             rust_analyzer: NormalizedServerOutcome::from_raw(
                 fixture_root,
@@ -102,7 +102,7 @@ impl NormalizedQueryExecution {
 
     pub(crate) fn outcome(&self, server: ServerUnderTest) -> &NormalizedServerOutcome {
         match server {
-            ServerUnderTest::RustGlancer => &self.rust_glancer,
+            ServerUnderTest::SuprnovaLsp => &self.suprnova_lsp,
             ServerUnderTest::RustAnalyzer => &self.rust_analyzer,
         }
     }
@@ -111,13 +111,13 @@ impl NormalizedQueryExecution {
     pub(crate) fn test_new(
         label: &'static str,
         kind: QueryKind,
-        rust_glancer: NormalizedOutcome,
+        suprnova_lsp: NormalizedOutcome,
         rust_analyzer: NormalizedOutcome,
     ) -> Self {
         Self {
             label,
             kind,
-            rust_glancer: NormalizedServerOutcome::test_new(rust_glancer),
+            suprnova_lsp: NormalizedServerOutcome::test_new(suprnova_lsp),
             rust_analyzer: NormalizedServerOutcome::test_new(rust_analyzer),
         }
     }

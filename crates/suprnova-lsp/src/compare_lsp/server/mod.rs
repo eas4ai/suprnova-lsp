@@ -22,9 +22,9 @@ use crate::compare_lsp::{fixture::Fixture, lsp_client::RequestOutcome, query::Qu
 /// Two initialized servers that have opened the same fixture files.
 #[derive(Debug)]
 pub(crate) struct StartedServers {
-    rust_glancer_server: RunningServer,
+    suprnova_lsp_server: RunningServer,
     rust_analyzer_server: RunningServer,
-    rust_glancer_readiness: ServerReadiness,
+    suprnova_lsp_readiness: ServerReadiness,
     rust_analyzer_readiness: ServerReadiness,
     opened_files: usize,
 }
@@ -33,17 +33,17 @@ impl StartedServers {
     /// Spawn both servers and prepare them to answer the fixture query vector.
     pub(crate) async fn start(fixture: &Fixture) -> anyhow::Result<Self> {
         let source_paths = Self::unique_source_paths(fixture.query_cases());
-        let mut rust_glancer_server = RunningServer::spawn(ServerKind::RustGlancer).await?;
+        let mut suprnova_lsp_server = RunningServer::spawn(ServerKind::SuprnovaLsp).await?;
         let mut rust_analyzer_server = RunningServer::spawn(ServerKind::RustAnalyzer).await?;
 
-        let rust_glancer_readiness = rust_glancer_server
+        let suprnova_lsp_readiness = suprnova_lsp_server
             .initialize_fixture(fixture.root(), &source_paths)
             .await?;
         let rust_analyzer_readiness = rust_analyzer_server
             .initialize_fixture(fixture.root(), &source_paths)
             .await?;
-        let rust_glancer_readiness = rust_glancer_readiness.with_settle_latency(
-            rust_glancer_server
+        let suprnova_lsp_readiness = suprnova_lsp_readiness.with_settle_latency(
+            suprnova_lsp_server
                 .settle_after_readiness()
                 .await
                 .context("Waiting for suprnova-lsp post-ready settle failed")?,
@@ -62,7 +62,7 @@ impl StartedServers {
                 let text = fixture
                     .editor_source_text(source_path)
                     .context("Preparing dirty compare-lsp editor source failed")?;
-                rust_glancer_server
+                suprnova_lsp_server
                     .change_source_file(fixture.root(), source_path, text.clone())
                     .await?;
                 rust_analyzer_server
@@ -76,37 +76,37 @@ impl StartedServers {
         }
 
         Ok(Self {
-            rust_glancer_server,
+            suprnova_lsp_server,
             rust_analyzer_server,
-            rust_glancer_readiness,
+            suprnova_lsp_readiness,
             rust_analyzer_readiness,
             opened_files: source_paths.len(),
         })
     }
 
-    pub(crate) fn rust_glancer_readiness(&self) -> &ServerReadiness {
-        &self.rust_glancer_readiness
+    pub(crate) fn suprnova_lsp_readiness(&self) -> &ServerReadiness {
+        &self.suprnova_lsp_readiness
     }
 
     pub(crate) fn rust_analyzer_readiness(&self) -> &ServerReadiness {
         &self.rust_analyzer_readiness
     }
 
-    pub(crate) fn rust_glancer_command_label(&self) -> &str {
-        self.rust_glancer_server.command_label()
+    pub(crate) fn suprnova_lsp_command_label(&self) -> &str {
+        self.suprnova_lsp_server.command_label()
     }
 
     pub(crate) fn rust_analyzer_command_label(&self) -> &str {
         self.rust_analyzer_server.command_label()
     }
 
-    pub(crate) async fn request_rust_glancer(
+    pub(crate) async fn request_suprnova_lsp(
         &mut self,
         method: &'static str,
         params: Value,
         timeout: Duration,
     ) -> RequestOutcome {
-        self.rust_glancer_server
+        self.suprnova_lsp_server
             .request(method, params, timeout)
             .await
     }
@@ -128,18 +128,18 @@ impl StartedServers {
 
     /// Ask both servers to shut down, even if one side reports an error first.
     pub(crate) async fn shutdown(self) -> anyhow::Result<()> {
-        let (rust_glancer_shutdown, rust_analyzer_shutdown) = futures::future::join(
-            self.rust_glancer_server.shutdown(),
+        let (suprnova_lsp_shutdown, rust_analyzer_shutdown) = futures::future::join(
+            self.suprnova_lsp_server.shutdown(),
             self.rust_analyzer_server.shutdown(),
         )
         .await;
-        match (rust_glancer_shutdown, rust_analyzer_shutdown) {
+        match (suprnova_lsp_shutdown, rust_analyzer_shutdown) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
-            (Err(rust_glancer_error), Err(rust_analyzer_error)) => {
+            (Err(suprnova_lsp_error), Err(rust_analyzer_error)) => {
                 anyhow::bail!(
                     "both LSP servers failed during shutdown\n\
-                     suprnova-lsp: {rust_glancer_error}\n\
+                     suprnova-lsp: {suprnova_lsp_error}\n\
                      rust-analyzer: {rust_analyzer_error}",
                 );
             }

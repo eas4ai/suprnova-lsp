@@ -5,27 +5,27 @@ use crate::compare_lsp::normalization::NormalizedOutcome;
 
 #[derive(Debug)]
 pub(crate) struct NonComparableComparison {
-    rust_glancer: OutcomeStatus,
+    suprnova_lsp: OutcomeStatus,
     rust_analyzer: OutcomeStatus,
-    rust_glancer_detail: Option<String>,
+    suprnova_lsp_detail: Option<String>,
     rust_analyzer_detail: Option<String>,
 }
 
 impl NonComparableComparison {
-    pub(super) fn new(rust_glancer: &NormalizedOutcome, rust_analyzer: &NormalizedOutcome) -> Self {
+    pub(super) fn new(suprnova_lsp: &NormalizedOutcome, rust_analyzer: &NormalizedOutcome) -> Self {
         Self {
-            rust_glancer: OutcomeStatus::from_outcome(rust_glancer),
+            suprnova_lsp: OutcomeStatus::from_outcome(suprnova_lsp),
             rust_analyzer: OutcomeStatus::from_outcome(rust_analyzer),
-            rust_glancer_detail: Self::outcome_detail(rust_glancer),
+            suprnova_lsp_detail: Self::outcome_detail(suprnova_lsp),
             rust_analyzer_detail: Self::outcome_detail(rust_analyzer),
         }
     }
 
     pub(crate) fn metrics(&self) -> NonComparableMetrics {
         NonComparableMetrics {
-            rust_glancer_status: self.rust_glancer,
+            suprnova_lsp_status: self.suprnova_lsp,
             rust_analyzer_status: self.rust_analyzer,
-            rust_glancer_detail: self.rust_glancer_detail.clone(),
+            suprnova_lsp_detail: self.suprnova_lsp_detail.clone(),
             rust_analyzer_detail: self.rust_analyzer_detail.clone(),
         }
     }

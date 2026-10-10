@@ -110,6 +110,6 @@ upgrade can affect that PR's deltas; after merging, the next successful main run
 publishes the updated baseline for subsequent PRs.
 
 When updating this fixture, audit query tokens and whole-file/workspace cases in
-`crates/rust-glancer/src/compare_lsp/query/mod.rs`. Numeric positions can remain
+`crates/suprnova-lsp/src/compare_lsp/query/mod.rs`. Numeric positions can remain
 valid while targeting the wrong symbol. Preserve coverage; comparison scores
 still include real gaps in supported behavior.

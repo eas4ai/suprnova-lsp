@@ -1,4 +1,4 @@
-//! Lightweight scoped profiling for rust-glancer internals.
+//! Lightweight scoped profiling for suprnova-lsp internals.
 //!
 //! The crate separates the static profiling vocabulary from runtime collection. Instrumentation
 //! call sites record by path, while descriptors decide which selector enables that path and how the

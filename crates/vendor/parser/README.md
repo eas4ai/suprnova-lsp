@@ -1,6 +1,6 @@
 ## rg_parser
 
-Rust Glancer fork of [`parser`](https://github.com/rust-lang/rust-analyzer/tree/master/crates/parser) crate.
+Suprnova LSP fork of [`parser`](https://github.com/rust-lang/rust-analyzer/tree/master/crates/parser) crate.
 It is a vendored part, originally a part of the `rust-analyzer` project, licensed under [MIT](https://github.com/rust-lang/rust-analyzer/blob/master/LICENSE-MIT) and [Apache 2.0](https://github.com/rust-lang/rust-analyzer/blob/master/LICENSE-APACHE) license.
 
 ## Upstream and regeneration

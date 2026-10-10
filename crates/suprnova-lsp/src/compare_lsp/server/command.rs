@@ -14,14 +14,14 @@ const RUST_ANALYZER_ENV: &str = "SUPRNOVA_LSP_COMPARE_LSP_RUST_ANALYZER";
 /// Server implementation used for one side of the comparison.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum ServerKind {
-    RustGlancer,
+    SuprnovaLsp,
     RustAnalyzer,
 }
 
 impl ServerKind {
     pub(super) fn display_name(self) -> &'static str {
         match self {
-            Self::RustGlancer => "suprnova-lsp",
+            Self::SuprnovaLsp => "suprnova-lsp",
             Self::RustAnalyzer => "rust-analyzer",
         }
     }
@@ -29,7 +29,7 @@ impl ServerKind {
     /// Resolve the executable and arguments used to start this server.
     pub(super) fn command_spec(self) -> anyhow::Result<CommandSpec> {
         match self {
-            Self::RustGlancer => {
+            Self::SuprnovaLsp => {
                 let executable = env::current_exe()
                     .context("Resolving current suprnova-lsp executable failed")?;
                 Ok(CommandSpec::new(executable, [OsString::from("lsp")]))
@@ -45,7 +45,7 @@ impl ServerKind {
     /// Disable background work that would make query latency less comparable.
     pub(super) fn initialization_options(self) -> Value {
         match self {
-            Self::RustGlancer => json!({
+            Self::SuprnovaLsp => json!({
                 "diagnostics": {
                     "onStartup": false,
                     "onSave": false,

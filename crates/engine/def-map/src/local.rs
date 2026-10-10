@@ -209,7 +209,7 @@ pub enum MacroDefinitionPayload {
         #[shrink(skip)]
         body: Option<TopSubtree>,
     },
-    /// Proc macros are visible definitions, but rust-glancer never executes their host code.
+    /// Proc macros are visible definitions, but suprnova-lsp never executes their host code.
     ///
     /// The implementation is an ordinary value-namespace function inside the defining crate. It
     /// stays separate from the exported macro identity so semantic lowering and downstream lookup

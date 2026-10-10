@@ -1,4 +1,4 @@
-//! Interned short text used by rust-glancer's semantic indexes.
+//! Interned short text used by suprnova-lsp's semantic indexes.
 //!
 //! `Name` deliberately keeps rendering and comparison cheap without requiring query callers to
 //! carry an interner. The interner is a reuse table; cloned `Name`s retain the shared string

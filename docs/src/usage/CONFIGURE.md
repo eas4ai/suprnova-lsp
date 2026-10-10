@@ -1,6 +1,6 @@
 # Configuration
 
-Rust Glancer comes with a configuration that is meant to be optimal for casual use:
+Suprnova LSP comes with a configuration that is meant to be optimal for casual use:
 
 - All packages are offloaded to filesystem (minimal RAM usage).
 - Bodies are only indexed for the workspace (dependencies receive semantic analysis only).
@@ -18,7 +18,7 @@ Tweaking options are covered from the more "traditional" configuration options.
 You can configure all the typical things you might want to configure:
 
 - Command for diagnostics and arguments for it (`cargo check` by default).
-- Enable/disable diagnostics on startup / on save. Keeping them disabled makes Rust Glancer indexing flow feel significantly faster, so it can be reasonable if you use something else to observe diagnostics, e.g. [bacon](https://github.com/canop/bacon).
+- Enable/disable diagnostics on startup / on save. Keeping them disabled makes Suprnova LSP indexing flow feel significantly faster, so it can be reasonable if you use something else to observe diagnostics, e.g. [bacon](https://github.com/canop/bacon).
 - Configure cargo features / enable all features / disable default features.
 - Configure cargo target triple, cfg atoms (e.g. custom `cfg` attributes), and `cfg(test)`.
 - Extra env vars for cargo commands (e.g. `RUSTFLAGS`)
@@ -37,7 +37,7 @@ For example:
 
 ```json
 {
-  "rust-glancer.cargo.overrides": [
+  "suprnova-lsp.cargo.overrides": [
     {
       "path": "firmware",
       "target": "riscv32imac-unknown-none-elf",
@@ -72,5 +72,5 @@ size only if needed.
 Following settings _can_ be changed, but probably shouldn't.
 
 - `Cache: Package Residency`: you can make it so that not everything is offloaded to the filesystem.
-  In theory, it can make Rust Glancer faster. In practice, if you don't care about memory usage,
+  In theory, it can make Suprnova LSP faster. In practice, if you don't care about memory usage,
   `rust-analyzer` will probably work better for you.

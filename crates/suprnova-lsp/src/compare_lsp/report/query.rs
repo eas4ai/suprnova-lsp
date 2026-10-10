@@ -23,7 +23,7 @@ pub(super) struct QueryReport {
     label: String,
     method: String,
     equivalence_scored: bool,
-    rust_glancer_ms: f64,
+    suprnova_lsp_ms: f64,
     rust_analyzer_ms: f64,
     result: QueryResultReport,
 }
@@ -35,7 +35,7 @@ impl QueryReport {
             label: query.label().to_string(),
             method: method.lsp_method().to_string(),
             equivalence_scored: method.is_equivalence_scored(),
-            rust_glancer_ms: duration_ms(query.rust_glancer_latency()),
+            suprnova_lsp_ms: duration_ms(query.suprnova_lsp_latency()),
             rust_analyzer_ms: duration_ms(query.rust_analyzer_latency()),
             result: QueryResultReport::capture(query.result()),
         }
@@ -143,7 +143,7 @@ impl QueryReport {
 
     fn slowest_queries(queries: &[Self]) -> Vec<&Self> {
         let mut slowest = queries.iter().collect::<Vec<_>>();
-        slowest.sort_by(|left, right| right.rust_glancer_ms.total_cmp(&left.rust_glancer_ms));
+        slowest.sort_by(|left, right| right.suprnova_lsp_ms.total_cmp(&left.suprnova_lsp_ms));
         slowest.truncate(HIGHLIGHT_LIMIT);
         slowest
     }
@@ -207,7 +207,7 @@ impl QueryReport {
         table
             .text_column("method")
             .text_column("query")
-            .duration_column_as("rust_glancer_ms", "suprnova-lsp")
+            .duration_column_as("suprnova_lsp_ms", "suprnova-lsp")
             .duration_column_as("rust_analyzer_ms", "rust-analyzer")
             .text_column("outcome")
             .column_as(
@@ -252,7 +252,7 @@ impl QueryReport {
                 ReportAlign::Right,
                 Some(ReportUnit::Percent),
             )
-            .count_column("rust_glancer_count")
+            .count_column("suprnova_lsp_count")
             .count_column("rust_analyzer_count")
             .count_column("matched")
             .count_column("compatible")
@@ -276,7 +276,7 @@ impl QueryReport {
                 ReportAlign::Right,
                 Some(ReportUnit::Percent),
             )
-            .count_column("rust_glancer_count")
+            .count_column("suprnova_lsp_count")
             .count_column("rust_analyzer_count")
             .count_column("matched")
             .count_column("missing");
@@ -298,7 +298,7 @@ impl QueryReport {
                 ReportAlign::Right,
                 Some(ReportUnit::Percent),
             )
-            .count_column("rust_glancer_count")
+            .count_column("suprnova_lsp_count")
             .count_column("rust_analyzer_count")
             .count_column("matched")
             .count_column("extra");
@@ -308,7 +308,7 @@ impl QueryReport {
         table.row(|row| {
             row.text("method", &self.method)
                 .text("query", &self.label)
-                .duration_ms("rust_glancer_ms", self.rust_glancer_ms)
+                .duration_ms("suprnova_lsp_ms", self.suprnova_lsp_ms)
                 .duration_ms("rust_analyzer_ms", self.rust_analyzer_ms)
                 .text("outcome", self.result.kind());
 
@@ -342,10 +342,10 @@ impl QueryReport {
     fn configure_query_table(table: &mut ReportTableBuilder) {
         table
             .text_column("query")
-            .duration_column_as("rust_glancer_ms", "suprnova-lsp")
+            .duration_column_as("suprnova_lsp_ms", "suprnova-lsp")
             .duration_column_as("rust_analyzer_ms", "rust-analyzer")
             .text_column("outcome")
-            .count_column("rust_glancer_count")
+            .count_column("suprnova_lsp_count")
             .count_column("rust_analyzer_count")
             .count_column("matched")
             .count_column("compatible")
@@ -374,7 +374,7 @@ impl QueryReport {
     fn append_query_row(&self, table: &mut ReportTableBuilder) {
         table.row(|row| {
             row.text("query", &self.label)
-                .duration_ms("rust_glancer_ms", self.rust_glancer_ms)
+                .duration_ms("suprnova_lsp_ms", self.suprnova_lsp_ms)
                 .duration_ms("rust_analyzer_ms", self.rust_analyzer_ms)
                 .text("outcome", self.result.kind());
 
@@ -410,8 +410,8 @@ impl QueryReport {
         table
             .text_column("method")
             .text_column("query")
-            .text_column("rust_glancer")
-            .text_column("rust_glancer_detail")
+            .text_column("suprnova_lsp")
+            .text_column("suprnova_lsp_detail")
             .text_column("rust_analyzer")
             .text_column("rust_analyzer_detail");
     }
@@ -424,10 +424,10 @@ impl QueryReport {
         table.row(|row| {
             row.text("method", &self.method)
                 .text("query", &self.label)
-                .text("rust_glancer", &non_comparable.rust_glancer_status)
+                .text("suprnova_lsp", &non_comparable.suprnova_lsp_status)
                 .text(
-                    "rust_glancer_detail",
-                    non_comparable.rust_glancer_detail.as_deref().unwrap_or(""),
+                    "suprnova_lsp_detail",
+                    non_comparable.suprnova_lsp_detail.as_deref().unwrap_or(""),
                 )
                 .text("rust_analyzer", &non_comparable.rust_analyzer_status)
                 .text(
@@ -519,7 +519,7 @@ impl QueryResultReport {
 
 #[derive(Debug, Clone, Copy)]
 struct QueryCounts {
-    rust_glancer_count: usize,
+    suprnova_lsp_count: usize,
     rust_analyzer_count: usize,
     matched_count: usize,
     compatible_count: usize,
@@ -533,8 +533,8 @@ struct QueryCounts {
 impl QueryCounts {
     fn append_query_cells(self, row: &mut ReportRowBuilder) {
         row.value(
-            "rust_glancer_count",
-            ReportValue::count(self.rust_glancer_count),
+            "suprnova_lsp_count",
+            ReportValue::count(self.suprnova_lsp_count),
         )
         .value(
             "rust_analyzer_count",
@@ -564,8 +564,8 @@ impl QueryCounts {
     fn append_score_table_cells(self, row: &mut ReportRowBuilder) {
         self.append_score_cells(row);
         row.value(
-            "rust_glancer_count",
-            ReportValue::count(self.rust_glancer_count),
+            "suprnova_lsp_count",
+            ReportValue::count(self.suprnova_lsp_count),
         )
         .value(
             "rust_analyzer_count",
@@ -584,8 +584,8 @@ impl QueryCounts {
         )
         .value("recall", optional_percent(self.recall_percent))
         .value(
-            "rust_glancer_count",
-            ReportValue::count(self.rust_glancer_count),
+            "suprnova_lsp_count",
+            ReportValue::count(self.suprnova_lsp_count),
         )
         .value(
             "rust_analyzer_count",
@@ -602,8 +602,8 @@ impl QueryCounts {
         )
         .value("precision", optional_percent(self.precision_percent))
         .value(
-            "rust_glancer_count",
-            ReportValue::count(self.rust_glancer_count),
+            "suprnova_lsp_count",
+            ReportValue::count(self.suprnova_lsp_count),
         )
         .value(
             "rust_analyzer_count",
@@ -617,7 +617,7 @@ impl QueryCounts {
 impl From<&LocationQueryReport> for QueryCounts {
     fn from(report: &LocationQueryReport) -> Self {
         Self {
-            rust_glancer_count: report.rust_glancer_count,
+            suprnova_lsp_count: report.suprnova_lsp_count,
             rust_analyzer_count: report.rust_analyzer_count,
             matched_count: report.matched_count,
             compatible_count: report.compatible_count,
@@ -633,7 +633,7 @@ impl From<&LocationQueryReport> for QueryCounts {
 impl From<&RangeQueryReport> for QueryCounts {
     fn from(report: &RangeQueryReport) -> Self {
         Self {
-            rust_glancer_count: report.rust_glancer_count,
+            suprnova_lsp_count: report.suprnova_lsp_count,
             rust_analyzer_count: report.rust_analyzer_count,
             matched_count: report.matched_count,
             compatible_count: report.compatible_count,
@@ -649,7 +649,7 @@ impl From<&RangeQueryReport> for QueryCounts {
 impl From<&SymbolQueryReport> for QueryCounts {
     fn from(report: &SymbolQueryReport) -> Self {
         Self {
-            rust_glancer_count: report.rust_glancer_count,
+            suprnova_lsp_count: report.suprnova_lsp_count,
             rust_analyzer_count: report.rust_analyzer_count,
             matched_count: report.matched_count,
             compatible_count: report.compatible_count,
@@ -664,16 +664,16 @@ impl From<&SymbolQueryReport> for QueryCounts {
 
 #[derive(Debug, Serialize)]
 struct LocationQueryReport {
-    rust_glancer_count: usize,
+    suprnova_lsp_count: usize,
     rust_analyzer_count: usize,
     matched_count: usize,
     compatible_count: usize,
     missing_count: usize,
     extra_count: usize,
-    rust_glancer_unmapped_count: usize,
+    suprnova_lsp_unmapped_count: usize,
     rust_analyzer_unmapped_count: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    rust_glancer_unmapped: Vec<String>,
+    suprnova_lsp_unmapped: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     rust_analyzer_unmapped: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -692,15 +692,15 @@ impl LocationQueryReport {
 impl From<MappedSetComparisonMetrics> for LocationQueryReport {
     fn from(metrics: MappedSetComparisonMetrics) -> Self {
         Self {
-            rust_glancer_count: metrics.set.rust_glancer_count,
+            suprnova_lsp_count: metrics.set.suprnova_lsp_count,
             rust_analyzer_count: metrics.set.rust_analyzer_count,
             matched_count: metrics.set.matched_count,
             compatible_count: metrics.set.compatible_count,
             missing_count: metrics.set.missing_count,
             extra_count: metrics.set.extra_count,
-            rust_glancer_unmapped_count: metrics.rust_glancer_unmapped_count,
+            suprnova_lsp_unmapped_count: metrics.suprnova_lsp_unmapped_count,
             rust_analyzer_unmapped_count: metrics.rust_analyzer_unmapped_count,
-            rust_glancer_unmapped: metrics.rust_glancer_unmapped,
+            suprnova_lsp_unmapped: metrics.suprnova_lsp_unmapped,
             rust_analyzer_unmapped: metrics.rust_analyzer_unmapped,
             recall_percent: metrics.set.recall_percent,
             precision_percent: metrics.set.precision_percent,
@@ -711,7 +711,7 @@ impl From<MappedSetComparisonMetrics> for LocationQueryReport {
 
 #[derive(Debug, Serialize)]
 struct RangeQueryReport {
-    rust_glancer_count: usize,
+    suprnova_lsp_count: usize,
     rust_analyzer_count: usize,
     matched_count: usize,
     compatible_count: usize,
@@ -733,7 +733,7 @@ impl RangeQueryReport {
 impl From<SetComparisonMetrics> for RangeQueryReport {
     fn from(metrics: SetComparisonMetrics) -> Self {
         Self {
-            rust_glancer_count: metrics.rust_glancer_count,
+            suprnova_lsp_count: metrics.suprnova_lsp_count,
             rust_analyzer_count: metrics.rust_analyzer_count,
             matched_count: metrics.matched_count,
             compatible_count: metrics.compatible_count,
@@ -748,16 +748,16 @@ impl From<SetComparisonMetrics> for RangeQueryReport {
 
 #[derive(Debug, Serialize)]
 struct SymbolQueryReport {
-    rust_glancer_count: usize,
+    suprnova_lsp_count: usize,
     rust_analyzer_count: usize,
     matched_count: usize,
     compatible_count: usize,
     missing_count: usize,
     extra_count: usize,
-    rust_glancer_unmapped_count: usize,
+    suprnova_lsp_unmapped_count: usize,
     rust_analyzer_unmapped_count: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    rust_glancer_unmapped: Vec<String>,
+    suprnova_lsp_unmapped: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     rust_analyzer_unmapped: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -776,15 +776,15 @@ impl SymbolQueryReport {
 impl From<MappedSetComparisonMetrics> for SymbolQueryReport {
     fn from(metrics: MappedSetComparisonMetrics) -> Self {
         Self {
-            rust_glancer_count: metrics.set.rust_glancer_count,
+            suprnova_lsp_count: metrics.set.suprnova_lsp_count,
             rust_analyzer_count: metrics.set.rust_analyzer_count,
             matched_count: metrics.set.matched_count,
             compatible_count: metrics.set.compatible_count,
             missing_count: metrics.set.missing_count,
             extra_count: metrics.set.extra_count,
-            rust_glancer_unmapped_count: metrics.rust_glancer_unmapped_count,
+            suprnova_lsp_unmapped_count: metrics.suprnova_lsp_unmapped_count,
             rust_analyzer_unmapped_count: metrics.rust_analyzer_unmapped_count,
-            rust_glancer_unmapped: metrics.rust_glancer_unmapped,
+            suprnova_lsp_unmapped: metrics.suprnova_lsp_unmapped,
             rust_analyzer_unmapped: metrics.rust_analyzer_unmapped,
             recall_percent: metrics.set.recall_percent,
             precision_percent: metrics.set.precision_percent,
@@ -795,10 +795,10 @@ impl From<MappedSetComparisonMetrics> for SymbolQueryReport {
 
 #[derive(Debug, Serialize)]
 struct NonComparableQueryReport {
-    rust_glancer_status: String,
+    suprnova_lsp_status: String,
     rust_analyzer_status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    rust_glancer_detail: Option<String>,
+    suprnova_lsp_detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     rust_analyzer_detail: Option<String>,
 }
@@ -806,9 +806,9 @@ struct NonComparableQueryReport {
 impl From<NonComparableMetrics> for NonComparableQueryReport {
     fn from(metrics: NonComparableMetrics) -> Self {
         Self {
-            rust_glancer_status: metrics.rust_glancer_status.label().to_string(),
+            suprnova_lsp_status: metrics.suprnova_lsp_status.label().to_string(),
             rust_analyzer_status: metrics.rust_analyzer_status.label().to_string(),
-            rust_glancer_detail: metrics.rust_glancer_detail,
+            suprnova_lsp_detail: metrics.suprnova_lsp_detail,
             rust_analyzer_detail: metrics.rust_analyzer_detail,
         }
     }

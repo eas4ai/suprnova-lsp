@@ -231,7 +231,7 @@ class GuardedCurrentBuild(unittest.TestCase):
             RunnerOptions=lambda **kwargs: SimpleNamespace(**kwargs),
             build_spec=Mock(side_effect=lambda options: SimpleNamespace(command='cargo', args=self.args[:-2].copy())),
             CommandSpec=lambda command, args: SimpleNamespace(command=command, args=args),
-            rust_glancer_binary=Mock(return_value=self.binary),
+            suprnova_lsp_binary=Mock(return_value=self.binary),
             observe_command=AsyncMock(return_value=(self.outcome, 'actual controlled compiler output')),
             write_json=lambda path, value: Path(path).write_text(json.dumps(value)),
             summarize_cleanup=lambda commands: {'status': 'verified', 'runs': len(commands), 'verifiedRuns': len(commands)},
@@ -251,7 +251,7 @@ class GuardedCurrentBuild(unittest.TestCase):
         self.assertTrue(Path(proof['report']).is_file())
         self.runner.build_spec.assert_called_once()
         self.assertEqual(self.runner.build_spec.call_args.args[0].build_profile, 'release')
-        self.runner.rust_glancer_binary.assert_called_once_with('release')
+        self.runner.suprnova_lsp_binary.assert_called_once_with('release')
         self.runner.observe_command.assert_awaited_once()
         spec, cwd, environment, output, deadline = self.runner.observe_command.await_args.args
         self.assertEqual((spec.command, spec.args), ('cargo', self.args))

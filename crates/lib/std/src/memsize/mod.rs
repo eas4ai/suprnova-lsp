@@ -1,4 +1,4 @@
-//! Lightweight, approximate memory attribution for rust-glancer data structures.
+//! Lightweight, approximate memory attribution for suprnova-lsp data structures.
 //!
 //! The goal is not allocator-perfect accounting. We want stable, tagged measurements that explain
 //! which retained phase data deserves optimization attention.

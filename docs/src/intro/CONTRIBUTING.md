@@ -15,7 +15,7 @@ Some basic rules:
 
 Small typo fixes, non-functional changes, unsolicited refactorings reduce my capacity to actually
 work on the project. I would love to see contributions, but they must be a combination of:
-1. Real reason behind them (you used rust glancer, had an issue of sort, and decided to fix it), and
+1. Real reason behind them (you used Suprnova LSP, had an issue of sort, and decided to fix it), and
 2. Personal effort (you take full responsibility for the PR).
 
 ## No unsolicited features

@@ -13,24 +13,24 @@ use crate::compare_lsp::{
 
 #[derive(Debug)]
 pub(crate) struct SymbolComparison {
-    rust_glancer_count: usize,
+    suprnova_lsp_count: usize,
     rust_analyzer_count: usize,
     matched: Vec<NormalizedSymbol>,
     compatible: Vec<(NormalizedSymbol, NormalizedSymbol)>,
     missing: Vec<NormalizedSymbol>,
     extra: Vec<NormalizedSymbol>,
-    rust_glancer_unmapped_count: usize,
+    suprnova_lsp_unmapped_count: usize,
     rust_analyzer_unmapped_count: usize,
-    rust_glancer_unmapped: Vec<String>,
+    suprnova_lsp_unmapped: Vec<String>,
     rust_analyzer_unmapped: Vec<String>,
 }
 
 impl SymbolComparison {
     pub(super) fn new(
-        rust_glancer: &NormalizedSymbolSet,
+        suprnova_lsp: &NormalizedSymbolSet,
         rust_analyzer: &NormalizedSymbolSet,
     ) -> Self {
-        let rust_glancer_symbols = rust_glancer
+        let suprnova_lsp_symbols = suprnova_lsp
             .symbols()
             .iter()
             .cloned()
@@ -41,46 +41,46 @@ impl SymbolComparison {
             .cloned()
             .collect::<BTreeSet<_>>();
 
-        let mut matched = rust_glancer_symbols
+        let mut matched = suprnova_lsp_symbols
             .intersection(&rust_analyzer_symbols)
             .cloned()
             .collect::<Vec<_>>();
         let mut missing = rust_analyzer_symbols
-            .difference(&rust_glancer_symbols)
+            .difference(&suprnova_lsp_symbols)
             .cloned()
             .collect::<Vec<_>>();
-        let unmatched_extra = rust_glancer_symbols
+        let unmatched_extra = suprnova_lsp_symbols
             .difference(&rust_analyzer_symbols)
             .cloned()
             .collect::<Vec<_>>();
 
         let mut compatible = Vec::new();
         let mut extra = Vec::new();
-        for rust_glancer_symbol in unmatched_extra {
+        for suprnova_lsp_symbol in unmatched_extra {
             let Some(reference_index) = missing
                 .iter()
-                .position(|reference| rust_glancer_symbol.is_no_worse_match_for(reference))
+                .position(|reference| suprnova_lsp_symbol.is_no_worse_match_for(reference))
             else {
-                extra.push(rust_glancer_symbol);
+                extra.push(suprnova_lsp_symbol);
                 continue;
             };
 
             let rust_analyzer_symbol = missing.remove(reference_index);
-            matched.push(rust_glancer_symbol.clone());
-            compatible.push((rust_glancer_symbol, rust_analyzer_symbol));
+            matched.push(suprnova_lsp_symbol.clone());
+            compatible.push((suprnova_lsp_symbol, rust_analyzer_symbol));
         }
         matched.sort();
 
         Self {
-            rust_glancer_count: rust_glancer_symbols.len(),
+            suprnova_lsp_count: suprnova_lsp_symbols.len(),
             rust_analyzer_count: rust_analyzer_symbols.len(),
             matched,
             compatible,
             missing,
             extra,
-            rust_glancer_unmapped_count: rust_glancer.unmapped_count(),
+            suprnova_lsp_unmapped_count: suprnova_lsp.unmapped_count(),
             rust_analyzer_unmapped_count: rust_analyzer.unmapped_count(),
-            rust_glancer_unmapped: rust_glancer.unmapped_summaries(),
+            suprnova_lsp_unmapped: suprnova_lsp.unmapped_summaries(),
             rust_analyzer_unmapped: rust_analyzer.unmapped_summaries(),
         }
     }
@@ -88,16 +88,16 @@ impl SymbolComparison {
     pub(crate) fn metrics(&self) -> MappedSetComparisonMetrics {
         MappedSetComparisonMetrics {
             set: SetComparisonMetrics::new_with_compatible_matches(
-                self.rust_glancer_count,
+                self.suprnova_lsp_count,
                 self.rust_analyzer_count,
                 self.matched.len() - self.compatible.len(),
                 self.compatible.len(),
                 self.missing.len(),
                 self.extra.len(),
             ),
-            rust_glancer_unmapped_count: self.rust_glancer_unmapped_count,
+            suprnova_lsp_unmapped_count: self.suprnova_lsp_unmapped_count,
             rust_analyzer_unmapped_count: self.rust_analyzer_unmapped_count,
-            rust_glancer_unmapped: self.rust_glancer_unmapped.clone(),
+            suprnova_lsp_unmapped: self.suprnova_lsp_unmapped.clone(),
             rust_analyzer_unmapped: self.rust_analyzer_unmapped.clone(),
         }
     }
@@ -120,13 +120,13 @@ pub(crate) struct SymbolAggregate {
     query_count: usize,
     comparable_count: usize,
     non_comparable_count: usize,
-    rust_glancer_symbols: usize,
+    suprnova_lsp_symbols: usize,
     rust_analyzer_symbols: usize,
     matched_symbols: usize,
     compatible_symbols: usize,
     missing_symbols: usize,
     extra_symbols: usize,
-    rust_glancer_unmapped_symbols: usize,
+    suprnova_lsp_unmapped_symbols: usize,
     rust_analyzer_unmapped_symbols: usize,
 }
 
@@ -136,13 +136,13 @@ impl SymbolAggregate {
         match query.result() {
             QueryComparisonResult::Symbols(comparison) => {
                 self.comparable_count += 1;
-                self.rust_glancer_symbols += comparison.rust_glancer_count;
+                self.suprnova_lsp_symbols += comparison.suprnova_lsp_count;
                 self.rust_analyzer_symbols += comparison.rust_analyzer_count;
                 self.matched_symbols += comparison.matched.len();
                 self.compatible_symbols += comparison.compatible.len();
                 self.missing_symbols += comparison.missing.len();
                 self.extra_symbols += comparison.extra.len();
-                self.rust_glancer_unmapped_symbols += comparison.rust_glancer_unmapped_count;
+                self.suprnova_lsp_unmapped_symbols += comparison.suprnova_lsp_unmapped_count;
                 self.rust_analyzer_unmapped_symbols += comparison.rust_analyzer_unmapped_count;
             }
             QueryComparisonResult::NonComparable(_) => self.non_comparable_count += 1,
@@ -165,14 +165,14 @@ impl SymbolAggregate {
     pub(crate) fn metrics(&self) -> MappedSetAggregateMetrics {
         MappedSetAggregateMetrics {
             set: SetComparisonMetrics::new_with_compatible_matches(
-                self.rust_glancer_symbols,
+                self.suprnova_lsp_symbols,
                 self.rust_analyzer_symbols,
                 self.matched_symbols - self.compatible_symbols,
                 self.compatible_symbols,
                 self.missing_symbols,
                 self.extra_symbols,
             ),
-            rust_glancer_unmapped_count: self.rust_glancer_unmapped_symbols,
+            suprnova_lsp_unmapped_count: self.suprnova_lsp_unmapped_symbols,
             rust_analyzer_unmapped_count: self.rust_analyzer_unmapped_symbols,
         }
     }
@@ -190,10 +190,10 @@ mod tests {
     #[test]
     fn accepts_method_as_a_more_specific_function_classification() {
         let range = NormalizedRange::test_new(8, 11, 8, 15);
-        let rust_glancer = symbols(vec![symbol(SymbolKind::Method, range)]);
+        let suprnova_lsp = symbols(vec![symbol(SymbolKind::Method, range)]);
         let rust_analyzer = symbols(vec![symbol(SymbolKind::Function, range)]);
 
-        let comparison = SymbolComparison::new(&rust_glancer, &rust_analyzer);
+        let comparison = SymbolComparison::new(&suprnova_lsp, &rust_analyzer);
         let metrics = comparison.metrics().set;
 
         assert_eq!(metrics.matched_count, 1);
@@ -205,10 +205,10 @@ mod tests {
     #[test]
     fn rejects_function_when_the_reference_knows_it_is_a_method() {
         let range = NormalizedRange::test_new(8, 11, 8, 15);
-        let rust_glancer = symbols(vec![symbol(SymbolKind::Function, range)]);
+        let suprnova_lsp = symbols(vec![symbol(SymbolKind::Function, range)]);
         let rust_analyzer = symbols(vec![symbol(SymbolKind::Method, range)]);
 
-        let comparison = SymbolComparison::new(&rust_glancer, &rust_analyzer);
+        let comparison = SymbolComparison::new(&suprnova_lsp, &rust_analyzer);
         let metrics = comparison.metrics().set;
 
         assert_eq!(metrics.matched_count, 0);
@@ -218,13 +218,13 @@ mod tests {
     }
 
     #[test]
-    fn keeps_broader_rust_glancer_symbol_ranges_as_divergences() {
+    fn keeps_broader_suprnova_lsp_symbol_ranges_as_divergences() {
         let focused = NormalizedRange::test_new(8, 5, 8, 15);
         let whole_impl = NormalizedRange::test_new(8, 0, 14, 1);
-        let rust_glancer = symbols(vec![symbol(SymbolKind::Object, whole_impl)]);
+        let suprnova_lsp = symbols(vec![symbol(SymbolKind::Object, whole_impl)]);
         let rust_analyzer = symbols(vec![symbol(SymbolKind::Object, focused)]);
 
-        let comparison = SymbolComparison::new(&rust_glancer, &rust_analyzer);
+        let comparison = SymbolComparison::new(&suprnova_lsp, &rust_analyzer);
         let metrics = comparison.metrics().set;
 
         assert_eq!(metrics.matched_count, 0);
@@ -236,10 +236,10 @@ mod tests {
     #[test]
     fn keeps_unrelated_lossy_type_kinds_as_divergences() {
         let range = NormalizedRange::test_new(8, 5, 8, 14);
-        let rust_glancer = symbols(vec![symbol(SymbolKind::Class, range)]);
+        let suprnova_lsp = symbols(vec![symbol(SymbolKind::Class, range)]);
         let rust_analyzer = symbols(vec![symbol(SymbolKind::TypeParameter, range)]);
 
-        let comparison = SymbolComparison::new(&rust_glancer, &rust_analyzer);
+        let comparison = SymbolComparison::new(&suprnova_lsp, &rust_analyzer);
         let metrics = comparison.metrics().set;
 
         assert_eq!(metrics.matched_count, 0);

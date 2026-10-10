@@ -1,7 +1,7 @@
 [book]
-title = "rust-glancer"
+title = "Suprnova LSP"
 authors = ["Igor Aleksanov"]
-description = "Documentation for the rust-glancer Rust language server."
+description = "Documentation for the suprnova-lsp Rust language server."
 language = "en"
 src = "src"
 
@@ -13,6 +13,6 @@ build-dir = "../target/book"
 create-missing = false
 
 [output.html]
-git-repository-url = "https://github.com/rust-glancer/rust-glancer"
+git-repository-url = "https://github.com/eas4ai/suprnova-lsp"
 git-repository-icon = "fab-github"
-edit-url-template = "https://github.com/rust-glancer/rust-glancer/edit/main/docs/{path}"
+edit-url-template = "https://github.com/eas4ai/suprnova-lsp/edit/main/docs/{path}"

@@ -1,4 +1,4 @@
-//! Typed dense arenas for phase-local rust-glancer ids.
+//! Typed dense arenas for phase-local suprnova-lsp ids.
 //!
 //! The crate intentionally models only the simple arena shape used throughout the engine:
 //! builders allocate values into a dense `Arena`, and retained project snapshots compact that
