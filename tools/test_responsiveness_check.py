@@ -90,6 +90,19 @@ class BaselineIntegrity(unittest.TestCase):
 
 
 class SourceLatencyIntegrity(unittest.TestCase):
+    def test_all_independent_obligations_are_checked_when_baseline_fails(self):
+        with tempfile.TemporaryDirectory() as scratch, \
+             patch.object(check.ResponsivenessCheck, "baseline", side_effect=ValueError("baseline missing")), \
+             patch.object(check.ResponsivenessCheck, "invariant_evidence", return_value={"passed": True}) as assess, \
+             patch.object(check.observer.helpers, "module", return_value=SimpleNamespace(create_run_directory=lambda _: Path(scratch))), \
+             redirect_stdout(io.StringIO()):
+            self.assertEqual(asyncio.run(check.ResponsivenessCheck.run()), 1)
+            self.assertEqual([call.args[0] for call in assess.call_args_list],
+                             ["RSP-003", "RSP-004", "RSP-005", "RSP-006"])
+            results = json.loads((Path(scratch) / "observations.json").read_text())
+            self.assertEqual(set(results), {"RSP-001", "RSP-003", "RSP-004", "RSP-005", "RSP-006"})
+            self.assertFalse(results["RSP-001"]["passed"])
+
     def test_slow_source_fails_for_latency_and_fast_source_still_requires_the_matrix(self):
         original = json.loads((ROOT / "tools/fixtures/responsiveness/baseline-source.json").read_text())
         baseline = original["identity"]
@@ -127,6 +140,43 @@ class SourceLatencyIntegrity(unittest.TestCase):
                 else:
                     self.assertEqual(results["RSP-002"]["reason"], "complete latency matrix evidence has not been selected")
                     matrix.assert_called_once()
+
+
+class IndependentEvidenceRouting(unittest.TestCase):
+    def test_policy_and_idle_proofs_use_their_own_evaluators(self):
+        selected = object()
+        for requirement, filename, owner, key in (
+            ("RSP-005", "responsiveness-policy.py", "PolicyEvidence", "policy"),
+            ("RSP-006", "responsiveness-idle.py", "IdleEvidence", "idle"),
+        ):
+            proof = {"rawArtifact": filename}
+            evaluator = SimpleNamespace(assess=lambda evidence: proof if evidence is selected else None)
+            modules = {"responsiveness-evidence.py": SimpleNamespace(Evidence=lambda _: selected),
+                       filename: SimpleNamespace(**{owner: evaluator})}
+            with self.subTest(requirement=requirement), \
+                 patch.object(check.observer.helpers, "module", side_effect=lambda _, path: modules[path.name]):
+                self.assertEqual(check.ResponsivenessCheck.invariant_evidence(requirement),
+                                 {"passed": True, key: proof})
+
+    def test_rejected_raw_evidence_preserves_observations_and_fails(self):
+        class RejectedEvidence(ValueError):
+            observations = {"attempts": [{"id": 7, "error": "retained real error"}]}
+
+        def reject(_):
+            raise RejectedEvidence("raw evidence failed")
+
+        for requirement, filename, owner in (
+            ("RSP-005", "responsiveness-policy.py", "PolicyEvidence"),
+            ("RSP-006", "responsiveness-idle.py", "IdleEvidence"),
+        ):
+            modules = {"responsiveness-evidence.py": SimpleNamespace(Evidence=lambda _: object()),
+                       filename: SimpleNamespace(**{owner: SimpleNamespace(assess=reject)})}
+            with self.subTest(requirement=requirement), \
+                 patch.object(check.observer.helpers, "module", side_effect=lambda _, path: modules[path.name]):
+                result = check.ResponsivenessCheck.invariant_evidence(requirement)
+                self.assertFalse(result["passed"])
+                self.assertEqual(result["observations"], RejectedEvidence.observations)
+                self.assertEqual(result["reason"], "raw evidence failed")
 
 
 class MatrixReceiptIntegrity(unittest.TestCase):
