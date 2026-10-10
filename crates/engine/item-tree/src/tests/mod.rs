@@ -1,0 +1,933 @@
+mod utils;
+
+use expect_test::expect;
+use rg_ir_model::Span;
+use rg_parse::{LineColumnSpan, LineIndex, Position};
+use rg_syntax::{AstNode as _, Edition, SourceFile, ast};
+use rg_text::NameInterner;
+
+use crate::{
+    FromAst, GenericArg, GenericParams, ItemKind, TraitBoundModifier, TypeBound, TypePathAnchor,
+    TypeRef,
+};
+
+#[test]
+fn preserves_relaxed_trait_bound_modifier() {
+    let source = "struct Wrapper<T: ?core::marker::Sized> { value: T }";
+    let file = SourceFile::parse(source, Edition::CURRENT)
+        .ok()
+        .expect("fixture should parse");
+    let item = file
+        .syntax()
+        .descendants()
+        .find_map(ast::Struct::cast)
+        .expect("fixture should contain a struct");
+    let line_index = LineIndex::new(source);
+    let mut interner = NameInterner::new();
+    let generics = GenericParams::from_ast(&item, (&line_index, &mut interner));
+    let param = generics
+        .types()
+        .next()
+        .expect("fixture should contain a type parameter");
+    let [TypeBound::Trait { ty, modifier }] = param.bounds.as_slice() else {
+        panic!("type parameter should contain one trait bound");
+    };
+
+    assert_eq!(*modifier, TraitBoundModifier::Maybe);
+    assert_eq!(ty.to_string(), "core::marker::Sized");
+    assert_eq!(param.bounds[0].to_string(), "?core::marker::Sized");
+    assert!(param.bounds[0].required_trait_ty().is_none());
+}
+
+#[test]
+fn lowers_qualified_associated_type_as_anchored_path() {
+    let TypeRef::Path(path) = lower_alias_ty("type Alias<I> = <I as Iterator>::Item;") else {
+        panic!("aliased type should lower to a path");
+    };
+    assert_eq!(path.to_string(), "<I as Iterator>::Item");
+    assert_eq!(path.segments.len(), 1);
+    assert_eq!(path.segments[0].name.as_str(), "Item");
+
+    let Some(TypePathAnchor::QualifiedTrait { self_ty, trait_ty }) = &path.anchor else {
+        panic!("qualified associated type should keep a qualified trait anchor");
+    };
+    assert_eq!(
+        self_ty.type_param_name().map(|name| name.to_string()),
+        Some("I".to_string())
+    );
+    let TypeRef::Path(trait_path) = trait_ty.as_ref() else {
+        panic!("qualified trait anchor should keep the trait as a path type");
+    };
+    assert_eq!(
+        trait_path.single_name().map(|name| name.as_str()),
+        Some("Iterator")
+    );
+}
+
+#[test]
+fn lowers_type_only_associated_type_as_anchored_path() {
+    let TypeRef::Path(path) = lower_alias_ty("type Alias<T> = <T>::Item;") else {
+        panic!("aliased type should lower to a path");
+    };
+    assert_eq!(path.to_string(), "<T>::Item");
+    assert_eq!(path.segments.len(), 1);
+    assert_eq!(path.segments[0].name.as_str(), "Item");
+
+    let Some(TypePathAnchor::Type(self_ty)) = &path.anchor else {
+        panic!("type-only associated path should keep a type anchor");
+    };
+    assert_eq!(
+        self_ty.type_param_name().map(|name| name.to_string()),
+        Some("T".to_string())
+    );
+}
+
+#[test]
+fn preserves_generic_args_on_associated_path_segment() {
+    let TypeRef::Path(path) = lower_alias_ty("type Alias<I> = <I as Iterator>::Item<'static, I>;")
+    else {
+        panic!("aliased type should lower to a path");
+    };
+    assert_eq!(path.to_string(), "<I as Iterator>::Item<'static, I>");
+    assert!(matches!(
+        &path.anchor,
+        Some(TypePathAnchor::QualifiedTrait { .. })
+    ));
+
+    let [assoc_segment] = path.segments.as_slice() else {
+        panic!("associated path should have one associated segment");
+    };
+    assert_eq!(assoc_segment.name.as_str(), "Item");
+    assert_eq!(assoc_segment.args.len(), 2);
+    assert!(matches!(
+        &assoc_segment.args[0],
+        GenericArg::Lifetime(lifetime) if lifetime == "'static"
+    ));
+    assert!(matches!(
+        &assoc_segment.args[1],
+        GenericArg::Type(ty) if ty.type_param_name().is_some_and(|name| name.as_str() == "I")
+    ));
+}
+
+fn lower_alias_ty(source: &str) -> TypeRef {
+    let file = SourceFile::parse(source, Edition::CURRENT)
+        .ok()
+        .expect("fixture should parse");
+    let alias = file
+        .syntax()
+        .descendants()
+        .find_map(ast::TypeAlias::cast)
+        .expect("fixture should contain a type alias");
+    let ty = alias.ty().expect("fixture type alias should have a value");
+    let line_index = LineIndex::new(source);
+    let mut interner = NameInterner::new();
+
+    TypeRef::from_ast(&ty, (&line_index, &mut interner))
+}
+
+#[test]
+fn lowers_raw_identifier_tokens_to_semantic_names() {
+    utils::check_project_item_tree_with_declarations(
+        r#"
+        //- /Cargo.toml
+        [package]
+        name = "raw_item_names"
+        version = "0.1.0"
+        edition = "2024"
+
+        //- /src/lib.rs
+        pub struct r#type<'r#fn, r#match> {
+            pub r#struct: &'r#fn r#match,
+        }
+
+        pub mod r#mod {
+            pub enum r#enum {
+                r#variant { pub r#field: super::r#type<'static, u8> },
+            }
+        }
+
+        use r#mod::r#enum as r#trait;
+
+        macro_rules! r#macro {
+            () => {};
+        }
+        r#macro!();
+        "#,
+        expect![[r#"
+            package raw_item_names
+
+            targets
+            - raw_item_names [lib] -> lib.rs
+
+            files
+            file lib.rs
+            - pub struct type
+              - generics <'fn, match>
+              - pub field struct: &'fn match
+            - pub module mod [inline]
+              - pub enum enum
+                - variant variant
+                  - pub field field: super::type<'static, u8>
+            - use
+              - import named mod::enum as trait
+            - macro_definition macro
+              - body {() => {} ;}
+            - macro_call [r#macro]
+              - args ()
+        "#]],
+    );
+}
+
+#[test]
+fn uses_manifest_edition_when_parsing_package_sources() {
+    utils::check_project_item_tree(
+        r#"
+//- /Cargo.toml
+[package]
+name = "edition_fixture"
+version = "0.1.0"
+edition = "2021"
+
+//- /src/lib.rs
+// `gen` is allowed in Rust 2021, but reserved in Rust 2024.
+pub fn gen() {}
+"#,
+        expect![[r#"
+            package edition_fixture
+
+            targets
+            - edition_fixture [lib] -> lib.rs
+
+            files
+            file lib.rs
+            - pub fn gen
+        "#]],
+    );
+}
+
+#[test]
+fn lowers_target_specific_and_shared_module_files_once() {
+    utils::check_project_item_tree(
+        r#"
+//- /Cargo.toml
+[package]
+name = "target_module_fixture"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "target-module-fixture"
+path = "src/main.rs"
+
+//- /src/lib.rs
+pub mod library;
+pub mod shared;
+
+//- /src/library.rs
+pub struct LibraryThing;
+
+//- /src/main.rs
+mod cli;
+mod shared;
+
+fn main() {}
+
+//- /src/cli.rs
+pub struct CliThing;
+
+//- /src/shared.rs
+pub struct Shared;
+"#,
+        expect![[r#"
+            package target_module_fixture
+
+            targets
+            - target_module_fixture [lib] -> lib.rs
+
+            - target-module-fixture [bin] -> main.rs
+
+            files
+            file cli.rs
+            - pub struct CliThing
+
+            file lib.rs
+            - pub module library [out_of_line]
+            - pub module shared [out_of_line]
+
+            file library.rs
+            - pub struct LibraryThing
+
+            file main.rs
+            - module cli [out_of_line]
+            - module shared [out_of_line]
+            - fn main
+
+            file shared.rs
+            - pub struct Shared
+        "#]],
+    );
+}
+
+#[test]
+fn module_lowering_terminates_on_file_cycles() {
+    utils::check_project_item_tree(
+        r#"
+//- /Cargo.toml
+[package]
+name = "cycle_lowering"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+pub mod a;
+
+//- /src/a/mod.rs
+#[path = "../lib.rs"]
+pub mod root_again;
+"#,
+        expect![[r#"
+            package cycle_lowering
+
+            targets
+            - cycle_lowering [lib] -> lib.rs
+
+            files
+            file mod.rs
+            - pub module root_again [out_of_line]
+
+            file lib.rs
+            - pub module a [out_of_line]
+        "#]],
+    );
+}
+
+#[test]
+fn resolves_out_of_line_multi_module_chains() {
+    utils::check_project_item_tree(
+        r#"
+//- /Cargo.toml
+[package]
+name = "module_chain_fixture"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+pub mod outer;
+
+//- /src/outer.rs
+pub mod inner;
+pub struct Outer;
+
+//- /src/outer/inner.rs
+pub mod leaf;
+pub struct Inner;
+
+//- /src/outer/inner/leaf.rs
+pub struct Leaf;
+"#,
+        expect![[r#"
+            package module_chain_fixture
+
+            targets
+            - module_chain_fixture [lib] -> lib.rs
+
+            files
+            file lib.rs
+            - pub module outer [out_of_line]
+
+            file leaf.rs
+            - pub struct Leaf
+
+            file inner.rs
+            - pub module leaf [out_of_line]
+            - pub struct Inner
+
+            file outer.rs
+            - pub module inner [out_of_line]
+            - pub struct Outer
+        "#]],
+    );
+}
+
+#[test]
+fn resolves_path_attribute_modules() {
+    utils::check_project_item_tree(
+        r#"
+//- /Cargo.toml
+[package]
+name = "path_attr_fixture"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+#[path = "generated/api_file.rs"]
+pub mod api;
+
+pub mod outer {
+    pub mod child;
+
+    #[path = "implementation.rs"]
+    pub mod implementation;
+}
+
+pub use api::Api;
+pub use outer::child::Child;
+pub use outer::implementation::work;
+
+//- /src/generated/api_file.rs
+pub struct Api;
+
+//- /src/outer/child.rs
+pub struct Child;
+
+//- /src/outer/implementation.rs
+pub fn work() {}
+"#,
+        expect![[r#"
+            package path_attr_fixture
+
+            targets
+            - path_attr_fixture [lib] -> lib.rs
+
+            files
+            file api_file.rs
+            - pub struct Api
+
+            file lib.rs
+            - pub module api [out_of_line]
+            - pub module outer [inline]
+              - pub module child [out_of_line]
+              - pub module implementation [out_of_line]
+            - pub use
+              - import named api::Api
+            - pub use
+              - import named outer::child::Child
+            - pub use
+              - import named outer::implementation::work
+
+            file child.rs
+            - pub struct Child
+
+            file implementation.rs
+            - pub fn work
+        "#]],
+    );
+}
+
+#[test]
+fn dumps_import_payloads() {
+    utils::check_project_item_tree(
+        r#"
+//- /Cargo.toml
+[package]
+name = "import_crate"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+#[macro_use(make_bar)]
+pub mod bar {
+    pub mod foo {}
+}
+
+#[macro_use(current_macro)]
+extern crate self as current;
+#[macro_use]
+extern crate self as _;
+
+use bar::foo::{self, self as imported_foo, work as _, *};
+use crate::bar::foo::work as run;
+use ::bar::foo;
+"#,
+        expect![[r#"
+            package import_crate
+
+            targets
+            - import_crate [lib] -> lib.rs
+
+            files
+            file lib.rs
+            - pub module bar [inline] [macro_use(make_bar)]
+              - pub module foo [inline]
+            - extern_crate self [self as current] [macro_use(current_macro)]
+            - extern_crate self [self as _] [macro_use]
+            - use
+              - import self bar::foo
+              - import self bar::foo as imported_foo
+              - import named bar::foo::work as _
+              - import glob bar::foo
+            - use
+              - import named crate::bar::foo::work as run
+            - use
+              - import named ::bar::foo
+        "#]],
+    );
+}
+
+#[test]
+fn lowers_dangling_use_before_attribute_for_completion() {
+    utils::check_project_item_tree(
+        r#"
+//- /Cargo.toml
+[package]
+name = "dangling_use_fixture"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+use std::collections::
+
+#[derive(Debug)]
+enum CliInvocation {
+    Capture,
+}
+"#,
+        expect![[r#"
+            package dangling_use_fixture
+
+            targets
+            - dangling_use_fixture [lib] -> lib.rs
+
+            files
+            file lib.rs
+            - use
+              - import named std::collections
+            - enum CliInvocation
+        "#]],
+    );
+}
+
+#[test]
+fn lowers_item_position_macro_calls_only() {
+    utils::check_project_item_tree_with_declarations(
+        r#"
+//- /Cargo.toml
+[package]
+name = "macro_crate"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+#[macro_export]
+macro_rules! make_user {
+    () => {
+        pub struct User;
+    };
+}
+
+make_user!();
+
+pub fn use_it() {
+    make_user!();
+}
+"#,
+        expect![[r#"
+            package macro_crate
+
+            targets
+            - macro_crate [lib] -> lib.rs
+
+            files
+            file lib.rs
+            - macro_definition make_user
+              - macro_export
+              - body {() => {pub struct User ;} ;}
+            - macro_call [make_user]
+              - args ()
+            - pub fn use_it
+              - params ()
+        "#]],
+    );
+}
+
+#[test]
+fn lowers_literal_include_files_for_macro_calls() {
+    utils::check_project_item_tree_with_declarations(
+        r#"
+//- /Cargo.toml
+[package]
+name = "include_fixture"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+include!("included.rs");
+
+//- /src/included.rs
+pub struct Included;
+"#,
+        expect![[r#"
+            package include_fixture
+
+            targets
+            - include_fixture [lib] -> lib.rs
+
+            files
+            file included.rs
+            - pub struct Included
+
+            file lib.rs
+            - macro_call [include]
+              - args ("included.rs")
+              - include_file included.rs
+        "#]],
+    );
+}
+
+#[test]
+fn lowers_cfg_select_arms_as_source_fragments() {
+    utils::check_project_item_tree_with_declarations(
+        r#"
+//- /Cargo.toml
+[package]
+name = "cfg_select_item_tree_fixture"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+cfg_select! {
+    unix => {
+        mod os;
+    }
+    _ => {
+        pub struct Other;
+    }
+}
+
+//- /src/os.rs
+pub struct Unix;
+"#,
+        expect![[r#"
+            package cfg_select_item_tree_fixture
+
+            targets
+            - cfg_select_item_tree_fixture [lib] -> lib.rs
+
+            files
+            file lib.rs
+            - macro_call [cfg_select]
+              - args {unix => {mod os ;} _ => {pub struct Other ;}}
+              - cfg_select_arm 0
+                - module os [out_of_line]
+              - cfg_select_arm 1
+                - pub struct Other
+
+            file os.rs
+            - pub struct Unix
+        "#]],
+    );
+}
+
+#[test]
+fn preserves_failed_cfg_select_arm_lowering_per_arm() {
+    utils::check_project_item_tree_with_declarations(
+        r#"
+//- /Cargo.toml
+[package]
+name = "cfg_select_failed_arm_fixture"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+cfg_select! {
+    false => {
+        mod ;
+    }
+    true => {
+        pub struct Selected;
+    }
+}
+"#,
+        expect![[r#"
+            package cfg_select_failed_arm_fixture
+
+            targets
+            - cfg_select_failed_arm_fixture [lib] -> lib.rs
+
+            files
+            file lib.rs
+            - macro_call [cfg_select]
+              - args {false => {mod ;} true => {pub struct Selected ;}}
+              - cfg_select_arm 0 [lowering_failed]
+              - cfg_select_arm 1
+                - pub struct Selected
+        "#]],
+    );
+}
+
+#[test]
+fn literal_include_probe_ignores_unreadable_targets() {
+    utils::check_project_item_tree_with_declarations(
+        r#"
+//- /Cargo.toml
+[package]
+name = "shadowed_include_fixture"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+macro_rules! include {
+    ($path:literal) => {};
+}
+
+include!("foo");
+
+//- /src/foo/mod.rs
+pub struct Foo;
+"#,
+        expect![[r#"
+            package shadowed_include_fixture
+
+            targets
+            - shadowed_include_fixture [lib] -> lib.rs
+
+            files
+            file lib.rs
+            - macro_definition include
+              - body {($ path : literal) => {} ;}
+            - macro_call [include]
+              - args ("foo")
+        "#]],
+    );
+}
+
+#[test]
+fn cyclic_literal_include_files_do_not_recurse_forever() {
+    utils::check_project_item_tree_with_declarations(
+        r#"
+//- /Cargo.toml
+[package]
+name = "cyclic_include_fixture"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+include!("foo.rs");
+
+//- /src/foo.rs
+pub struct Foo;
+
+include!("bar.rs");
+
+//- /src/bar.rs
+pub struct Bar;
+
+include!("foo.rs");
+"#,
+        expect![[r#"
+            package cyclic_include_fixture
+
+            targets
+            - cyclic_include_fixture [lib] -> lib.rs
+
+            files
+            file bar.rs
+            - pub struct Bar
+            - macro_call [include]
+              - args ("foo.rs")
+
+            file foo.rs
+            - pub struct Foo
+            - macro_call [include]
+              - args ("bar.rs")
+              - include_file bar.rs
+
+            file lib.rs
+            - macro_call [include]
+              - args ("foo.rs")
+              - include_file foo.rs
+        "#]],
+    );
+}
+
+#[test]
+fn dumps_declaration_payloads() {
+    utils::check_project_item_tree_with_declarations(
+        r#"
+//- /Cargo.toml
+[package]
+name = "declaration_fixture"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+pub struct User<T>
+where
+    T: Clone,
+{
+    pub id: UserId,
+    payload: Option<T>,
+}
+
+pub enum LoadState<E> {
+    Empty,
+    Loaded(User),
+    Failed { error: E },
+}
+
+pub trait Repository<T>: Send
+where
+    T: Clone,
+{
+    type Error;
+    const KIND: &'static str;
+    fn get(&self, id: UserId) -> Result<T, Self::Error>;
+}
+
+impl<T> Repository<T> for DbRepository<T>
+where
+    T: Clone,
+{
+    type Error = DbError;
+    const KIND: &'static str = "db";
+    fn get(&self, id: UserId) -> Result<T, DbError> {
+        todo!()
+    }
+}
+
+pub type UserResult<T> = Result<User<T>, DbError>;
+pub const DEFAULT_ID: UserId = UserId(0);
+pub static mut CACHE_READY: bool = false;
+"#,
+        expect![[r#"
+            package declaration_fixture
+
+            targets
+            - declaration_fixture [lib] -> lib.rs
+
+            files
+            file lib.rs
+            - pub struct User
+              - generics <T> where T: Clone
+              - pub field id: UserId
+              - field payload: Option<T>
+            - pub enum LoadState
+              - generics <E>
+              - variant Empty
+              - variant Loaded
+                - field #0: User
+              - variant Failed
+                - field error: E
+            - pub trait Repository
+              - generics <T> where T: Clone
+              - supertraits Send
+              - type_alias Error
+              - const KIND
+                - ty &'static str
+              - fn get
+                - params (&self, id: UserId)
+                - ret Result<T, Self::Error>
+            - impl
+              - generics <T> where T: Clone
+              - trait Repository<T>
+              - self DbRepository<T>
+              - type_alias Error
+                - aliased DbError
+              - const KIND
+                - ty &'static str
+              - fn get
+                - params (&self, id: UserId)
+                - ret Result<T, DbError>
+            - pub type_alias UserResult
+              - generics <T>
+              - aliased Result<User<T>, DbError>
+            - pub const DEFAULT_ID
+              - ty UserId
+            - pub static CACHE_READY
+              - ty bool
+        "#]],
+    );
+}
+
+#[test]
+fn stores_item_source_spans() {
+    let db = crate::testonly::ItemTreeFixture::build(
+        r#"
+//- /Cargo.toml
+[package]
+name = "simple_crate"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+pub fn add_two_numbers(left: i32, right: i32) -> i32 {
+    left + right
+}
+"#,
+    );
+    let package = db
+        .item_tree_db()
+        .package(0)
+        .expect("fixture item-tree package should exist");
+    let [target_root] = package.target_roots() else {
+        panic!("fixture should contain one target root");
+    };
+    let file_tree = package
+        .file(target_root.root_file)
+        .expect("target root item tree should exist");
+    let function = file_tree
+        .top_level
+        .iter()
+        .filter_map(|item| file_tree.item(*item))
+        .find(|item| {
+            item.name
+                .as_ref()
+                .is_some_and(|name| name == "add_two_numbers")
+        })
+        .expect("fixture function should be lowered");
+
+    assert!(matches!(function.kind, ItemKind::Function(_)));
+    assert_eq!(function.span, Span { start: 0, end: 73 });
+
+    let parsed_file = db.parse_db().packages()[0]
+        .parsed_file(file_tree.file)
+        .expect("fixture source should be parsed");
+    let line_index = parsed_file
+        .line_index()
+        .expect("fixture line index should load");
+    assert_eq!(
+        line_index.line_column_span(function.span),
+        LineColumnSpan {
+            start: Position { line: 0, column: 0 },
+            end: Position { line: 2, column: 1 },
+        }
+    );
+}
+
+#[test]
+fn extern_blocks_own_lowered_foreign_declarations() {
+    utils::check_project_item_tree(
+        r#"
+//- /Cargo.toml
+[package]
+name = "foreign_tree"
+version = "0.1.0"
+edition = "2024"
+
+//- /src/lib.rs
+unsafe extern "C" {
+    pub fn foreign_fn(input: u32) -> u64;
+    pub static FOREIGN_STATIC: u32;
+    pub type Opaque;
+    nested_call!();
+}
+"#,
+        expect![[r#"
+            package foreign_tree
+
+            targets
+            - foreign_tree [lib] -> lib.rs
+
+            files
+            file lib.rs
+            - extern_block [unsafe abi "C"]
+              - pub fn foreign_fn
+              - pub static FOREIGN_STATIC
+              - pub type_alias Opaque
+              - macro_call [nested_call]
+        "#]],
+    );
+}
