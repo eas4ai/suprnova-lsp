@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Reject upstream product identities in current fork code and instructions."""
 
+import hashlib
 import re
 import subprocess
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 UPSTREAM_IDENTITY = re.compile(r"rust(?:[-_]|\s+)glancer|RustGlancer", re.IGNORECASE)
+UPSTREAM_ICON_SHA256 = "b798bed94708c73affe2c508e1afd4631335a19dac00784c62fcfb754883d7bc"
 
 # These records describe upstream or past observations. Rewriting them would
 # change attribution, contract history or the provenance of measurements.
@@ -57,8 +59,13 @@ def identity_failures(root=ROOT, paths=None):
         registered_skill = relative.startswith(".agents/skills/rust-glancer-debugging/")
         if UPSTREAM_IDENTITY.search(relative) and not registered_skill:
             failures.append(f"{relative}: upstream name in an active project path")
+        # The inherited eye logo has no searchable text. Keep its exact bytes as
+        # a rejection control so a merge cannot silently restore that identity.
+        contents = path.read_bytes()
+        if hashlib.sha256(contents).hexdigest() == UPSTREAM_ICON_SHA256:
+            failures.append(f"{relative}: upstream extension icon in an active project path")
         try:
-            text = path.read_text(encoding="utf-8")
+            text = contents.decode("utf-8")
         except UnicodeDecodeError:
             continue
         references = SKILL_REFERENCES if registered_skill else DOCUMENTED_REFERENCES.get(relative, NO_REFERENCES)
