@@ -1,0 +1,847 @@
+//! Recursive inference follows source ownership: a block introduces statements, each expression
+//! infers its children, and consumers read their live types from inference state.
+//!
+//! An expectation flows down into children where the syntax gives us a matching shape, such as
+//! tuple fields or call arguments. Their stored slots also connect the result back to its inputs:
+//! a later constraint on the result can still reach a child whose syntax has already been visited.
+
+use anyhow::Context as _;
+use rg_def_map::DefMapSource;
+use rg_ir_model::{ExprId, FieldKey, StmtId, identity::DeclarationRef};
+use rg_item_tree::LangItem;
+use rg_package_store::PackageStoreError;
+use rg_semantic_ir::ItemStoreSource;
+use rg_ty::solver::{AdtTy, List, TraitApplication, Ty, TyShape};
+
+use super::{BodyInference, deferred::DeferredKind};
+use crate::body::{
+    ExprAssignOp, ExprBlockKind, ExprKind, ExprRangeKind, ExprWrapperKind, LabelData, StmtKind,
+    facts::BodyResolution,
+};
+
+// These targets live only while walking a body. A break searches from the innermost target;
+// labels can name blocks or loops, while an unlabeled break belongs to a loop.
+pub(crate) struct BreakTarget<'s, 'query> {
+    label: Option<&'query LabelData>,
+    is_loop: bool,
+    expected: Ty<'s>,
+    values: Vec<Ty<'s>>,
+}
+
+impl<'s, 'query, D, I> BodyInference<'s, 'query, D, I>
+where
+    D: DefMapSource<Error = PackageStoreError> + Copy,
+    I: ItemStoreSource<'query, Error = PackageStoreError> + Copy,
+{
+    /// Infer one expression against its expectation and store its type in inference state.
+    /// Shared variables carry later evidence without revisiting this subtree.
+    pub(super) fn infer_expr(&mut self, expr: ExprId, expected: &Ty<'s>) -> anyhow::Result<()> {
+        #[cfg(test)]
+        self.before_expression();
+        rg_std::check_cancel!(self.context, "expression resolution");
+        // Keep generated or expanded syntax from consuming an unbounded inference stack.
+        // An interrupted subtree stays unknown while the rest of the body can keep its results.
+        if self.depth == 256 {
+            self.inference_exhausted = true;
+            crate::profile::metric::RECURSION_EXHAUSTIONS.inc();
+            return Ok(());
+        }
+        self.depth += 1;
+        crate::profile::metric::EXPRESSION_VISITS.inc();
+        // A closure or separately executed block cannot jump back into its surrounding body.
+        // Its own loops and labeled blocks start a fresh set of break targets.
+        let outer_targets = matches!(
+            self.body.expr_unchecked(expr).kind,
+            ExprKind::Closure { .. }
+                | ExprKind::Block {
+                    kind: ExprBlockKind::Const
+                        | ExprBlockKind::Async { .. }
+                        | ExprBlockKind::Gen { .. }
+                        | ExprBlockKind::AsyncGen { .. },
+                    ..
+                }
+        )
+        .then(|| std::mem::take(&mut self.break_targets));
+        let result = self.infer_expr_inner(expr, expected);
+        if let Some(outer_targets) = outer_targets {
+            self.break_targets = outer_targets;
+        }
+        self.depth -= 1;
+        result
+    }
+
+    fn infer_expr_inner(&mut self, expr: ExprId, expected: &Ty<'s>) -> anyhow::Result<()> {
+        // Syntax belongs to the immutable body, independently of the mutable inference state.
+        let body = self.body;
+        match body.expr_unchecked(expr).kind {
+            ExprKind::Block {
+                ref kind,
+                ref label,
+                ref statements,
+                tail,
+                ..
+            } => {
+                if label.is_some() {
+                    self.break_targets.push(BreakTarget {
+                        label: label.as_ref(),
+                        is_loop: false,
+                        expected: *expected,
+                        values: Vec::new(),
+                    });
+                }
+                for statement in statements {
+                    self.infer_statement(*statement)
+                        .context("infer block statement")?;
+                    // A top-level binding hover can finish once its actual producer has supplied
+                    // a concrete type. Do not default numbers here: `let n = 1; use_u64(n);`
+                    // still needs the later statement. Nested blocks keep ordinary inference.
+                    if expr == body.root_expr()
+                        && *kind == ExprBlockKind::Plain
+                        && label.is_none()
+                        && let Some(binding) = self.hover_binding
+                        && let StmtKind::Let { bindings, .. } =
+                            &body.statement_unchecked(*statement).kind
+                        && bindings.contains(&binding)
+                    {
+                        let ty = self
+                            .inference
+                            .table()
+                            .resolve(self.inference.binding_ty(binding));
+                        if ty.has_var()
+                            || ty.has_unknown()
+                            || !Self::settled_hover_type(&self.inference.table().finalize(ty), true)
+                        {
+                            self.fulfill_pending().context("settle hovered binding")?;
+                        }
+                        let ty = self
+                            .inference
+                            .table()
+                            .resolve(self.inference.binding_ty(binding));
+                        if !ty.has_var()
+                            && !ty.has_unknown()
+                            && Self::settled_hover_type(&self.inference.table().finalize(ty), true)
+                        {
+                            rg_std::check_cancel!(self.context, "settled binding hover");
+                            self.hover_type_settled = true;
+                            tracing::trace!(body = ?self.context.body_ref(), binding = binding.0,
+                                "request-local binding hover settled before body tail");
+                        }
+                        // Stop the probe in either case. Unresolved types restart ordinary full
+                        // inference with return expectations; they never become partial answers.
+                        return Ok(());
+                    }
+                }
+                self.infer_optional(tail, expected)
+                    .context("infer block tail")?;
+                // Statements and the tail can refine locals used by earlier pending operations.
+                // Let those operations use the new evidence before reading the block's result.
+                self.fulfill_pending().context("complete block inference")?;
+                // `break 'done value;` has type `!`, so it contributes no ordinary fallthrough
+                // value. Its payload belongs to the named target, even through nested blocks.
+                let statements = statements
+                    .iter()
+                    .filter_map(
+                        |statement| match body.statement_unchecked(*statement).kind {
+                            StmtKind::Expr { expr, .. } => Some(expr),
+                            StmtKind::Let { initializer, .. } => initializer,
+                            StmtKind::Item { .. } | StmtKind::ItemIgnored => None,
+                        },
+                    )
+                    .map(|expr| self.inference.expr_slot(expr))
+                    .collect();
+                let tail = tail
+                    .map(|tail| self.inference.expr_slot(tail))
+                    .unwrap_or(self.cx.unit());
+                let breaks = label.as_ref().map(|_| {
+                    self.break_targets
+                        .pop()
+                        .expect("labeled block retains its target")
+                        .values
+                });
+                self.infer_block_result(expr, statements, tail, breaks)
+                    .context("infer block result")?;
+            }
+            ExprKind::Call { callee, ref args } => {
+                let started = std::time::Instant::now();
+                // A binding probe needs the selected call, not a second declaration-only search
+                // for the same associated path. Live lookup preserves inherent precedence and
+                // supplies the signature and substitution used below. Constructors and paths
+                // without a selected function keep their ordinary callee inference.
+                let prepared = if self.hover_binding.is_some()
+                    && callee.is_some_and(|callee| {
+                        matches!(&body.expr_unchecked(callee).kind, ExprKind::Path { path }
+                            if path.split_associated_item_prefix_name().is_some())
+                    }) {
+                    self.prepare_call(expr, None)
+                        .context("prepare associated binding call")?
+                } else {
+                    None
+                };
+                if prepared.is_none() {
+                    self.infer_optional(callee, &self.cx.unknown())
+                        .context("infer optional expression")?;
+                }
+                tracing::trace!(
+                    phase = "callee",
+                    elapsed_us = started.elapsed().as_micros(),
+                    "body inference phase"
+                );
+                if let Some(callee) = callee {
+                    let callee_ty = self.inference.root_resolved_expr_ty(callee);
+                    if matches!((callee_ty).shape(), TyShape::Adt(_)) {
+                        self.inference.set_expr_ty(expr, callee_ty);
+                    }
+                }
+                let variant =
+                    callee.and_then(|callee| match self.inference.expr_resolution(callee) {
+                        BodyResolution::Declarations(declarations) => match declarations.as_one() {
+                            Some(DeclarationRef::EnumVariant(variant)) => Some(*variant),
+                            _ => None,
+                        },
+                        _ => None,
+                    });
+                if let Some(variant) = variant {
+                    // A tuple variant gets argument expectations from its enum's fields. Give
+                    // omitted enum arguments live slots first, so `Some(value)` and an expected
+                    // `Option<User>` can pass evidence through the same element type.
+                    let ty = self.inference.expr_ty(expr);
+                    self.inference.instantiate_expr_nested_unknown_ty(expr, &ty);
+                    self.inference.constrain_expr_ty(expr, expected);
+                    let ty = self.inference.root_resolved_expr_ty(expr);
+                    for (index, arg) in args.iter().enumerate() {
+                        let expected = match ty.as_adt() {
+                            Some(nominal) => self
+                                .context
+                                .live()
+                                .enum_variant_field(
+                                    nominal,
+                                    variant,
+                                    &FieldKey::Tuple(index),
+                                    self.inference.table(),
+                                )
+                                .context("resolve variant field type")?
+                                .unwrap_or(self.cx.unknown()),
+                            None => self.cx.unknown(),
+                        };
+                        self.infer_expr(*arg, &expected)
+                            .context("infer variant argument")?;
+                    }
+                } else {
+                    self.infer_call(expr, args, None, expected, prepared)
+                        .context("infer call")?;
+                }
+            }
+            ExprKind::MethodCall {
+                receiver, ref args, ..
+            } => {
+                self.infer_optional(receiver, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                self.method_calls.push(expr);
+                self.infer_call(expr, args, receiver, expected, None)
+                    .context("infer call")?;
+            }
+            ExprKind::Tuple { ref fields } => {
+                let expected = self.inference.root_resolved_ty(expected);
+                // Retain the children's slots in the tuple. A later expectation for the whole
+                // tuple must still be able to constrain a field that is unknown here.
+                let mut field_tys = Vec::with_capacity(fields.len());
+                for (index, field) in fields.iter().enumerate() {
+                    let expected = match expected.shape() {
+                        TyShape::Tuple(types) if types.len() == fields.len() => types[index],
+                        _ => self.cx.unknown(),
+                    };
+                    self.infer_expr(*field, &expected)
+                        .context("infer tuple field")?;
+                    field_tys.push(self.inference.expr_slot(*field));
+                }
+                self.inference.set_expr_ty(expr, self.cx.tuple(field_tys));
+            }
+            ExprKind::Array { ref elements } => {
+                let expected = self.inference.root_resolved_ty(expected);
+                let element_ty = match expected.shape() {
+                    TyShape::Array { inner, len }
+                        if matches!(
+                            self.cx.raise_const(len),
+                            rg_ty::ConstValue::Unknown | rg_ty::ConstValue::Param(_)
+                        ) || self.cx.raise_const(len)
+                            == rg_ty::ConstValue::Scalar(elements.len() as u128) =>
+                    {
+                        inner
+                    }
+                    _ => self.cx.unknown(),
+                };
+                // Every element shares this destination. Expected types and later sibling
+                // evidence constrain the same live slots, without revisiting earlier elements.
+                if !elements.is_empty() {
+                    let shared_element = self.inference.table_mut().new_type_var();
+                    for element in elements {
+                        self.infer_expr(*element, &element_ty)
+                            .context("infer array element")?;
+                        let ty = self.inference.expr_slot(*element);
+                        self.inference.constrain_infer_tys(&shared_element, &ty);
+                    }
+                    self.inference.set_expr_ty(
+                        expr,
+                        self.cx
+                            .array(shared_element, self.cx.scalar(elements.len() as u128)),
+                    );
+                }
+            }
+            ExprKind::RepeatArray {
+                initializer,
+                repeat,
+                ref len_text,
+            } => {
+                let expected = self.inference.root_resolved_ty(expected);
+                let element_ty = match expected.shape() {
+                    TyShape::Array { inner, .. } => inner,
+                    _ => self.cx.unknown(),
+                };
+                self.infer_optional(initializer, &element_ty)
+                    .context("infer array initializer")?;
+                self.infer_optional(repeat, &self.cx.unknown())
+                    .context("infer array length")?;
+                if let Some(initializer) = initializer {
+                    let ty = self.inference.expr_slot(initializer);
+                    self.inference.set_expr_ty(
+                        expr,
+                        self.cx.array(
+                            ty,
+                            self.cx.lower_const(
+                                len_text
+                                    .as_deref()
+                                    .map(rg_ty::ConstValue::from_syntax)
+                                    .unwrap_or(rg_ty::ConstValue::Unknown),
+                                self.inference
+                                    .table()
+                                    .params(self.body.owner().generic_def().into()),
+                            ),
+                        ),
+                    );
+                }
+            }
+            ExprKind::Index { base, index } => {
+                self.infer_optional(base, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                self.infer_optional(index, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                self.inference.expr_slot(expr);
+                if base.is_some() && index.is_some() {
+                    self.run_or_defer(DeferredKind::Index { expr })
+                        .context("register pending inference")?;
+                }
+            }
+            ExprKind::Field { base, .. } => {
+                self.infer_optional(base, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                self.inference.expr_slot(expr);
+                if base.is_some() {
+                    self.run_or_defer(DeferredKind::Field { expr })
+                        .context("register pending inference")?;
+                }
+            }
+            ExprKind::Range { start, end, kind } => {
+                // Syntax chooses the compiler-known declaration, regardless of imports or a
+                // local type named Range. TODO: Support the experimental range families.
+                let lang_item = match (start, end, kind) {
+                    (Some(_), Some(_), Some(ExprRangeKind::Exclusive)) => Some(LangItem::Range),
+                    (Some(_), None, Some(ExprRangeKind::Exclusive)) => Some(LangItem::RangeFrom),
+                    (None, Some(_), Some(ExprRangeKind::Exclusive)) => Some(LangItem::RangeTo),
+                    (Some(_), Some(_), Some(ExprRangeKind::Inclusive)) => {
+                        Some(LangItem::RangeInclusive)
+                    }
+                    (None, Some(_), Some(ExprRangeKind::Inclusive)) => {
+                        Some(LangItem::RangeToInclusive)
+                    }
+                    (None, None, Some(ExprRangeKind::Exclusive)) => Some(LangItem::RangeFull),
+                    _ => None,
+                };
+                let endpoint_ty = if let Some(def) =
+                    lang_item.and_then(|item| self.context.item_lookup_query().lang_type(item))
+                {
+                    // Both endpoints and the range's type argument share this destination.
+                    // For `let bounds = 1..; take_range(bounds)`, a later RangeFrom<usize>
+                    // parameter can still refine the literal before numeric fallback.
+                    let (endpoint_ty, args) = if start.is_some() || end.is_some() {
+                        let endpoint_ty = self.inference.table().new_type_var();
+                        (endpoint_ty, List::new(self.cx, &[endpoint_ty.into()]))
+                    } else {
+                        (self.cx.unknown(), List::default())
+                    };
+                    self.inference
+                        .set_expr_ty(expr, self.cx.adt(AdtTy { def, args }));
+                    self.inference.constrain_expr_ty(expr, expected);
+                    endpoint_ty
+                } else {
+                    // Even incomplete syntax or missing declarations must visit the endpoints.
+                    self.cx.unknown()
+                };
+                self.infer_optional(start, &endpoint_ty)
+                    .context("infer range start")?;
+                self.infer_optional(end, &endpoint_ty)
+                    .context("infer range end")?;
+            }
+            ExprKind::Cast {
+                expr: inner,
+                ref ty,
+            } => {
+                self.infer_optional(inner, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                if let Some(ty) = ty {
+                    let ty = self
+                        .context
+                        .live()
+                        .type_ref(
+                            self.body.expr_unchecked(expr).scope,
+                            ty,
+                            self.inference.table(),
+                        )
+                        .context("resolve cast type")?;
+                    self.inference.set_expr_ty(expr, ty);
+                }
+            }
+            ExprKind::Unary { expr: inner, .. } => {
+                self.infer_optional(inner, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                if inner.is_some() {
+                    self.inference.expr_slot(expr);
+                    self.run_or_defer(DeferredKind::Operator { expr })
+                        .context("register pending inference")?;
+                }
+            }
+            ExprKind::Binary { lhs, rhs, .. } => {
+                self.infer_optional(lhs, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                self.infer_optional(rhs, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                if lhs.is_some() && rhs.is_some() {
+                    self.inference.expr_slot(expr);
+                    self.run_or_defer(DeferredKind::Operator { expr })
+                        .context("register pending inference")?;
+                }
+            }
+            ExprKind::Assign { target, op, value } => {
+                self.infer_optional(target, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                let ty = match (target, op) {
+                    (Some(target), Some(ExprAssignOp::Assign))
+                        if matches!(
+                            self.inference.expr_resolution(target),
+                            BodyResolution::Binding(_)
+                        ) =>
+                    {
+                        self.inference.expr_slot(target)
+                    }
+                    _ => self.cx.unknown(),
+                };
+                self.infer_optional(value, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                if let Some(value) = value {
+                    self.coerce_expr_ty(value, &ty);
+                }
+                self.inference.set_expr_ty(expr, self.cx.unit());
+            }
+            ExprKind::Match {
+                scrutinee,
+                ref arms,
+            } => {
+                self.infer_optional(scrutinee, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                let scrutinee = scrutinee
+                    .map(|expr| self.inference.expr_slot(expr))
+                    .unwrap_or(self.cx.unknown());
+                for arm in arms {
+                    if let Some(pat) = arm.pat {
+                        self.infer_pattern(pat, &scrutinee)
+                            .context("infer match pattern")?;
+                    }
+                    self.infer_optional(arm.guard, &self.cx.unknown())
+                        .context("infer optional expression")?;
+                    self.infer_optional(arm.expr, expected)
+                        .context("infer optional expression")?;
+                }
+                self.infer_branch_result(expr, arms.iter().filter_map(|arm| arm.expr))
+                    .context("infer match result")?;
+            }
+            ExprKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                self.infer_optional(condition, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                let branch_expected = if else_branch.is_some() {
+                    expected
+                } else {
+                    &self.cx.unknown()
+                };
+                self.infer_optional(then_branch, branch_expected)
+                    .context("infer optional expression")?;
+                self.infer_optional(else_branch, branch_expected)
+                    .context("infer optional expression")?;
+                if let Some(else_branch) = else_branch {
+                    self.infer_branch_result(expr, then_branch.into_iter().chain([else_branch]))
+                        .context("infer if result")?;
+                } else {
+                    self.inference.set_expr_ty(expr, self.cx.unit());
+                }
+            }
+            ExprKind::Let {
+                pat, initializer, ..
+            } => {
+                self.infer_optional(initializer, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                let ty = initializer
+                    .map(|expr| self.inference.expr_slot(expr))
+                    .unwrap_or(self.cx.unknown());
+                if let Some(pat) = pat {
+                    self.infer_pattern(pat, &ty).context("infer let pattern")?;
+                }
+                self.inference
+                    .set_expr_ty(expr, self.cx.primitive(rg_ty::PrimitiveTy::Bool));
+            }
+            ExprKind::Closure {
+                scope,
+                ref params,
+                ref ret_ty,
+                body,
+                ..
+            } => {
+                self.infer_closure(expr, scope, params, ret_ty.as_ref(), body)
+                    .context("infer closure")?;
+            }
+            ExprKind::Loop { ref label, body } => {
+                self.break_targets.push(BreakTarget {
+                    label: label.as_ref(),
+                    is_loop: true,
+                    expected: *expected,
+                    values: Vec::new(),
+                });
+                self.infer_optional(body, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                let branches = self
+                    .break_targets
+                    .pop()
+                    .expect("loop retains its target")
+                    .values;
+                // Only breaks aimed at this loop contribute to its result. Keep their live
+                // slots separate until pending payloads have revealed whether they return `!`.
+                if !branches.is_empty() {
+                    self.run_or_defer(DeferredKind::BranchResult { expr, branches })
+                        .context("infer loop result")?;
+                } else if body.is_some() && !self.inference_exhausted {
+                    // A break to an outer label still diverges here. Missing or truncated
+                    // syntax cannot establish that the loop has no exit of its own.
+                    self.inference.set_expr_ty(expr, self.cx.never());
+                }
+            }
+            ExprKind::While {
+                ref label,
+                condition,
+                body,
+            } => {
+                self.break_targets.push(BreakTarget {
+                    label: label.as_ref(),
+                    is_loop: true,
+                    expected: self.cx.unit(),
+                    values: Vec::new(),
+                });
+                self.infer_optional(condition, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                self.infer_optional(body, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                self.break_targets.pop().expect("while retains its target");
+                self.inference.set_expr_ty(expr, self.cx.unit());
+            }
+            ExprKind::For {
+                ref label,
+                pat,
+                iterable,
+                body,
+                ..
+            } => {
+                self.infer_optional(iterable, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                if let (Some(pat), Some(iterable)) = (pat, iterable) {
+                    // The loop pattern can use its item slot before `IntoIterator::Item` is
+                    // known. A later projection fills the same slot, including its binding uses.
+                    let item = self.inference.table_mut().new_type_var();
+                    self.run_or_defer(DeferredKind::IteratorItem { iterable, item })
+                        .context("register pending inference")?;
+                    self.infer_pattern(pat, &item)
+                        .context("infer iterator pattern")?;
+                }
+                self.break_targets.push(BreakTarget {
+                    label: label.as_ref(),
+                    is_loop: true,
+                    expected: self.cx.unit(),
+                    values: Vec::new(),
+                });
+                self.infer_optional(body, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                self.break_targets.pop().expect("for retains its target");
+                self.inference.set_expr_ty(expr, self.cx.unit());
+            }
+            ExprKind::Break { ref label, value } => {
+                let target = self.break_targets.iter().rposition(|target| match label {
+                    Some(label) => target.label.is_some_and(|target| target.name == label.name),
+                    None => target.is_loop,
+                });
+                let expected = target
+                    .map(|target| self.break_targets[target].expected)
+                    .unwrap_or(self.cx.unknown());
+                self.infer_optional(value, &expected)
+                    .context("infer break value")?;
+                if let Some(target) = target {
+                    let value = value
+                        .map(|value| self.inference.expr_slot(value))
+                        .unwrap_or(self.cx.unit());
+                    self.break_targets[target].values.push(value);
+                }
+                self.inference.set_expr_ty(expr, self.cx.never());
+            }
+            ExprKind::Yield { value } | ExprKind::Yeet { value } | ExprKind::Become { value } => {
+                self.infer_optional(value, &self.cx.unknown())
+                    .context("infer optional expression")?;
+                if !matches!(self.body.expr_unchecked(expr).kind, ExprKind::Yield { .. }) {
+                    self.inference.set_expr_ty(expr, self.cx.never());
+                }
+            }
+            ExprKind::Record {
+                ref path,
+                ref fields,
+                ref spread,
+                ..
+            } => {
+                let (resolution, ty) = match path.as_ref() {
+                    Some(path) => self
+                        .context
+                        .value_paths()
+                        .resolve_record_expr_path(
+                            self.body.expr_unchecked(expr).scope,
+                            path,
+                            self.inference.table(),
+                        )
+                        .context("resolve record path")?,
+                    None => (BodyResolution::Unknown, self.cx.unknown()),
+                };
+                self.inference.set_expr_facts(expr, resolution, ty);
+                // Path lookup supplies the record's identity and written generic arguments.
+                // Make omitted arguments inferable before deriving expectations for the fields.
+                let ty = self.inference.expr_ty(expr);
+                self.inference.instantiate_expr_nested_unknown_ty(expr, &ty);
+                self.inference.constrain_expr_ty(expr, expected);
+                let ty = self.inference.root_resolved_expr_ty(expr);
+                for field in fields {
+                    let expected = self
+                        .context
+                        .live()
+                        .field(ty, &field.key, self.inference.table())
+                        .context("resolve record field")?
+                        .map(|(_, ty)| ty)
+                        .unwrap_or(self.cx.unknown());
+                    self.infer_optional(field.value, &expected)
+                        .context("infer optional expression")?;
+                }
+                self.infer_optional(
+                    spread.as_ref().and_then(|spread| spread.expr),
+                    &self.cx.unknown(),
+                )
+                .context("infer optional expression")?;
+            }
+            ExprKind::Wrapper { kind, inner } => {
+                let resolved_expected = self.inference.root_resolved_ty(expected);
+                let inner_expected = match (&kind, resolved_expected.shape()) {
+                    (ExprWrapperKind::Paren | ExprWrapperKind::Await, _) => *expected,
+                    (
+                        ExprWrapperKind::Ref { mutability },
+                        TyShape::Reference {
+                            mutability: expected_mutability,
+                            inner,
+                            ..
+                        },
+                    ) if *mutability == expected_mutability => inner,
+                    (ExprWrapperKind::Return, _) => self.return_ty,
+                    _ => self.cx.unknown(),
+                };
+                self.infer_optional(inner, &inner_expected)
+                    .context("infer wrapped expression")?;
+                if let Some(inner) = inner {
+                    let inner_ty = self.inference.expr_slot(inner);
+                    // Await is shallow: async functions expose their declared result here.
+                    // TODO: Model arbitrary Future::Output when inference coverage expands.
+                    let ty = match kind {
+                        ExprWrapperKind::Paren | ExprWrapperKind::Await => inner_ty,
+                        ExprWrapperKind::Ref { mutability } => {
+                            self.cx.reference(mutability, inner_ty)
+                        }
+                        ExprWrapperKind::Return => self.cx.never(),
+                        ExprWrapperKind::Try => {
+                            // `value?` yields <Value as Try>::Output. Keep Value's live slot in
+                            // that projection so a later use can refine an unknown operand too.
+                            // TODO: Relate Try::Residual to the enclosing return type through
+                            // FromResidual; output inference alone does not check that conversion.
+                            match self.context.item_lookup_query().lang_trait(LangItem::Try) {
+                                Some(def) => self
+                                    .context
+                                    .live()
+                                    .projection(
+                                        TraitApplication {
+                                            def,
+                                            args: List::new(self.cx, &[inner_ty.into()]),
+                                        },
+                                        "Output",
+                                        self.inference.table(),
+                                    )
+                                    .context("project try output")?
+                                    .unwrap_or(self.cx.unknown()),
+                                None => self.cx.unknown(),
+                            }
+                        }
+                    };
+                    self.inference.set_expr_ty(expr, ty);
+                    if matches!(kind, ExprWrapperKind::Paren) {
+                        self.inference.set_expr_resolution(
+                            expr,
+                            self.inference.expr_resolution(inner).clone(),
+                        );
+                    }
+                } else if matches!(kind, ExprWrapperKind::Return) {
+                    self.inference.set_expr_ty(expr, self.cx.never());
+                }
+            }
+            ExprKind::Unknown { ref children } => {
+                for child in children {
+                    self.infer_expr(*child, &self.cx.unknown())
+                        .context("infer unmodeled expression child")?;
+                }
+            }
+            ExprKind::Path { ref path } => {
+                let (resolution, ty) = self
+                    .context
+                    .value_paths()
+                    .resolve_body_path_expr(expr, path, self.cx)
+                    .context("resolve body path")?;
+                if let BodyResolution::Binding(binding) = resolution {
+                    self.inference.set_expr_resolution(expr, resolution);
+                    self.inference.set_expr_from_binding(expr, binding);
+                } else {
+                    self.inference.set_expr_facts(expr, resolution, ty);
+                }
+            }
+
+            // Unsuffixed numbers stay inferable until completion: a later use may require `u64`
+            // or `f32`, even when the literal had no expectation at its introduction site.
+            ExprKind::Literal { kind } => match kind {
+                crate::body::LiteralKind::Int { primitive_ty: None } => {
+                    let ty = self.inference.table_mut().new_integer_var();
+                    self.inference.set_expr_ty(expr, ty);
+                }
+                crate::body::LiteralKind::Float { primitive_ty: None } => {
+                    let ty = self.inference.table_mut().new_float_var();
+                    self.inference.set_expr_ty(expr, ty);
+                }
+                _ => self
+                    .inference
+                    .set_expr_ty(expr, self.lower(&rg_ty::ty_for_literal(kind))),
+            },
+            ExprKind::BuiltinMacro { kind } => {
+                let ty = self.builtin_macro_ty(kind);
+                self.inference.set_expr_ty(expr, ty);
+            }
+            ExprKind::Continue { .. } => self.inference.set_expr_ty(expr, self.cx.never()),
+            ExprKind::Underscore => {}
+        }
+
+        // A block with a diverging tail can satisfy a concrete expected result, while the tail
+        // expression itself keeps `!`. This is the small block coercion supported by body facts.
+        if matches!(
+            self.body.expr_unchecked(expr).kind,
+            ExprKind::Block { tail: Some(_), .. }
+        ) && matches!(
+            (self.inference.root_resolved_expr_ty(expr)).shape(),
+            TyShape::Never
+        ) && !matches!(
+            (self.inference.root_resolved_ty(expected)).shape(),
+            TyShape::Unknown | TyShape::Never | TyShape::InferVar { .. }
+        ) {
+            self.inference.set_coerced_expr_ty(expr, *expected);
+        } else {
+            self.coerce_expr_ty(expr, expected);
+        }
+        Ok(())
+    }
+
+    pub(super) fn infer_optional(
+        &mut self,
+        expr: Option<ExprId>,
+        expected: &Ty<'s>,
+    ) -> anyhow::Result<()> {
+        match expr {
+            Some(expr) => self
+                .infer_expr(expr, expected)
+                .context("infer child expression"),
+            None => Ok(()),
+        }
+    }
+
+    /// A branch supplies a value by coercion, so its type need not equal the shared result: a
+    /// deferred call can still reveal `!`. Retain those relationships until its producer settles.
+    fn infer_branch_result(
+        &mut self,
+        expr: ExprId,
+        result_exprs: impl Iterator<Item = ExprId>,
+    ) -> anyhow::Result<()> {
+        let branches = result_exprs
+            .map(|branch| self.inference.expr_slot(branch))
+            .collect();
+        self.run_or_defer(DeferredKind::BranchResult { expr, branches })
+            .context("coerce branch results")
+    }
+
+    fn infer_statement(&mut self, statement: StmtId) -> anyhow::Result<()> {
+        let body = self.body;
+        match body.statement_unchecked(statement).kind {
+            StmtKind::Let {
+                scope,
+                pat,
+                ref annotation,
+                initializer,
+                else_branch,
+                ..
+            } => {
+                let expected = match annotation {
+                    Some(annotation) => self
+                        .context
+                        .live()
+                        .type_ref(scope, annotation, self.inference.table())
+                        .context("resolve let annotation")?,
+                    None => self.cx.unknown(),
+                };
+                self.infer_optional(initializer, &expected)
+                    .context("infer optional expression")?;
+                // Written types remain the binding's contract even when incomplete source has
+                // an incompatible initializer. Inferred bindings instead share the producer slot.
+                let ty = if matches!((expected).shape(), TyShape::Unknown) {
+                    initializer
+                        .map(|expr| self.inference.expr_slot(expr))
+                        .unwrap_or(self.cx.unknown())
+                } else {
+                    expected
+                };
+                if let Some(pat) = pat {
+                    self.infer_pattern(pat, &ty)
+                        .context("infer binding pattern")?;
+                }
+                self.infer_optional(else_branch, &self.cx.unknown())
+                    .context("infer optional expression")?;
+            }
+            StmtKind::Expr { expr, .. } => {
+                self.infer_expr(expr, &self.cx.unknown())
+                    .context("infer statement expression")?;
+            }
+            StmtKind::Item { .. } | StmtKind::ItemIgnored => {}
+        }
+        Ok(())
+    }
+}

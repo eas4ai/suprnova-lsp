@@ -1,0 +1,37 @@
+[package]
+name = "rg_parser"
+version.workspace = true
+edition.workspace = true
+authors = [
+  "rust-analyzer developers",
+  "Igor Aleksanov <popzxc@yandex.ru>",
+]
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "The Rust parser for rust-analyzer."
+
+[lib]
+doctest = false
+
+[dependencies]
+drop_bomb.workspace = true
+ra-ap-rustc_lexer.workspace = true
+rustc-literal-escaper.workspace = true
+tracing.workspace = true
+
+edition.workspace = true
+winnow.workspace = true
+
+[dev-dependencies]
+expect-test.workspace = true
+
+stdx.workspace = true
+
+[features]
+default = []
+in-rust-tree = []
+
+[lints]
+workspace = true

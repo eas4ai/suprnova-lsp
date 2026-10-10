@@ -1,0 +1,91 @@
+use std::path::{Path, PathBuf};
+
+use rg_cfg_eval::CfgOptions;
+use rg_std::MemorySize;
+use rg_text::RustEdition;
+
+use super::{dependency::PackageDependency, target::CargoTarget};
+use crate::{CargoGeneratedSources, SysrootCrate};
+
+/// Stable package identifier inside a normalized workspace metadata snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::Display, MemorySize)]
+#[display("{_0}")]
+pub struct PackageId(#[memsize(inline)] pub(crate) String);
+
+impl PackageId {
+    pub(crate) fn sysroot(krate: SysrootCrate) -> Self {
+        Self(format!("sysroot:{}", krate.name()))
+    }
+}
+
+/// Where one normalized package came from.
+#[derive(Debug, Clone, PartialEq, Eq, MemorySize)]
+pub enum PackageOrigin {
+    Workspace,
+    Dependency,
+    Sysroot(SysrootCrate),
+}
+
+impl PackageOrigin {
+    pub fn is_sysroot(&self) -> bool {
+        matches!(self, Self::Sysroot(_))
+    }
+}
+
+/// Package source kind used for future residency/cache policies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display, MemorySize)]
+#[memsize(leaf)]
+pub enum PackageSource {
+    #[display("workspace")]
+    Workspace,
+    #[display("path")]
+    Path,
+    #[display("registry")]
+    Registry,
+    #[display("sparse-registry")]
+    SparseRegistry,
+    #[display("git")]
+    Git,
+    #[display("local-registry")]
+    LocalRegistry,
+    #[display("directory")]
+    Directory,
+    #[display("sysroot")]
+    Sysroot,
+}
+
+/// Normalized package metadata relevant to later analysis phases.
+#[derive(Debug, Clone, PartialEq, Eq, MemorySize)]
+pub struct Package {
+    pub id: PackageId,
+    pub name: String,
+    pub edition: RustEdition,
+    pub origin: PackageOrigin,
+    pub source: PackageSource,
+    pub is_workspace_member: bool,
+    pub manifest_path: PathBuf,
+    pub cfg_options: CfgOptions,
+    /// Every feature declared in this package's manifest, including inactive features.
+    pub declared_features: Vec<String>,
+    /// Generated sources recovered from one existing Cargo compilation.
+    ///
+    /// This remains separate from ordinary package metadata because it is an approximate snapshot
+    /// of user-produced build outputs. Parse carries it forward so `include!` path resolution can
+    /// use the captured compile-time environment without consulting or executing Cargo.
+    pub cargo_generated_sources: Option<CargoGeneratedSources>,
+    pub targets: Vec<CargoTarget>,
+    pub dependencies: Vec<PackageDependency>,
+}
+
+impl Package {
+    /// Returns the package root directory, modeled as the parent of `Cargo.toml`.
+    pub fn root_dir(&self) -> &Path {
+        self.manifest_path
+            .parent()
+            .expect("package manifest path should have a parent directory")
+    }
+
+    pub(crate) fn contains_path(&self, path: &Path) -> bool {
+        path.starts_with(self.root_dir())
+    }
+}

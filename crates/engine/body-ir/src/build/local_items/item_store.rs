@@ -1,0 +1,64 @@
+//! Adapts finalized lexical DefMaps and source items to semantic item-store lowering.
+//!
+//! This is intentionally an adapter around the generic semantic item-store lowerer: body source
+//! items look like item-tree entries once the local DefMap has been finalized.
+
+use anyhow::Context as _;
+use rg_def_map::{DefMap, ItemSource, ItemSourceKind};
+use rg_ir_model::DefMapRef;
+use rg_item_tree::ItemNode;
+use rg_semantic_ir::{ItemStore, ItemStoreLowerer, ItemStoreSourceReader};
+
+use crate::BodySourceItems;
+
+pub(crate) struct LocalItemStoreCollector<'source> {
+    items: &'source BodySourceItems,
+    def_map: &'source DefMap,
+}
+
+impl<'source> LocalItemStoreCollector<'source> {
+    pub fn new(items: &'source BodySourceItems, def_map: &'source DefMap) -> Self {
+        Self { items, def_map }
+    }
+
+    /// Lowers body-local DefMap entries into semantic item-shaped shadow storage.
+    pub fn collect(self, cancellation: &rg_std::CancellationToken) -> anyhow::Result<ItemStore> {
+        let reader = LocalItemStoreSourceReader {
+            items: self.items,
+            def_map: self.def_map,
+            cancellation,
+        };
+        ItemStoreLowerer::new(self.def_map, reader)
+            .lower()
+            .context("lower collected body source items")
+    }
+}
+
+// Adapts body-local source item storage to the generic semantic item-store lowerer.
+struct LocalItemStoreSourceReader<'source, 'operation> {
+    cancellation: &'operation rg_std::CancellationToken,
+    items: &'source BodySourceItems,
+    def_map: &'source DefMap,
+}
+
+impl<'source> ItemStoreSourceReader<'source> for LocalItemStoreSourceReader<'source, '_> {
+    #[rg_std::cancelable("local signature item", token = self.cancellation)]
+    fn item(&self, source: ItemSource) -> anyhow::Result<&'source ItemNode> {
+        let (DefMapRef::Body(body_ref), ItemSourceKind::Body(source)) =
+            (self.def_map.own_ref(), source.kind)
+        else {
+            anyhow::bail!("body item store source should point to body source item");
+        };
+
+        if source.body != body_ref {
+            anyhow::bail!("body item store source should belong to this body");
+        }
+
+        self.items.item(source.item).with_context(|| {
+            format!(
+                "while attempting to fetch body source item {:?}",
+                source.item
+            )
+        })
+    }
+}
