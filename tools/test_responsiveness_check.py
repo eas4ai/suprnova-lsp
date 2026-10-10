@@ -8,11 +8,12 @@ from contextlib import redirect_stdout
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -77,6 +78,8 @@ class BaselineIntegrity(unittest.TestCase):
             with self.subTest(effective=effective), tempfile.TemporaryDirectory() as scratch, \
                  patch.object(check.ResponsivenessCheck, "baseline", return_value=baseline), \
                  patch.object(check.ResponsivenessCheck, "read_report", return_value=candidate), \
+                 patch.object(check.ResponsivenessCheck, "build_candidate", create=True, new_callable=AsyncMock,
+                              return_value={"runtimeSourcesSha256": "native-source", "binarySha256": candidate["identity"]["binarySha256"], "report": str(Path(scratch) / "native-build.json")}), \
                    patch.object(check.ResponsivenessCheck, "invariant_evidence", return_value={"passed": True}), \
                  patch.object(check.observer.Diagnostic, "inventory", return_value=baseline["sources"]), \
                  patch.object(check.observer.Diagnostic, "runtime_fingerprint", return_value="native-source"), \
@@ -121,6 +124,8 @@ class SourceLatencyIntegrity(unittest.TestCase):
             with self.subTest(slow=slow), tempfile.TemporaryDirectory() as scratch, \
                  patch.object(check.ResponsivenessCheck, "baseline", return_value=baseline), \
                  patch.object(check.ResponsivenessCheck, "read_report", return_value=candidate), \
+                 patch.object(check.ResponsivenessCheck, "build_candidate", create=True, new_callable=AsyncMock,
+                              return_value={"runtimeSourcesSha256": "unit-test-native-source", "binarySha256": candidate["identity"]["binarySha256"], "report": str(Path(scratch) / "native-build.json")}), \
                  patch.object(check.ResponsivenessCheck, "matrix", side_effect=ValueError("complete latency matrix evidence has not been selected")) as matrix, \
                    patch.object(check.ResponsivenessCheck, "invariant_evidence", return_value={"passed": True}), \
                  patch.object(check.observer.Diagnostic, "inventory", return_value=baseline["sources"]), \
@@ -140,6 +145,144 @@ class SourceLatencyIntegrity(unittest.TestCase):
                 else:
                     self.assertEqual(results["RSP-002"]["reason"], "complete latency matrix evidence has not been selected")
                     matrix.assert_called_once()
+
+
+class CurrentBuildProtocol(unittest.TestCase):
+    def test_current_source_is_built_once_before_frozen_no_build_series(self):
+        candidate = json.loads((ROOT / 'tools/fixtures/responsiveness/baseline-source.json').read_text())
+        baseline = copy.deepcopy(candidate['identity'])
+        candidate.update(binaryUnchanged=True, runtimeSourcesUnchanged=True)
+        candidate['identity']['runtimeSourcesSha256'] = 'current-native-source'
+        proof = {'runtimeSourcesSha256': 'current-native-source',
+                 'binarySha256': candidate['identity']['binarySha256'], 'report': 'native-build.json'}
+        order = []
+        async def build(*args):
+            order.append('build')
+            return proof
+        async def series(*args):
+            order.append('series')
+            return Path('candidate.json')
+        with tempfile.TemporaryDirectory() as scratch:
+            runner = SimpleNamespace(create_run_directory=lambda _: Path(scratch))
+            with patch.object(check.ResponsivenessCheck, 'baseline', return_value=baseline), \
+                 patch.object(check.ResponsivenessCheck, 'read_report', return_value=candidate), \
+                 patch.object(check.ResponsivenessCheck, 'build_candidate', create=True, new_callable=AsyncMock, side_effect=build) as built, \
+                 patch.object(check.ResponsivenessCheck, 'invariant_evidence', return_value={'passed': True}), \
+                 patch.object(check.observer.Diagnostic, 'runtime_fingerprint', return_value='current-native-source'), \
+                 patch.object(check.observer.SourceSeries, 'run', new_callable=AsyncMock, side_effect=series) as collected, \
+                 patch.object(check.observer.helpers, 'module', return_value=runner), \
+                 redirect_stdout(io.StringIO()):
+                asyncio.run(check.ResponsivenessCheck.run())
+            built.assert_awaited_once_with(runner, Path(scratch))
+            collected.assert_awaited_once_with(check.observer.MODES, True, 4096)
+            self.assertEqual(order, ['build', 'series'])
+
+    def test_source_series_cannot_substitute_a_binary_or_source_after_build(self):
+        for corruption in ('binary', 'source'):
+            with self.subTest(corruption=corruption), tempfile.TemporaryDirectory(dir=ROOT / 'target/agent-debug') as scratch:
+                directory = Path(scratch)
+                binary = directory / 'suprnova-lsp'
+                binary.write_bytes(b'actual controlled current binary')
+                candidate = json.loads((ROOT / 'tools/fixtures/responsiveness/baseline-source.json').read_text())
+                baseline = copy.deepcopy(candidate['identity'])
+                candidate.update(binaryUnchanged=True, runtimeSourcesUnchanged=True)
+                candidate['identity'].update(binary=str(binary), binarySha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+                                              runtimeSourcesSha256='current-source')
+                proof = {'runtimeSourcesSha256': 'current-source', 'binarySha256': candidate['identity']['binarySha256'],
+                         'report': str(directory / 'native-build.json')}
+                async def series(*args):
+                    if corruption == 'binary':
+                        binary.write_bytes(b'substituted after build')
+                        candidate['identity']['binarySha256'] = hashlib.sha256(binary.read_bytes()).hexdigest()
+                    else:
+                        candidate['identity']['runtimeSourcesSha256'] = 'substituted-source'
+                    return directory / 'candidate.json'
+                runner = SimpleNamespace(create_run_directory=lambda _: directory)
+                with patch.object(check.ResponsivenessCheck, 'baseline', return_value=baseline), \
+                     patch.object(check.ResponsivenessCheck, 'read_report', return_value=candidate), \
+                     patch.object(check.ResponsivenessCheck, 'build_candidate', create=True, new_callable=AsyncMock, return_value=proof), \
+                     patch.object(check.ResponsivenessCheck, 'invariant_evidence', return_value={'passed': True}), \
+                     patch.object(check.ResponsivenessCheck, 'matrix') as matrix, \
+                     patch.object(check.observer.Diagnostic, 'runtime_fingerprint', side_effect=lambda: candidate['identity']['runtimeSourcesSha256']), \
+                     patch.object(check.observer.SourceSeries, 'run', new_callable=AsyncMock, side_effect=series), \
+                     patch.object(check.observer.helpers, 'module', return_value=runner), redirect_stdout(io.StringIO()):
+                    self.assertEqual(asyncio.run(check.ResponsivenessCheck.run()), 1)
+                result = json.loads((directory / 'observations.json').read_text())
+                self.assertFalse(result['RSP-001']['passed'])
+                self.assertRegex(result['RSP-001']['reason'], 'build|binary|source')
+                matrix.assert_not_called()
+
+
+class GuardedCurrentBuild(unittest.TestCase):
+    def setUp(self):
+        self.scratch = tempfile.TemporaryDirectory(dir=ROOT / 'target/agent-debug')
+        self.addCleanup(self.scratch.cleanup)
+        self.directory = Path(self.scratch.name)
+        build_root = self.directory / 'build'
+        self.binary = build_root / 'x86_64-unknown-linux-gnu/release/suprnova-lsp'
+        self.binary.parent.mkdir(parents=True)
+        self.binary.write_bytes(b'actual controlled current binary bytes')
+        self.args = ['build', '--target-dir', str(build_root), '--target', 'x86_64-unknown-linux-gnu',
+                     '--release', '-p', 'suprnova-lsp', '--locked', '--offline']
+        self.outcome = {'command': 'cargo', 'args': self.args, 'pid': 101, 'code': 0,
+            'timedOut': False, 'signal': None, 'spawnError': None, 'interruptedBy': None,
+            'cleanup': {'processGroupId': 101, 'verifiedEmpty': True, 'remainingPids': []}}
+        self.runner = SimpleNamespace(BUILD_ROOT=build_root,
+            RunnerOptions=lambda **kwargs: SimpleNamespace(**kwargs),
+            build_spec=Mock(side_effect=lambda options: SimpleNamespace(command='cargo', args=self.args[:-2].copy())),
+            CommandSpec=lambda command, args: SimpleNamespace(command=command, args=args),
+            rust_glancer_binary=Mock(return_value=self.binary),
+            observe_command=AsyncMock(return_value=(self.outcome, 'actual controlled compiler output')),
+            write_json=lambda path, value: Path(path).write_text(json.dumps(value)),
+            summarize_cleanup=lambda commands: {'status': 'verified', 'runs': len(commands), 'verifiedRuns': len(commands)},
+            install_signal_handlers=lambda: None)
+
+    def build(self, fingerprints=('current-source', 'current-source')):
+        with patch.object(check.observer.Diagnostic, 'runtime_fingerprint', side_effect=fingerprints):
+            return asyncio.run(check.ResponsivenessCheck.build_candidate(self.runner, self.directory))
+
+    def test_real_file_digest_and_exact_supervised_locked_release_layout(self):
+        inherited = {name: 'inherited-wrong-value' for name in
+                     ('RUSTUP_TOOLCHAIN', 'CARGO_BUILD_JOBS', 'CARGO_NET_OFFLINE', 'CARGO_TARGET_DIR', 'CARGO_BUILD_BUILD_DIR')}
+        with patch.dict(os.environ, inherited):
+            proof = self.build()
+        self.assertEqual(proof['runtimeSourcesSha256'], 'current-source')
+        self.assertEqual(proof['binarySha256'], hashlib.sha256(self.binary.read_bytes()).hexdigest())
+        self.assertTrue(Path(proof['report']).is_file())
+        self.runner.build_spec.assert_called_once()
+        self.assertEqual(self.runner.build_spec.call_args.args[0].build_profile, 'release')
+        self.runner.rust_glancer_binary.assert_called_once_with('release')
+        self.runner.observe_command.assert_awaited_once()
+        spec, cwd, environment, output, deadline = self.runner.observe_command.await_args.args
+        self.assertEqual((spec.command, spec.args), ('cargo', self.args))
+        self.assertEqual(cwd, ROOT)
+        self.assertEqual(deadline, 20 * 60_000)
+        self.assertTrue(Path(output).is_relative_to(self.directory))
+        self.assertEqual({name: environment[name] for name in inherited}, {
+            'RUSTUP_TOOLCHAIN': '1.98.1', 'CARGO_BUILD_JOBS': '2', 'CARGO_NET_OFFLINE': 'true',
+            'CARGO_TARGET_DIR': str(self.runner.BUILD_ROOT), 'CARGO_BUILD_BUILD_DIR': str(self.runner.BUILD_ROOT)})
+        report = json.loads(Path(proof['report']).read_text())
+        self.assertEqual(report['commands'], [self.outcome])
+
+    def test_failed_timeout_or_unverified_cleanup_cannot_produce_candidate_proof(self):
+        for corruption in ('failed', 'timeout', 'cleanup', 'remaining-pids'):
+            outcome = copy.deepcopy(self.outcome)
+            if corruption == 'failed': outcome['code'] = 42
+            elif corruption == 'timeout': outcome['timedOut'] = True
+            elif corruption == 'cleanup': outcome['cleanup']['verifiedEmpty'] = False
+            else: outcome['cleanup']['remainingPids'] = [102]
+            self.runner.observe_command.return_value = (outcome, 'controlled failed build')
+            with self.subTest(corruption=corruption), self.assertRaises((ValueError, OSError)):
+                self.build()
+
+    def test_changed_native_sources_reject_despite_successful_build(self):
+        with self.assertRaisesRegex(ValueError, 'source'):
+            self.build(('before-source', 'after-source'))
+
+    def test_missing_actual_binary_rejects_despite_successful_build(self):
+        self.binary.unlink()
+        with self.assertRaises((ValueError, OSError)):
+            self.build()
 
 
 class IndependentEvidenceRouting(unittest.TestCase):
