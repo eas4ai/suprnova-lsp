@@ -1,0 +1,11 @@
+rustdoc JSON format: 61
+Toolchain: nightly-2026-08-19
+rustc: 1.100.0-nightly (e71c0f1e3 2026-08-18)
+Host: x86_64-unknown-linux-gnu
+
+Regenerate from this fixture directory:
+cargo +nightly-2026-08-19 rustdoc -p rustdoc_bounded --locked -- -Z unstable-options --output-format json --document-private-items --document-hidden-items
+Copy target/doc/rustdoc_bounded.json to export.json.
+
+The attribute macro produces a Gate-bounded inherent impl on Post<T>, alongside
+an unconditional source impl. Allowed implements Gate; Denied does not.

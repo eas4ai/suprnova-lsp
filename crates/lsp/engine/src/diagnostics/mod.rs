@@ -1,0 +1,233 @@
+//! Cargo-backed diagnostics for the LSP server.
+//!
+//! This module runs `cargo check`/`cargo clippy` outside the synchronous analysis engine.
+//!
+//! It emits saved-source diagnostics and progress through the service notification channel. The
+//! server-side editor owner decides whether those saved bytes still match an open buffer before
+//! publication, so Cargo work stays independent from editor lifecycle state.
+
+use std::{
+    collections::{BTreeSet, hash_map::DefaultHasher},
+    hash::{Hash, Hasher},
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
+
+use gen_lsp_types::ProgressToken;
+use rg_lsp_proto::{AnalysisConfig, DiagnosticsConfig};
+use rg_std::NormalizedPathBuf;
+use tokio::{sync::Mutex, task::JoinHandle};
+
+use crate::{debounce::Debouncer, service::ServiceNotificationsSink};
+
+mod cargo;
+mod command;
+mod progress;
+mod publish;
+mod task;
+
+use self::{
+    progress::{DiagnosticsProgress, ProgressFinish},
+    task::DiagnosticsTaskContext,
+};
+
+const EXTERNAL_CHANGE_DIAGNOSTICS_DEBOUNCE: Duration = Duration::from_secs(1);
+
+/// Launches Cargo diagnostics independently from the synchronous analysis engine.
+#[derive(Clone, Debug)]
+pub(crate) struct DiagnosticsHandle {
+    notifications: ServiceNotificationsSink,
+    inner: Arc<Mutex<DiagnosticsHandleInner>>,
+    current: Arc<Mutex<Option<CurrentDiagnostics>>>,
+    external_change_debouncer: Debouncer,
+}
+
+impl DiagnosticsHandle {
+    pub(crate) fn new(notifications: ServiceNotificationsSink) -> Self {
+        Self {
+            notifications,
+            inner: Arc::default(),
+            current: Arc::default(),
+            external_change_debouncer: Debouncer::new(EXTERNAL_CHANGE_DIAGNOSTICS_DEBOUNCE),
+        }
+    }
+
+    pub(crate) async fn configure(
+        &self,
+        workspace_root: PathBuf,
+        config: DiagnosticsConfig,
+        analysis: AnalysisConfig,
+    ) {
+        let mut inner = self.inner.lock().await;
+        inner.workspace_root = Some(workspace_root);
+        inner.config = config;
+        inner.analysis = analysis;
+    }
+
+    pub(crate) async fn launch_on_startup(&self) {
+        self.launch(DiagnosticsTrigger::Startup).await;
+    }
+
+    pub(crate) async fn launch_on_editor_save(&self, saved_path: PathBuf) {
+        self.external_change_debouncer.cancel();
+        self.launch(DiagnosticsTrigger::EditorSave { path: saved_path })
+            .await;
+    }
+
+    pub(crate) async fn launch_on_external_change(&self, changed_path: PathBuf) {
+        if !self.on_save_diagnostics_enabled().await {
+            return;
+        }
+
+        // The previous cargo run belongs to an older saved snapshot. Stop it immediately, then
+        // wait for nearby external changes to settle before spending work on a replacement run.
+        self.cancel_current().await;
+
+        let handle = self.clone();
+        self.external_change_debouncer.call(move || {
+            tokio::spawn(async move {
+                handle
+                    .launch(DiagnosticsTrigger::ExternalChange { path: changed_path })
+                    .await;
+            });
+        });
+    }
+
+    async fn launch(&self, trigger: DiagnosticsTrigger) {
+        let Some(snapshot) = self.prepare_launch(trigger).await else {
+            return;
+        };
+
+        self.cancel_current().await;
+        let progress_token = ProgressToken::String(Self::progress_token(
+            &snapshot.workspace_root,
+            snapshot.generation,
+        ));
+        let progress = DiagnosticsProgress::new(self.notifications.clone(), progress_token);
+        let task = DiagnosticsTaskContext::new(
+            self.notifications.clone(),
+            Arc::clone(&self.inner),
+            Arc::clone(&self.current),
+        )
+        .spawn(snapshot, progress.clone());
+
+        *self.current.lock().await = Some(CurrentDiagnostics { task, progress });
+    }
+
+    pub(crate) async fn shutdown(&self) {
+        self.external_change_debouncer.cancel();
+        if let Some(current) = self.current.lock().await.take() {
+            current.task.abort();
+            current.progress.finish(ProgressFinish::Cancelled).await;
+        }
+    }
+
+    async fn on_save_diagnostics_enabled(&self) -> bool {
+        let inner = self.inner.lock().await;
+        if !inner.config.on_save {
+            return false;
+        }
+        if inner.workspace_root.is_none() {
+            tracing::debug!("cargo diagnostics requested before workspace configuration");
+            return false;
+        }
+
+        true
+    }
+
+    async fn prepare_launch(&self, trigger: DiagnosticsTrigger) -> Option<DiagnosticsSnapshot> {
+        let mut inner = self.inner.lock().await;
+        if !trigger.enabled(&inner.config) {
+            return None;
+        }
+        let Some(workspace_root) = inner.workspace_root.clone() else {
+            tracing::debug!("cargo diagnostics requested before workspace configuration");
+            return None;
+        };
+
+        inner.generation += 1;
+        Some(DiagnosticsSnapshot {
+            generation: inner.generation,
+            workspace_root,
+            config: inner.config.clone(),
+            analysis: inner.analysis.clone(),
+            trigger,
+        })
+    }
+
+    async fn cancel_current(&self) {
+        if let Some(current) = self.current.lock().await.take() {
+            current.task.abort();
+            current.progress.finish(ProgressFinish::Cancelled).await;
+            tracing::debug!("cancelled previous cargo diagnostics run");
+        }
+    }
+
+    fn progress_token(workspace_root: &Path, generation: u64) -> String {
+        let mut hasher = DefaultHasher::new();
+        workspace_root.hash(&mut hasher);
+        format!(
+            "suprnova-lsp/diagnostics/{:x}/{generation}",
+            hasher.finish()
+        )
+    }
+}
+
+#[derive(Debug)]
+struct CurrentDiagnostics {
+    task: JoinHandle<()>,
+    progress: DiagnosticsProgress,
+}
+
+#[derive(Debug, Default)]
+struct DiagnosticsHandleInner {
+    workspace_root: Option<PathBuf>,
+    config: DiagnosticsConfig,
+    analysis: AnalysisConfig,
+    // Every launched cargo diagnostics task gets a monotonically increasing generation. A task
+    // only publishes when it still matches the latest generation, so stale tasks cannot overwrite
+    // newer diagnostics.
+    generation: u64,
+    // Cargo omits files that no longer have diagnostics, but LSP clients require an explicit empty
+    // diagnostic list to clear old entries. Track the last published set so the next run can clear
+    // stale files.
+    // Paths ever reported by Cargo are retained so a skipped clear can be offered again after an
+    // open editor buffer becomes compatible with saved-source diagnostics.
+    known_paths: BTreeSet<NormalizedPathBuf>,
+}
+
+#[derive(Debug)]
+struct DiagnosticsSnapshot {
+    generation: u64,
+    workspace_root: PathBuf,
+    config: DiagnosticsConfig,
+    analysis: AnalysisConfig,
+    trigger: DiagnosticsTrigger,
+}
+
+#[derive(Debug)]
+enum DiagnosticsTrigger {
+    Startup,
+    EditorSave { path: PathBuf },
+    ExternalChange { path: PathBuf },
+}
+
+impl DiagnosticsTrigger {
+    fn enabled(&self, config: &DiagnosticsConfig) -> bool {
+        match self {
+            Self::Startup => config.on_startup,
+            Self::EditorSave { .. } | Self::ExternalChange { .. } => config.on_save,
+        }
+    }
+}
+
+impl std::fmt::Display for DiagnosticsTrigger {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Startup => f.write_str("startup"),
+            Self::EditorSave { path } => write!(f, "editor-save:{}", path.display()),
+            Self::ExternalChange { path } => write!(f, "external-change:{}", path.display()),
+        }
+    }
+}
