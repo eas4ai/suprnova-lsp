@@ -28,6 +28,7 @@ use rg_lsp_proto::{
     FoldingClientCapabilities, GlobalPositionSnapshot,
 };
 use rg_parse::{CurrentSource, LineIndex};
+use rg_profile::ThreadCpuTime;
 use rg_project::{
     AnalysisSurface, CurrentSourceBuildCheckpoint, CurrentSourceSelection, DocumentSourceView,
     FileContext, ProjectSnapshot,
@@ -715,10 +716,14 @@ impl<'a> QueryRunner<'a> {
             // Owned protocol data no longer borrows the analysis. Time its release separately
             // from preparation and rendering, while keeping it on the same query lane.
             let release_started = Instant::now();
+            let release_cpu_started =
+                ThreadCpuTime::capture(tracing::enabled!(tracing::Level::TRACE));
             drop(destinations);
             drop(current);
+            let release_cpu_us = release_cpu_started.and_then(ThreadCpuTime::elapsed_us);
             tracing::trace!(
                 elapsed_us = release_started.elapsed().as_micros(),
+                thread_cpu_us = ?release_cpu_us,
                 "hover request-owned analysis released"
             );
             return Ok(hover);
