@@ -31,7 +31,7 @@ pub(crate) use self::project_status::{EngineProjectStatus, EngineProjectUpdate};
 mod project_status;
 
 const PROJECT_UPDATE_RPC_DEADLINE: Duration = Duration::from_secs(30 * 60);
-const ANALYSIS_QUERY_RPC_DEADLINE: Duration = Duration::from_secs(31);
+const ANALYSIS_QUERY_RPC_DEADLINE: Duration = Duration::from_secs(30);
 
 /// RPC client and saved-project status state for one engine process.
 ///
