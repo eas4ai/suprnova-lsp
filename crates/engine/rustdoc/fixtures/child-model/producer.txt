@@ -1,0 +1,3 @@
+nightly-2026-08-19; rustdoc JSON format 61; private and hidden items included
+SHA-256: 2b9b8e3830576935e9bd2d18c4e6b6dd74a318a0ddbca0ae2d7eb49a51957e10
+Generated from the checked-in lib and procedural macro. Compiler artifacts: target/agent-debug/runs/20261004T204306445Z-child-export-2680027-11beab

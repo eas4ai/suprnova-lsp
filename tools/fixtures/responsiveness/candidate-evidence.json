@@ -1,0 +1,94 @@
+{
+  "schema": 1,
+  "matrix": {
+    "path": "target/agent-debug/runs/20261010T032735688Z-rsp-matrix-158354-646154/report.json",
+    "sha256": "17a570afa5c80a6e3836b62f11e5bc395de8018bb66da6c158f1e586d8706b16"
+  },
+  "native": {
+    "path": "target/agent-debug/runs/20261010T054911763Z-rsp-native-1150716-7a6cde/report.json",
+    "sha256": "39b808294f6cec76fa60d1131e01894f3202b4dc14651f5b679421691a94a4aa"
+  },
+  "semantic": {
+    "path": "target/agent-debug/runs/20261010T060258380Z-editor-import-1211650-49f805/observations.json",
+    "sha256": "9b159b72b609e9b1f0d3b9b596a0527eb7a0bbf2324c2f9913a4503f088c97da",
+    "queryLogs": {
+      "initial/stdout.log": "4d28863da580fc36df6861d3c04da3c62a3bfea62007749821d5899d918ff1df",
+      "batched/stdout.log": "5772f4ce2bf9e1fcd026acf298a0bc48825a7e0f6b5b2483036d839a6df6a923",
+      "source-initial/stdout.log": "574bcc4fe94281d00ae00d35f8303290cc42fb47b66d80d76568d4b384def9b7",
+      "source-batched/stdout.log": "aa7bf9fcc0b7af4e65bcbb5d85e42703a65476e23deea5bce0109030dae0b80b"
+    }
+  },
+  "semanticCleanup": {
+    "path": "target/agent-debug/runs/20261010T060258380Z-editor-import-1211650-49f805/summary.json",
+    "sha256": "ce2fc9df6a5dff0b99880801ea33840857d748ffef08a52562ccc74e1dcf47c0"
+  },
+  "editor": {
+    "path": "target/agent-debug/runs/20261010T060913985Z-rsp-editor-1233130-2a76cc/report.json",
+    "sha256": "b313347a1f06ffdba3854f85345091555fe5cb097eaddb024e62e85d0c70ad32"
+  },
+  "cancellation": {
+    "path": "target/agent-debug/runs/20261010T060938098Z-rsp-editor-cancellation-1235467-e5f089/report.json",
+    "sha256": "d6919433e9d0e244d5ddede5eeb48cf7885216043bb903360f4eb4d13aee2155"
+  },
+  "progress": {
+    "path": "target/agent-debug/runs/20261010T060141467Z-rsp-progress-1205850-200e38/report.json",
+    "sha256": "b32daa68ad84e8aa3b15939838121791e40ad21a0cfffec4d3065003244a26cf",
+    "artifacts": {
+      "stream-faster-builds/stdout.log": "72d64c476b5d490c877829c15ec8cc228b7f8b4361707f15118878f407ac9151",
+      "stream-faster-builds-plan.json": "b89944ba31e4df4d533c9bee5ee162b5dd280113a6b182cada883760b8d9fca8"
+    }
+  },
+  "idle": {
+    "baselineBuild": {
+      "path": "target/agent-debug/runs/20261007T001653560Z-rsp-diagnostic-2206949-13c730/report.json",
+      "sha256": "58329d5de08d1d85841a95d04c0cf77a28687fcbf3a900d6848c7c966fbbfab1"
+    },
+    "baselineManifest": {
+      "path": "target/agent-debug/responsiveness-baseline/1889da8c00d21260bc785fb1658d4a8a6ad427449c16bd9f8391af81547ef0b2/manifest.json",
+      "sha256": "9dc1ef0d5ca6b4a980baf6e03ca2fb6358b8ee17461248b786d71319d00b90a1"
+    },
+    "baselineReview": {
+      "path": "target/agent-debug/rsp006-baseline-1889-provenance-source-review.md",
+      "sha256": "8f70f78486165b51bef63eeb74a6f0a1eb3773e9bb88753a389024f9cd9793fd"
+    },
+    "binding": {
+      "path": "target/agent-debug/current-eight-reader-idle-pairs-proof-01/binding.json",
+      "sha256": "d76ed9780c9c8e73a6f33427378d159f0e71aab75bd0fcc8527b07f45d30d3c5"
+    },
+    "candidateArchiveIdentity": {
+      "path": "target/agent-debug/current-eight-reader-matrix/identity.json",
+      "sha256": "aa2bb1ac1db042406def24344f71d577940e01f5222eb706cb72245f4ec1f528"
+    },
+    "candidateCompiledIdentity": {
+      "path": "target/agent-debug/runs/20261010T032141961Z-rsp-method-lookup-build-108197-cd7b51/identity.json",
+      "sha256": "b1a86f339fcc9a37b9eacbf57b3c6f7fc026c8b3a5c20a3a47ef3c97debb7619"
+    },
+    "candidateCompiledReport": {
+      "path": "target/agent-debug/runs/20261010T032141961Z-rsp-method-lookup-build-108197-cd7b51/report.json",
+      "sha256": "77f60bc2bf730eac6296ac61220e412025ff57808393b44d0ca1d7c3f74fcf6e"
+    },
+    "captureSource": {
+      "path": "target/agent-debug/collect-current-eight-reader-idle-pairs.py",
+      "sha256": "383fb2a6ea0d56db578f146b33b345c12b920d65b9896ce9ebfae2714936eac0"
+    },
+    "path": "target/agent-debug/runs/20261010T055902223Z-rsp-idle-pairs-1189591-01a738/report.json",
+    "producer": {
+      "path": "crates/engine/rustdoc/fixtures/devlist-user/producer.json",
+      "sha256": "c0c3a793d9d7a666d53ae4622a11e1e4b31c82573f33427045b1a92dd4ff0664"
+    },
+    "producerRun": {
+      "path": "target/agent-debug/runs/20261007T152858816Z-suprnova-user-514328-68dbf9/summary.json",
+      "sha256": "49c9d5f60ddc4237ffe27ba92b5193a80f35a8be0290c2cbb64a58d4dd17f68d"
+    },
+    "retainedReview": {
+      "path": "target/agent-debug/rsp006-current-eight-reader-retained-owner-source-review.md",
+      "runtimeSourcesSha256": "a20ba308b39e3cd5029a36593f7a858c13dc9ee8bee3fc780fb8acf088786a01",
+      "sha256": "006b7cbacebbc87abfba622659c64f0496b431c9fa9c2f1f23915d531876dfd8"
+    },
+    "sha256": "700a083b7c26db473e5c8d1d0c9eda62d3a36b7d833837e5ceeb600f75de83b1"
+  },
+  "policy": {
+    "path": "target/agent-debug/rsp005-current-policy-managed-running-e986-01/managed-collection.json",
+    "sha256": "e8572ed6566c7868f63884d5e28d74f56ffca561ff6a76009aeb3cb84496b070"
+  }
+}
