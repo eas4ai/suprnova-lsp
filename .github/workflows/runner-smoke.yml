@@ -57,6 +57,29 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then
             docker info --format '{{.ServerVersion}}'
           fi
+      - name: Check Linux release Cargo mount
+        if: matrix.role == 'linux'
+        shell: bash
+        env:
+          SERVICE_USER: ${{ vars.SUPRNOVA_LSP_LINUX_CONTAINER_USER }}
+          RELEASE_IMAGE: quay.io/pypa/manylinux_2_28_x86_64@sha256:4dc41da7df20400310c80d162a2fe2d2c2f3d9734d8dec20f6b9843711618deb
+        run: |
+          set -euo pipefail
+          test "$SERVICE_USER" = "$(id -u):$(id -g)"
+          docker run --rm --user "$SERVICE_USER" \
+            --mount type=volume,source=suprnova-lsp-cargo,target=/github/service-cargo \
+            --env CARGO_HOME=/github/service-cargo \
+            --env EXPECTED_INODE="$(stat -c '%i' "$CARGO_HOME")" \
+            --env EXPECTED_USER="$SERVICE_USER" \
+            "$RELEASE_IMAGE" bash -c '
+              set -euo pipefail
+              test "$CARGO_HOME" = /github/service-cargo
+              test "$(stat -c "%i" "$CARGO_HOME")" = "$EXPECTED_INODE"
+              test "$(id -u):$(id -g)" = "$EXPECTED_USER"
+              probe=$(mktemp "$CARGO_HOME/.suprnova-lsp-container-probe.XXXXXX")
+              trap '\''rm -f "$probe"'\'' EXIT
+              test "$(stat -c "%u:%g" "$probe")" = "$EXPECTED_USER"
+            '
       - name: Compile and test Rust probe
         run: python .github/scripts/runner_smoke.py
       - name: Upload runner observation

@@ -7,6 +7,7 @@ import importlib.util
 import json
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 
@@ -146,10 +147,24 @@ $values=@{}; foreach($line in Get-Content (Join-Path $root '.env')){if($line -ma
         for target in ("linux-arm64", "darwin-x64"):
             cls.require(not targets[target].get("local_runner"), "Unsupported release architecture selects local hardware")
         cls.require(targets["linux-x64"]["container"] == "quay.io/pypa/manylinux_2_28_x86_64@sha256:4dc41da7df20400310c80d162a2fe2d2c2f3d9734d8dec20f6b9843711618deb", "Linux release compatibility changed")
+        container = release["container"]
+        native_linux = TRUST + " && matrix.vscode_target == 'linux-x64'"
+        cls.require(isinstance(container, dict) and container.get("image") == "${{ matrix.container }}"
+                    and container.get("volumes") == ["${{ " + native_linux + " && 'suprnova-lsp-cargo:/github/service-cargo' || '/github/home/.cargo' }}"]
+                    and container.get("options") == "${{ " + native_linux + " && format('--user {0}', vars.SUPRNOVA_LSP_LINUX_CONTAINER_USER) || '' }}"
+                    and container.get("env") == {"CARGO_HOME": "${{ " + native_linux + " && '/github/service-cargo' || '/github/home/.cargo' }}", "RUSTUP_HOME": "/github/home/.rustup"},
+                    "Release container loses the service Cargo home or owner")
+        installer = next(step for step in release["steps"] if step.get("name") == "Install Rust in Linux compatibility container")
+        cls.require('CARGO_HOME="$HOME/.container-cargo-tools" sh' in installer["run"], "Container Rust installer modifies shared Cargo binaries")
         smoke = workflows["runner-smoke.yml"]
         cls.require(set(smoke["on"]) == {"workflow_dispatch"} and smoke["jobs"]["smoke"]["if"] == TRUST, "Smoke dispatch guard changed")
         cls.require(smoke["jobs"]["smoke"]["runs-on"] == "${{ matrix.labels }}", "Smoke routing changed")
         cls.require({entry["role"]: entry["labels"] for entry in smoke["jobs"]["smoke"]["strategy"]["matrix"]["include"]} == LABELS, "Smoke platform matrix changed")
+        mount_probe = next(step for step in smoke["jobs"]["smoke"]["steps"] if step.get("name") == "Check Linux release Cargo mount")
+        cls.require(mount_probe["if"] == "matrix.role == 'linux'"
+                    and mount_probe["env"] == {"SERVICE_USER": "${{ vars.SUPRNOVA_LSP_LINUX_CONTAINER_USER }}", "RELEASE_IMAGE": targets["linux-x64"]["container"]}
+                    and 'source=suprnova-lsp-cargo,target=/github/service-cargo' in mount_probe["run"]
+                    and '--user "$SERVICE_USER"' in mount_probe["run"] and 'EXPECTED_INODE' in mount_probe["run"], "Release container boundary probe differs")
         guarded = {("ci.yml", "tests"), ("build-server.yml", "build"),
                    *[("platform-checks.yml", name) for name in ("client", "build-editor-packages", "compare-lsp-windows")],
                    ("github-release.yml", "packages"), ("runner-smoke.yml", "smoke")}
@@ -185,6 +200,8 @@ $values=@{}; foreach($line in Get-Content (Join-Path $root '.env')){if($line -ma
             cls.require(job["conclusion"] == "success" and set(LABELS[role]) <= set(job["labels"]), "Smoke job failed or labels differ")
             for step_name in ("Install native test tools", "Check required native tools", "Compile and test Rust probe", "Upload runner observation"):
                 cls.require(any(step["name"] == step_name and step["conclusion"] == "success" for step in job["steps"]), "Smoke step did not pass: " + step_name)
+            if role == "linux":
+                cls.require(any(step["name"] == "Check Linux release Cargo mount" and step["conclusion"] == "success" for step in job["steps"]), "Actual release Cargo mount probe missing")
             value = observations[role]
             cls.require(value["runId"] == str(run["id"]) and value["sha"] == run["head_sha"]
                         and value["runnerName"] == name and value["role"] == role and value["host"] == TARGETS[role]
@@ -229,6 +246,13 @@ $values=@{}; foreach($line in Get-Content (Join-Path $root '.env')){if($line -ma
     @classmethod
     def check_routing(cls):
         cls.routing(cls.workflows(ROOT))
+        hosts = cls.hosts()
+        environment = hosts.execute("linux", ["systemctl", "--user", "show", "github-runner.eas4ai.suprnova-lsp.rust-linux-x64.service", "--property=Environment", "--value"])
+        cargo_home = dict(value.split("=", 1) for value in shlex.split(environment))["CARGO_HOME"]
+        options = json.loads(hosts.execute("linux", ["docker", "volume", "inspect", "suprnova-lsp-cargo", "--format", "{{json .Options}}"] ))
+        cls.require(options == {"device": cargo_home, "o": "bind", "type": "none"}, "Container volume does not bind the configured service Cargo home")
+        owner = hosts.execute("linux", ["python3", "-c", "import os; print(str(os.getuid())+':'+str(os.getgid()))"]).strip()
+        cls.require(cls.github("actions/variables/SUPRNOVA_LSP_LINUX_CONTAINER_USER")["value"] == owner, "Release container user differs from service owner")
         cls.require(cls.github("actions/permissions/fork-pr-contributor-approval")["approval_policy"] == "all_external_contributors", "Public fork approval policy differs")
         cls.require(cls.github("actions/workflows/release.yml")["state"] == "disabled_manually", "Marketplace workflow is enabled")
         for name in ("ci.yml", "performance.yml", "github-release.yml", "runner-smoke.yml"):
