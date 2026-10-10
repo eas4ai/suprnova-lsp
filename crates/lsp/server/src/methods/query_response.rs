@@ -48,7 +48,7 @@ pub(super) fn validate_global_operation<T>(
             "global query response does not match its captured ingress-state epoch",
         ));
     }
-    if false && !captured.is_global_operation_current(&target, open_documents_revision) {
+    if !captured.is_global_operation_current(&target, open_documents_revision) {
         tracing::debug!(
             path = %target.path().display(),
             session = target.session().get(),
