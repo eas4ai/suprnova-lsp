@@ -1,6 +1,5 @@
 mod builtin_derives;
 mod lookup_prefetch;
-mod read_release;
 mod trait_impl_lookup;
 mod utils;
 

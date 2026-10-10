@@ -27,18 +27,6 @@ pub(super) enum PackageReadEntry<'db> {
     Excluded,
 }
 
-impl PackageReadEntry<'_> {
-    pub(super) fn has_unique_decoded_values(&self) -> bool {
-        matches!(self, Self::Lazy(package) if package.has_unique_decoded_values())
-    }
-
-    pub(super) fn release_decoded_values(&mut self) {
-        if let Self::Lazy(package) = self {
-            package.release_decoded_values();
-        }
-    }
-}
-
 /// A request-local view of one offloaded Semantic IR package.
 ///
 /// Separate item and lookup-index cells let exact queries share only the data they actually used.
@@ -54,30 +42,6 @@ impl<'db> LazyPackage<'db> {
             loader,
             loaded: OnceLock::new(),
         }
-    }
-
-    pub(super) fn has_unique_decoded_values(&self) -> bool {
-        let Some(loaded) = self.loaded.get() else {
-            return false;
-        };
-        // Shared cells only decrement a reference. Reserve workers for entries that can actually
-        // destroy decoded data; uniqueness is an efficiency hint, never an ownership assumption.
-        loaded.items.iter().any(|cell| {
-            cell.get()
-                .is_some_and(|value| Arc::strong_count(value) == 1)
-        }) || loaded.lookup_indexes.iter().any(|cell| {
-            cell.get()
-                .is_some_and(|value| Arc::strong_count(value) == 1)
-        }) || loaded
-            .package
-            .get()
-            .is_some_and(|value| Arc::strong_count(value) == 1)
-    }
-
-    pub(super) fn release_decoded_values(&mut self) {
-        // Leave the loader on the caller so releasing decoded values cannot also start artifact
-        // reader cleanup inside a semantic release worker.
-        drop(self.loaded.take());
     }
 
     /// Returns the package's dense crate directory, loading it on first access.
