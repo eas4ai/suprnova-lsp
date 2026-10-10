@@ -5,7 +5,6 @@ import base64
 import hashlib
 import importlib.util
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
@@ -149,8 +148,19 @@ $values=@{}; foreach($line in Get-Content (Join-Path $root '.env')){if($line -ma
         cls.require(set(smoke["on"]) == {"workflow_dispatch"} and smoke["jobs"]["smoke"]["if"] == TRUST, "Smoke dispatch guard changed")
         cls.require(smoke["jobs"]["smoke"]["runs-on"] == "${{ matrix.labels }}", "Smoke routing changed")
         cls.require({entry["role"]: entry["labels"] for entry in smoke["jobs"]["smoke"]["strategy"]["matrix"]["include"]} == LABELS, "Smoke platform matrix changed")
+        guarded = {("ci.yml", "tests"), ("build-server.yml", "build"),
+                   *[("platform-checks.yml", name) for name in ("client", "build-editor-packages", "compare-lsp-windows")],
+                   ("github-release.yml", "packages"), ("runner-smoke.yml", "smoke")}
+        for name, workflow in workflows.items():
+            for job_name, job in workflow["jobs"].items():
+                if "runs-on" not in job or (name, job_name) in guarded:
+                    continue
+                runner = job["runs-on"]
+                cls.require(isinstance(runner, str) and (runner.startswith(("ubuntu-", "windows-", "macos-"))
+                            or (name == "release.yml" and runner == "${{ matrix.runner }}")), "Additional local job lacks reviewed event/actor routing")
         cache = (root / ".github/actions/cargo-cache/action.yml").read_text()
-        cls.require(cache.count("${{ env.CARGO_HOME || '~/.cargo' }}") == 8, "Cargo cache ignores service Cargo home")
+        cls.require(cache.count("${{ steps.cargo-home.outputs.path }}") == 8
+                    and '${CARGO_HOME:-$HOME/.cargo}' in cache, "Cargo cache ignores service Cargo home")
 
     @staticmethod
     def source_digest(root=ROOT):
@@ -197,7 +207,8 @@ $values=@{}; foreach($line in Get-Content (Join-Path $root '.env')){if($line -ma
         cls.require(before["ownerToolchains"] == cls.defaults(), "Owner default Rust toolchain changed")
         hosts = cls.hosts()
         current = hosts.github("repos/eas4ai/runners/actions/runners?per_page=100")["runners"]
-        cls.require({r["id"]: r["name"] for r in before["pilotRunners"]} == {r["id"]: r["name"] for r in current}
+        cls.require({r["id"]: (r["name"], sorted(label["name"] for label in r["labels"])) for r in before["pilotRunners"]}
+                    == {r["id"]: (r["name"], sorted(label["name"] for label in r["labels"])) for r in current}
                     and all(r["status"] == "online" for r in current), "Pilot registrations changed or offline")
         cls.profiles(cls.services(REPOSITORY))
         cls.require(before["pilotServices"] == cls.services("eas4ai/runners"), "Pilot service profiles changed")

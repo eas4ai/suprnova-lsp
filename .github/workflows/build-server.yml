@@ -18,11 +18,14 @@ permissions:
 jobs:
   build:
     name: build-server
-    runs-on: ${{ inputs.os }}
+    runs-on: ${{ fromJSON(github.repository == 'eas4ai/suprnova-lsp' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && (inputs.os == 'ubuntu-latest' && '["self-hosted","Linux","X64","rust-ci"]' || inputs.os == 'windows-latest' && '["self-hosted","Windows","X64","rust-ci"]' || inputs.os == 'macos-latest' && '["self-hosted","macOS","ARM64","rust-ci"]') || toJSON(inputs.os)) }}
+    env:
+      RUSTUP_TOOLCHAIN: 1.98.1
     outputs:
       target: ${{ steps.host.outputs.target }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/cargo-cache
         with:
           scope: server

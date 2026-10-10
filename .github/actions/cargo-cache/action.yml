@@ -19,6 +19,12 @@ inputs:
 runs:
   using: composite
   steps:
+    # Service environment variables are available to the shell, but are not
+    # automatically present in GitHub's workflow env context.
+    - name: Resolve Cargo home
+      id: cargo-home
+      shell: bash
+      run: printf 'path=%s\n' "${CARGO_HOME:-$HOME/.cargo}" >> "$GITHUB_OUTPUT"
     # Cache compilation directories explicitly. Archiving the whole target
     # directory would include incremental state even with glob exclusions,
     # because the cache action's tar command recurses into matched directories.
@@ -31,10 +37,10 @@ runs:
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
         path: |
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/git/db
-          ~/.cargo/git/checkouts
+          ${{ steps.cargo-home.outputs.path }}/registry/index
+          ${{ steps.cargo-home.outputs.path }}/registry/cache
+          ${{ steps.cargo-home.outputs.path }}/git/db
+          ${{ steps.cargo-home.outputs.path }}/git/checkouts
           ${{ inputs.target-dir }}/**/.fingerprint
           ${{ inputs.target-dir }}/**/build
           ${{ inputs.target-dir }}/**/deps
@@ -53,10 +59,10 @@ runs:
       uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
         path: |
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/git/db
-          ~/.cargo/git/checkouts
+          ${{ steps.cargo-home.outputs.path }}/registry/index
+          ${{ steps.cargo-home.outputs.path }}/registry/cache
+          ${{ steps.cargo-home.outputs.path }}/git/db
+          ${{ steps.cargo-home.outputs.path }}/git/checkouts
           ${{ inputs.target-dir }}/**/.fingerprint
           ${{ inputs.target-dir }}/**/build
           ${{ inputs.target-dir }}/**/deps
