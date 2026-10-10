@@ -1,0 +1,17 @@
+[package]
+name = "automatic_models"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+resolver = "3"
+
+[features]
+extra = []
+
+[dependencies]
+framework = { package = "suprnova", git = "https://github.com/eas4ai/suprnova.git", rev = "3229aa9af542c991196274fa3c235cdce88a68e2", default-features = false, features = ["database-sqlite"] }
+sea-orm = { version = "2.0", features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio-native-tls", "macros", "with-chrono", "postgres-use-serial-pk"] }
+serde = { version = "1.0", features = ["derive"] }
+async-trait = "0.1"
+tokio = { version = "1", features = ["sync"] }

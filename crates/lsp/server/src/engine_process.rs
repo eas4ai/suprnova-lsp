@@ -1,0 +1,320 @@
+//! Subprocess and transport lifetime for one analysis engine.
+//!
+//! This layer starts the child, connects the bidirectional tarpc services, forwards its stderr,
+//! and reports process exit. It deliberately does not know about document captures or method
+//! policy; the registry owns routing and `EngineClient` owns request/status behavior.
+
+use std::{
+    fmt,
+    io::Write as _,
+    net::SocketAddr,
+    path::Path,
+    process::{ExitStatus, Stdio},
+    sync::{Arc, Weak},
+    time::Duration,
+};
+
+use anyhow::Context as _;
+use futures::prelude::*;
+use rg_lsp_proto::{EngineServiceClient, NotificationsService};
+use tarpc::{
+    client::Config as TarpcClientConfig,
+    serde_transport::tcp,
+    server::{BaseChannel, Channel as _},
+    tokio_serde::formats::Json,
+};
+use tokio::{
+    io::{AsyncBufReadExt as _, BufReader},
+    process::Child,
+    sync::Mutex,
+};
+use tower_lsp_server::Client as LspClient;
+
+use crate::{
+    client_status::ClientStatusPublisher, engine_client::EngineClient, ingress::EditorStateHandle,
+    notifications::NotificationsPublisher,
+};
+
+const ENGINE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
+const ENGINE_ID_ENV: &str = "SUPRNOVA_LSP_ENGINE_ID";
+
+/// Process-backed handle to one engine owned by the LSP server.
+///
+/// Process lifetime lives here; request-specific logic belongs to method handlers through
+/// `EngineClient`, while multi-engine routing lives one level up in the registry.
+pub(crate) struct EngineProcess {
+    engine_client: EngineClient,
+    // Kept alive so `kill_on_drop` remains tied to the server-side engine handle.
+    _child: Arc<Mutex<Child>>,
+}
+
+impl EngineProcess {
+    pub(crate) async fn spawn(
+        lsp_client: LspClient,
+        editor: EditorStateHandle,
+        client_status: ClientStatusPublisher,
+        workspace_root: &Path,
+        engine_id: String,
+    ) -> anyhow::Result<(Self, EngineProcessExitMonitor)> {
+        // Initialize transport for engine service.
+        let (mut engine_listener, engine_addr) = {
+            // Both JSON and TCP are chosen for convenience of debugging, not that we need too much speed.
+            // Even though it's the engine that "hosts" the service, it doesn't matter which
+            // side starts the socket; it's bidirectional and `tarpc` can work over any initialized
+            // transport.
+            let mut listener = tcp::listen("127.0.0.1:0", Json::default)
+                .await
+                .expect("Failed to bind a TCP listener");
+            listener.config_mut().max_frame_length(usize::MAX);
+            let addr = listener.local_addr();
+            (listener, addr)
+        };
+
+        // Initialize transport for notifications service.
+        // The engine uses a second connection to send progress, diagnostics, and logs back to
+        // the LSP server without mixing callback traffic into request/response flow.
+        let (mut notifications_listener, notifications_addr) = {
+            let mut listener = tcp::listen("127.0.0.1:0", Json::default)
+                .await
+                .expect("Failed to bind a TCP listener");
+            listener.config_mut().max_frame_length(usize::MAX);
+            let addr = listener.local_addr();
+            (listener, addr)
+        };
+
+        // Spawn the engine subprocess.
+        let mut child =
+            Self::spawn_worker(engine_addr, notifications_addr, workspace_root, &engine_id)?;
+        Self::spawn_stderr_forwarder(&mut child, &engine_id);
+        let child = Arc::new(Mutex::new(child));
+        let exit_monitor = EngineProcessExitMonitor::new(Arc::downgrade(&child));
+
+        // Spawn the notifications publisher.
+        {
+            // Accept the notification connection in the background. The main initialization path
+            // only needs the engine client below; callback delivery can become ready independently.
+            let publisher = NotificationsPublisher::new(lsp_client, editor, client_status);
+            tokio::spawn(async move {
+                let accept =
+                    tokio::time::timeout(ENGINE_CONNECTION_TIMEOUT, notifications_listener.next())
+                        .await;
+                let transport = match accept {
+                    Ok(Some(Ok(transport))) => transport,
+                    Ok(Some(Err(error))) => {
+                        tracing::error!(error = %error, "failed to accept notifications RPC connection");
+                        return;
+                    }
+                    Ok(None) => {
+                        tracing::error!(
+                            "notifications RPC listener closed before engine connected"
+                        );
+                        return;
+                    }
+                    Err(_) => {
+                        tracing::error!(
+                            "timed out waiting for engine notifications RPC connection"
+                        );
+                        return;
+                    }
+                };
+
+                BaseChannel::with_defaults(transport)
+                    .execute(publisher.serve())
+                    .for_each(|response| async move {
+                        tokio::spawn(response);
+                    })
+                    .await;
+            });
+        }
+
+        // Initialize the engine RPC client.
+        let engine_client = {
+            // Wait for the worker to connect its request channel before constructing the backend.
+            // Once this returns, method handlers can send engine RPCs normally.
+            let engine_transport =
+                tokio::time::timeout(ENGINE_CONNECTION_TIMEOUT, engine_listener.next())
+                    .await
+                    .context("while attempting to wait for engine RPC connection")?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("engine RPC listener closed before engine connected")
+                    })?
+                    .context("while attempting to accept engine RPC connection")?;
+            let engine_service_client =
+                EngineServiceClient::new(TarpcClientConfig::default(), engine_transport).spawn();
+            EngineClient::new(engine_service_client)
+        };
+
+        Ok((
+            Self {
+                engine_client,
+                _child: child,
+            },
+            exit_monitor,
+        ))
+    }
+
+    pub(crate) fn engine_client(&self) -> &EngineClient {
+        &self.engine_client
+    }
+
+    fn spawn_worker(
+        engine_addr: SocketAddr,
+        notifications_addr: SocketAddr,
+        workspace_root: &Path,
+        engine_id: &str,
+    ) -> anyhow::Result<Child> {
+        let executable = std::env::current_exe()
+            .context("while attempting to locate suprnova-lsp executable")?;
+        let args = [
+            "lsp-engine".to_string(),
+            "--engine-addr".to_string(),
+            engine_addr.to_string(),
+            "--notifications-addr".to_string(),
+            notifications_addr.to_string(),
+        ];
+
+        tokio::process::Command::new(executable)
+            .args(args)
+            .env(ENGINE_ID_ENV, engine_id)
+            // Cargo configuration and rustup overrides are discovered from the child working
+            // directory. Use the resolved Cargo root so every engine tool shares one context.
+            .current_dir(workspace_root)
+            // The parent LSP server owns stdout for JSON-RPC. The engine may log to stderr, but it
+            // must never inherit stdout and accidentally corrupt the LSP stream. Stderr is piped
+            // through the parent so server and engine JSON log lines are serialized in one process.
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .context("while attempting to spawn suprnova-lsp engine process")
+    }
+
+    fn spawn_stderr_forwarder(child: &mut Child, engine_id: &str) {
+        let Some(stderr) = child.stderr.take() else {
+            tracing::warn!(engine = engine_id, "engine stderr was not piped");
+            return;
+        };
+        let engine_id = engine_id.to_string();
+
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => {
+                        let mut stderr = std::io::stderr().lock();
+                        let _ = stderr.write_all(line.as_bytes());
+                        let _ = stderr.write_all(b"\n");
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        tracing::warn!(
+                            engine = %engine_id,
+                            error = %error,
+                            "failed to read engine stderr"
+                        );
+                        break;
+                    }
+                }
+            }
+        });
+    }
+}
+
+impl fmt::Debug for EngineProcess {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.debug_struct("EngineProcess").finish_non_exhaustive()
+    }
+}
+
+/// Process-exit observer handed to the registry after startup succeeds.
+pub(crate) struct EngineProcessExitMonitor {
+    child: Weak<Mutex<Child>>,
+}
+
+impl EngineProcessExitMonitor {
+    fn new(child: Weak<Mutex<Child>>) -> Self {
+        Self { child }
+    }
+
+    pub(crate) async fn wait(self) -> Option<EngineProcessExit> {
+        const POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+        loop {
+            let child = self.child.upgrade()?;
+
+            // Polling through a weak handle keeps shutdown ownership simple: when the server
+            // drops the engine handle, `kill_on_drop` is free to clean up the child process.
+            let status = {
+                let mut child = child.lock().await;
+                child.try_wait()
+            };
+            match status {
+                Ok(Some(status)) => {
+                    return Some(EngineProcessExit::Exited(status));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    return Some(EngineProcessExit::WaitFailed(error.to_string()));
+                }
+            }
+
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
+}
+
+impl fmt::Debug for EngineProcessExitMonitor {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.debug_struct("EngineProcessExitMonitor")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Terminal process event observed by the parent-side supervisor.
+#[derive(Debug)]
+pub(crate) enum EngineProcessExit {
+    Exited(ExitStatus),
+    WaitFailed(String),
+}
+
+impl EngineProcessExit {
+    pub(crate) fn failure_message(&self) -> String {
+        match self {
+            Self::Exited(status) => {
+                format!("engine process exited unexpectedly: {status}")
+            }
+            Self::WaitFailed(error) => {
+                format!("failed to supervise engine process: {error}")
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EngineProcessExit;
+
+    #[cfg(unix)]
+    #[test]
+    fn exit_message_includes_process_status() {
+        use std::os::unix::process::ExitStatusExt as _;
+
+        let exit = EngineProcessExit::Exited(std::process::ExitStatus::from_raw(101 << 8));
+
+        assert_eq!(
+            exit.failure_message(),
+            "engine process exited unexpectedly: exit status: 101"
+        );
+    }
+
+    #[test]
+    fn wait_failure_message_names_supervision_failure() {
+        let exit = EngineProcessExit::WaitFailed("process handle unavailable".to_string());
+
+        assert_eq!(
+            exit.failure_message(),
+            "failed to supervise engine process: process handle unavailable"
+        );
+    }
+}
