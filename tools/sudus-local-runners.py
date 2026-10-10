@@ -28,6 +28,7 @@ TRUST = ("github.repository == 'eas4ai/suprnova-lsp' && "
 SOURCE_FILES = [".github/workflows/ci.yml", ".github/workflows/build-server.yml",
                 ".github/workflows/platform-checks.yml", ".github/workflows/github-release.yml",
                 ".github/workflows/runner-smoke.yml", ".github/actions/setup-rust/action.yml",
+                ".github/actions/setup-python/action.yml",
                 ".github/actions/cargo-cache/action.yml", ".github/scripts/runner_smoke.py"]
 
 
@@ -227,6 +228,8 @@ $values=@{}; foreach($line in Get-Content (Join-Path $root '.env')){if($line -ma
         cls.routing(cls.workflows(ROOT))
         cls.require(cls.github("actions/permissions/fork-pr-contributor-approval")["approval_policy"] == "all_external_contributors", "Public fork approval policy differs")
         cls.require(cls.github("actions/workflows/release.yml")["state"] == "disabled_manually", "Marketplace workflow is enabled")
+        for name in ("ci.yml", "performance.yml", "github-release.yml", "runner-smoke.yml"):
+            cls.require(cls.github("actions/workflows/" + name)["state"] == "active", "Required workflow is disabled: " + name)
         result = subprocess.run([str(EVIDENCE / "bin/actionlint"), "-shellcheck=", "-pyflakes="], cwd=ROOT, capture_output=True, text=True, timeout=30)
         cls.require(result.returncode == 0, "Workflow syntax check failed: " + result.stdout[:2000])
 

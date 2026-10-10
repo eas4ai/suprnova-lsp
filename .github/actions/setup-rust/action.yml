@@ -29,6 +29,16 @@ runs:
         COMPONENTS: ${{ inputs.components }}
       run: |
         $ErrorActionPreference = 'Stop'
+        # Git for Windows installs Bash outside the machine's Git command PATH.
+        # Add it to this job only; the service and owner PATH stay unchanged.
+        if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
+          $gitRoot = Split-Path (Split-Path (Get-Command git -ErrorAction Stop).Source -Parent) -Parent
+          $bashDirectory = Join-Path $gitRoot 'bin'
+          if (-not (Test-Path (Join-Path $bashDirectory 'bash.exe'))) { throw 'Git Bash is required by native build steps' }
+          $encoding = New-Object Text.UTF8Encoding($false)
+          [IO.File]::AppendAllText($env:GITHUB_PATH, $bashDirectory + [Environment]::NewLine, $encoding)
+          [IO.File]::AppendAllText($env:GITHUB_PATH, (Join-Path $gitRoot 'usr\bin') + [Environment]::NewLine, $encoding)
+        }
         $arguments = @('toolchain', 'install', $env:RUSTUP_TOOLCHAIN, '--profile', 'minimal', '--no-self-update')
         if ($env:COMPONENTS) { $arguments += @('--component', $env:COMPONENTS) }
         & rustup @arguments

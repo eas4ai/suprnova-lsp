@@ -1,0 +1,28 @@
+name: Set up job Python
+description: Use the configured interpreter on a Windows service without changing system Python.
+
+inputs:
+  python-version:
+    description: Python version for hosted and Unix runners.
+    required: false
+    default: '3.13'
+
+runs:
+  using: composite
+  steps:
+    - name: Select existing Windows service interpreter
+      if: runner.os == 'Windows' && runner.environment == 'self-hosted'
+      shell: powershell
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $python = $env:SUPRNOVA_LSP_CI_PYTHON
+        if (-not $python -or -not (Test-Path -LiteralPath $python -PathType Leaf)) {
+          throw 'Set SUPRNOVA_LSP_CI_PYTHON in the runner service environment to an existing Python 3.11+ executable'
+        }
+        & $python -I -c 'import sys; assert sys.version_info >= (3, 11)'
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        [IO.File]::AppendAllText($env:GITHUB_PATH, (Split-Path $python -Parent) + [Environment]::NewLine, (New-Object Text.UTF8Encoding($false)))
+    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      if: runner.os != 'Windows' || runner.environment != 'self-hosted'
+      with:
+        python-version: ${{ inputs.python-version }}

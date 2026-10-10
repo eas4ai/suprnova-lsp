@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: ./.github/actions/setup-rust
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: ./.github/actions/setup-python
         with:
           python-version: '3.13'
       - uses: ./.github/actions/download-server
@@ -76,7 +76,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: ./.github/actions/setup-python
         with:
           python-version: '3.13'
       - uses: ./.github/actions/download-server
@@ -126,7 +126,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           components: rust-analyzer,rust-src
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: ./.github/actions/setup-python
         with:
           python-version: '3.13'
       - uses: ./.github/actions/download-server

@@ -32,8 +32,10 @@ runs:
     #
     # PR caches are only reusable by the same PR. Let main populate the caches
     # every branch can restore, so abandoned PR snapshots do not evict them.
+    # A local service's Cargo home can contain other projects. Restore trusted
+    # repository caches there, but never upload that personal home to GitHub.
     - name: Cache Cargo artifacts
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      if: runner.environment == 'github-hosted' && github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
         path: |
@@ -55,7 +57,7 @@ runs:
     # The restore-only action has no post-job save. Keep its paths identical to
     # the main-branch action: paths are part of the cache's version identifier.
     - name: Restore Cargo artifacts
-      if: github.event_name != 'push' || github.ref != 'refs/heads/main'
+      if: runner.environment == 'self-hosted' || github.event_name != 'push' || github.ref != 'refs/heads/main'
       uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
         path: |

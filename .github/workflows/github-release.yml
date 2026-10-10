@@ -64,7 +64,7 @@ jobs:
       - name: Install native Rust toolchain
         if: ${{ !matrix.container }}
         uses: ./.github/actions/setup-rust
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: ./.github/actions/setup-python
         if: ${{ !matrix.container }}
         with:
           python-version: '3.13'
