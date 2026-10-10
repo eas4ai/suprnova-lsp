@@ -1,4 +1,5 @@
 use std::{
+    num::NonZeroUsize,
     sync::{
         Arc, Condvar, Mutex, Weak,
         atomic::{AtomicUsize, Ordering},
@@ -32,6 +33,7 @@ struct LookupLoader {
     state: Arc<LookupReads>,
     failed_package: Option<PackageSlot>,
     blocked_package: Option<PackageSlot>,
+    panic_package: Option<PackageSlot>,
 }
 
 impl LookupLoader {
@@ -50,6 +52,7 @@ impl LookupLoader {
                 }),
                 failed_package,
                 blocked_package: None,
+                panic_package: None,
             },
             receiver,
         )
@@ -125,7 +128,11 @@ impl LoadSemanticIr for LookupLoader {
         {
             released = self.state.release.wait(released).unwrap();
         }
+        drop(released);
         self.state.active.fetch_sub(1, Ordering::SeqCst);
+        if self.panic_package == Some(package) {
+            panic!("lookup fixture panic");
+        }
         if self.failed_package == Some(package) {
             return Err(PackageStoreError::stale_package(
                 package,
@@ -144,63 +151,204 @@ impl LoadSemanticIr for LookupLoader {
 
 #[test]
 fn lookup_prefetch_keeps_reading_when_one_artifact_is_slow() {
-    let (mut loader, started) = LookupLoader::new(false, None);
-    loader.blocked_package = Some(PackageSlot(0));
-    let txn = loader.transaction(12);
-    let request = std::thread::spawn(move || {
-        txn.prefetch_lookup_indexes(&LookupLoader::crates(12), &CancellationToken::new())
-    });
-    // Keep the first artifact blocked while the other readers take all remaining work.
-    // Fixed chunks leave later artifacts behind that blocked read.
-    let progress = LookupLoader::started_reads(&started, 12);
-    loader.release();
-    request.join().unwrap().unwrap();
-    assert_eq!(
-        progress
-            .expect("a slow artifact must not prevent the other readers from taking work")
-            .len(),
-        12
-    );
-    assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
-    assert_eq!(loader.state.reads.lock().unwrap().len(), 12);
+    for reader_count in [8, 16] {
+        let (mut loader, started) = LookupLoader::new(false, None);
+        loader.blocked_package = Some(PackageSlot(0));
+        let txn = loader.transaction(20);
+        let request = std::thread::spawn(move || {
+            txn.prefetch_lookup_indexes(
+                &LookupLoader::crates(20),
+                NonZeroUsize::new(reader_count).unwrap(),
+                &CancellationToken::new(),
+            )
+        });
+        // Keep the first artifact blocked while the other readers take all remaining work.
+        // Fixed chunks leave later artifacts behind that blocked read.
+        let progress = LookupLoader::started_reads(&started, 20);
+        loader.release();
+        request.join().unwrap().unwrap();
+        assert_eq!(
+            progress
+                .expect("a slow artifact must not prevent other readers from taking work")
+                .len(),
+            20
+        );
+        assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
+        assert_eq!(loader.state.reads.lock().unwrap().len(), 20);
+    }
 }
 
 #[test]
 fn lookup_prefetch_overlaps_bounded_reads_and_releases_them_with_the_transaction() {
-    let (loader, started) = LookupLoader::new(false, None);
-    let txn = loader.transaction(12);
-    let crates = LookupLoader::crates(12);
-    let cancellation = CancellationToken::new();
-    std::thread::scope(|scope| {
-        let request = scope.spawn(|| txn.prefetch_lookup_indexes(&crates, &cancellation));
-        // Each reader blocks inside its first load. Observe the overlap before releasing any read;
-        // the deadline only bounds a broken implementation, not a performance assertion.
-        let overlap = LookupLoader::started_reads(&started, 8);
-        loader.release();
-        request.join().unwrap().unwrap();
-        assert_eq!(
-            overlap
-                .expect("eight artifact readers should overlap")
-                .len(),
-            8
+    for (reader_count, crate_count) in [(1, 20), (8, 20), (16, 3), (16, 0), (16, 20)] {
+        let (loader, started) = LookupLoader::new(false, None);
+        let txn = loader.transaction(crate_count);
+        let crates = LookupLoader::crates(crate_count);
+        let cancellation = CancellationToken::new();
+        let reader_limit = NonZeroUsize::new(reader_count).unwrap();
+        let expected_readers = crate_count.min(reader_count);
+        std::thread::scope(|scope| {
+            let request =
+                scope.spawn(|| txn.prefetch_lookup_indexes(&crates, reader_limit, &cancellation));
+            // Loads block until released. The timeout bounds a broken test, not performance.
+            let overlap = LookupLoader::started_reads(&started, expected_readers);
+            loader.release();
+            request.join().unwrap().unwrap();
+            assert_eq!(
+                overlap
+                    .expect("the caller-selected reader bound must overlap")
+                    .len(),
+                expected_readers
+            );
+        });
+        assert_eq!(loader.state.peak.load(Ordering::SeqCst), expected_readers);
+        assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
+        assert_eq!(loader.state.reads.lock().unwrap().len(), crate_count);
+        for crate_ref in &crates {
+            assert!(txn.item_lookup_index(*crate_ref).unwrap().is_some());
+        }
+        assert_eq!(loader.state.reads.lock().unwrap().len(), crate_count);
+        let cloned = txn.clone();
+        drop(txn);
+        assert!(
+            loader
+                .state
+                .indexes
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|index| index.upgrade().is_some())
         );
-    });
-    assert_eq!(loader.state.peak.load(Ordering::SeqCst), 8);
-    assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
-    assert_eq!(loader.state.reads.lock().unwrap().len(), 12);
-    for crate_ref in crates {
-        assert!(txn.item_lookup_index(crate_ref).unwrap().is_some());
+        for crate_ref in crates {
+            assert!(cloned.item_lookup_index(crate_ref).unwrap().is_some());
+        }
+        assert_eq!(loader.state.reads.lock().unwrap().len(), crate_count);
+        drop(cloned);
+        assert!(
+            loader
+                .state
+                .indexes
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|index| index.upgrade().is_none())
+        );
     }
-    assert_eq!(loader.state.reads.lock().unwrap().len(), 12);
-    assert!(
-        loader
-            .state
-            .indexes
-            .lock()
-            .unwrap()
-            .iter()
-            .all(|index| index.upgrade().is_some())
-    );
+}
+
+#[test]
+fn lookup_prefetch_cancellation_stops_each_readers_next_load() {
+    for (reader_count, crate_count) in [(1, 20), (8, 20), (16, 3), (16, 20)] {
+        let (loader, started) = LookupLoader::new(false, None);
+        let txn = loader.transaction(crate_count);
+        let crates = LookupLoader::crates(crate_count);
+        let cancellation = CancellationToken::new();
+        let reader_limit = NonZeroUsize::new(reader_count).unwrap();
+        let expected_readers = crate_count.min(reader_count);
+        std::thread::scope(|scope| {
+            let request =
+                scope.spawn(|| txn.prefetch_lookup_indexes(&crates, reader_limit, &cancellation));
+            let overlap = LookupLoader::started_reads(&started, expected_readers);
+            cancellation.cancel();
+            loader.release();
+            let error = request
+                .join()
+                .unwrap()
+                .expect_err("cancelled prefetch must fail");
+            assert!(error.downcast_ref::<rg_std::Cancelled>().is_some());
+            overlap.expect("each selected reader reaches its controlled first load");
+        });
+        assert_eq!(loader.state.reads.lock().unwrap().len(), expected_readers);
+        assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[test]
+fn lookup_prefetch_preserves_storage_errors_and_does_not_cache_failure() {
+    for reader_count in [1, 8, 16] {
+        let (loader, started) = LookupLoader::new(false, Some(PackageSlot(0)));
+        let txn = loader.transaction(2);
+        let crates = LookupLoader::crates(2);
+        let reader_limit = NonZeroUsize::new(reader_count).unwrap();
+        std::thread::scope(|scope| {
+            let request = scope.spawn(|| {
+                let result =
+                    txn.prefetch_lookup_indexes(&crates, reader_limit, &CancellationToken::new());
+                assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
+                result
+            });
+            let overlap = LookupLoader::started_reads(&started, reader_count.min(2));
+            loader.release();
+            let error = request
+                .join()
+                .unwrap()
+                .expect_err("failed lookup artifact must remain an error");
+            assert!(error.downcast_ref::<PackageStoreError>().is_some());
+            assert!(format!("{error:#}").contains("lookup fixture failure"));
+            overlap.expect("all selected reads entered before the storage error was released");
+        });
+        assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
+        assert!(txn.item_lookup_index(crates[0]).is_err());
+        assert_eq!(
+            loader
+                .state
+                .reads
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|&&krate| krate == crates[0])
+                .count(),
+            2
+        );
+    }
+}
+
+#[test]
+fn lookup_prefetch_cancelled_before_start_reads_nothing() {
+    for (reader_count, crate_count) in [(1, 20), (8, 20), (16, 20), (16, 0)] {
+        let (loader, _started) = LookupLoader::new(false, None);
+        let txn = loader.transaction(crate_count);
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+        let error = txn
+            .prefetch_lookup_indexes(
+                &LookupLoader::crates(crate_count),
+                NonZeroUsize::new(reader_count).unwrap(),
+                &cancellation,
+            )
+            .expect_err("already cancelled prefetch must fail");
+        assert!(error.downcast_ref::<rg_std::Cancelled>().is_some());
+        assert!(loader.state.reads.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn lookup_prefetch_worker_panic_joins_other_reads_before_unwinding() {
+    let (mut loader, started) = LookupLoader::new(false, None);
+    loader.panic_package = Some(PackageSlot(0));
+    let txn = loader.transaction(2);
+    let crates = LookupLoader::crates(2);
+    std::thread::scope(|scope| {
+        let request = scope.spawn(|| {
+            txn.prefetch_lookup_indexes(
+                &crates,
+                NonZeroUsize::new(16).unwrap(),
+                &CancellationToken::new(),
+            )
+        });
+        let overlap = LookupLoader::started_reads(&started, 2);
+        loader.release();
+        assert!(
+            request.join().is_err(),
+            "worker panic must propagate to the request"
+        );
+        overlap.expect("both reads entered before allowing one to panic");
+    });
+    assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
+    assert_eq!(loader.state.reads.lock().unwrap().len(), 2);
+    // The successful sibling finished and its value stayed in the transaction before unwinding.
+    assert!(txn.item_lookup_index(crates[1]).unwrap().is_some());
+    assert_eq!(loader.state.reads.lock().unwrap().len(), 2);
     drop(txn);
     assert!(
         loader
@@ -211,64 +359,4 @@ fn lookup_prefetch_overlaps_bounded_reads_and_releases_them_with_the_transaction
             .iter()
             .all(|index| index.upgrade().is_none())
     );
-}
-
-#[test]
-fn lookup_prefetch_cancellation_stops_each_readers_next_load() {
-    let (loader, started) = LookupLoader::new(false, None);
-    let txn = loader.transaction(12);
-    let crates = LookupLoader::crates(12);
-    let cancellation = CancellationToken::new();
-    std::thread::scope(|scope| {
-        let request = scope.spawn(|| txn.prefetch_lookup_indexes(&crates, &cancellation));
-        let overlap = LookupLoader::started_reads(&started, 8);
-        cancellation.cancel();
-        loader.release();
-        let error = request
-            .join()
-            .unwrap()
-            .expect_err("cancelled prefetch must fail");
-        assert!(error.downcast_ref::<rg_std::Cancelled>().is_some());
-        overlap.expect("each reader reaches the controlled first load");
-    });
-    assert_eq!(loader.state.reads.lock().unwrap().len(), 8);
-    assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
-}
-
-#[test]
-fn lookup_prefetch_preserves_storage_errors_and_does_not_cache_failure() {
-    let (loader, _started) = LookupLoader::new(true, Some(PackageSlot(0)));
-    let txn = loader.transaction(2);
-    let crates = LookupLoader::crates(2);
-    let error = txn
-        .prefetch_lookup_indexes(&crates, &CancellationToken::new())
-        .expect_err("failed lookup artifact must remain an error");
-    assert!(error.downcast_ref::<PackageStoreError>().is_some());
-    assert!(format!("{error:#}").contains("lookup fixture failure"));
-    assert_eq!(loader.state.active.load(Ordering::SeqCst), 0);
-    assert!(txn.item_lookup_index(crates[0]).is_err());
-    assert_eq!(
-        loader
-            .state
-            .reads
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|&&krate| krate == crates[0])
-            .count(),
-        2
-    );
-}
-
-#[test]
-fn lookup_prefetch_cancelled_before_start_reads_nothing() {
-    let (loader, _started) = LookupLoader::new(false, None);
-    let txn = loader.transaction(8);
-    let cancellation = CancellationToken::new();
-    cancellation.cancel();
-    let error = txn
-        .prefetch_lookup_indexes(&LookupLoader::crates(8), &cancellation)
-        .expect_err("already cancelled prefetch must fail");
-    assert!(error.downcast_ref::<rg_std::Cancelled>().is_some());
-    assert!(loader.state.reads.lock().unwrap().is_empty());
 }

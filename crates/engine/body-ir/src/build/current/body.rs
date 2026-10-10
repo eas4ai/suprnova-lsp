@@ -13,7 +13,7 @@
 //! discover the unsaved members. If a root cannot be identified safely, we skip it rather than
 //! attach current code to an unrelated declaration.
 
-use std::time::Instant;
+use std::{num::NonZeroUsize, time::Instant};
 
 use anyhow::Context as _;
 use rg_cfg_eval::CfgEvaluator;
@@ -294,8 +294,15 @@ impl<'source, 'db> CurrentBodyBuilder<'source, 'db> {
             .context("find the current body's visible lookup crates")?;
         let visibility_us = lookup_started.elapsed().as_micros();
         let prefetch_started = Instant::now();
+        // Cursor hover reads many independent indexes before it can answer. Keep the larger
+        // reader budget local to hover; range and other cursor requests use the ordinary bound.
+        let reader_limit = if matches!(self.selection, CurrentSourceSelection::HoverAtOffset(_)) {
+            NonZeroUsize::new(16).unwrap()
+        } else {
+            NonZeroUsize::new(8).unwrap()
+        };
         self.semantic_ir
-            .prefetch_lookup_indexes(visible_crates.as_slice(), &cancellation)
+            .prefetch_lookup_indexes(visible_crates.as_slice(), reader_limit, &cancellation)
             .context("prefetch the current body's lookup artifacts")?;
         let prefetch_us = prefetch_started.elapsed().as_micros();
         let composition_started = Instant::now();
