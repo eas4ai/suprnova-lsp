@@ -5,7 +5,7 @@ inputs:
   components:
     description: Optional comma-separated Rust components.
     required: false
-    default: ''
+    default: rustfmt
 
 runs:
   using: composite
@@ -27,6 +27,7 @@ runs:
       shell: powershell
       env:
         COMPONENTS: ${{ inputs.components }}
+        LOCAL_RUNNER: ${{ runner.environment }}
       run: |
         $ErrorActionPreference = 'Stop'
         # Git for Windows installs Bash outside the machine's Git command PATH.
@@ -38,6 +39,11 @@ runs:
           $encoding = New-Object Text.UTF8Encoding($false)
           [IO.File]::AppendAllText($env:GITHUB_PATH, $bashDirectory + [Environment]::NewLine, $encoding)
           [IO.File]::AppendAllText($env:GITHUB_PATH, (Join-Path $gitRoot 'usr\bin') + [Environment]::NewLine, $encoding)
+        }
+        if ($env:LOCAL_RUNNER -eq 'self-hosted' -and -not (Get-Command pwsh -ErrorAction SilentlyContinue)) {
+          $pwsh = $env:SUPRNOVA_LSP_CI_PWSH
+          if (-not $pwsh -or -not (Test-Path -LiteralPath $pwsh -PathType Leaf)) { throw 'Configure a runner-owned PowerShell 7 executable through SUPRNOVA_LSP_CI_PWSH' }
+          [IO.File]::AppendAllText($env:GITHUB_PATH, (Split-Path $pwsh -Parent) + [Environment]::NewLine, (New-Object Text.UTF8Encoding($false)))
         }
         $arguments = @('toolchain', 'install', $env:RUSTUP_TOOLCHAIN, '--profile', 'minimal', '--no-self-update')
         if ($env:COMPONENTS) { $arguments += @('--component', $env:COMPONENTS) }

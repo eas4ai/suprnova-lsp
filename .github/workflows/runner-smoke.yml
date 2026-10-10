@@ -36,6 +36,19 @@ jobs:
       - uses: ./.github/actions/setup-python
         with:
           python-version: '3.13'
+      - name: Install native test tools
+        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+        with:
+          tool: cargo-nextest@0.9.132
+      - name: Check required native tools
+        run: |
+          rustfmt --version
+          cargo nextest --version
+      - name: Check Windows PowerShell
+        if: matrix.role == 'windows'
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required' }
       - name: Check release shell
         shell: bash
         run: |

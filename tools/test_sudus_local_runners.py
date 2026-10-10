@@ -19,7 +19,7 @@ class RunnerControls(unittest.TestCase):
         self.run = {"id": 123, "status": "completed", "conclusion": "success", "event": "workflow_dispatch",
                     "actor": {"login": "eas4ai"}, "triggering_actor": {"login": "eas4ai"}, "head_sha": "abc"}
         self.jobs = [{"runner_name": name, "conclusion": "success", "labels": observer.LABELS[role],
-                      "steps": [{"name": name, "conclusion": "success"} for name in ("Compile and test Rust probe", "Upload runner observation")]}
+                      "steps": [{"name": name, "conclusion": "success"} for name in ("Install native test tools", "Check required native tools", "Compile and test Rust probe", "Upload runner observation")]}
                      for role, name in observer.NAMES.items()]
         self.artifacts = [{"name": "runner-smoke-" + role, "expired": False} for role in observer.NAMES]
         self.observations = {role: {"runId": "123", "sha": "abc", "runnerName": name, "role": role,
