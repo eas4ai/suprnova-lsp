@@ -22,6 +22,7 @@ class RunnerControls(unittest.TestCase):
                       "steps": [{"name": name, "conclusion": "success"} for name in ("Install native test tools", "Check required native tools", "Compile and test Rust probe", "Upload runner observation")]}
                      for role, name in observer.NAMES.items()]
         self.artifacts = [{"name": "runner-smoke-" + role, "expired": False} for role in observer.NAMES]
+        self.jobs[0]["steps"].append({"name": "Check Linux release Cargo mount", "conclusion": "success"})
         self.observations = {role: {"runId": "123", "sha": "abc", "runnerName": name, "role": role,
                              "host": observer.TARGETS[role], "toolchain": "1.98.1", "cargoTestExit": 0, "sourceDigest": "digest"}
                              for role, name in observer.NAMES.items()}
@@ -85,6 +86,24 @@ class RunnerControls(unittest.TestCase):
         changed["ci.yml"]["jobs"]["unexpected"] = {"runs-on": ["self-hosted", "Linux", "X64", "rust-ci"]}
         with self.assertRaises(ValueError):
             Acceptance.routing(changed)
+
+    def test_release_container_retains_service_cargo_home(self):
+        release = Acceptance.workflows(observer.ROOT)["github-release.yml"]["jobs"]["packages"]
+        self.assertIsInstance(release["container"], dict, "A bare image loses the service Cargo home")
+        self.assertTrue(any("suprnova-lsp-cargo:/github/service-cargo" in volume for volume in release["container"]["volumes"]))
+        self.assertIn("/github/service-cargo", release["container"]["env"]["CARGO_HOME"])
+        self.assertIn("--user", release["container"]["options"])
+
+    def test_container_mapping_and_actual_boundary_controls_are_rejected(self):
+        workflows = Acceptance.workflows(observer.ROOT)
+        for field in ("volumes", "options", "env"):
+            changed = copy.deepcopy(workflows)
+            changed["github-release.yml"]["jobs"]["packages"]["container"].pop(field)
+            with self.assertRaises(ValueError):
+                Acceptance.routing(changed)
+        self.jobs[0]["steps"][-1]["conclusion"] = "skipped"
+        with self.assertRaises(ValueError):
+            Acceptance.smoke(self.run, self.jobs, self.artifacts, self.observations, "digest")
 
 
 if __name__ == "__main__":

@@ -16,7 +16,16 @@ jobs:
   packages:
     name: Package (${{ matrix.vscode_target }})
     runs-on: ${{ fromJSON(github.repository == 'eas4ai/suprnova-lsp' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && matrix.local_runner || toJSON(matrix.runner)) }}
-    container: ${{ matrix.container }}
+    container:
+      image: ${{ matrix.container }}
+      # The named bind volume is configured from the Linux service's Cargo home.
+      # Match its owner so container downloads never leave root-owned cache files.
+      options: ${{ github.repository == 'eas4ai/suprnova-lsp' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && matrix.vscode_target == 'linux-x64' && format('--user {0}', vars.SUPRNOVA_LSP_LINUX_CONTAINER_USER) || '' }}
+      volumes:
+        - ${{ github.repository == 'eas4ai/suprnova-lsp' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && matrix.vscode_target == 'linux-x64' && 'suprnova-lsp-cargo:/github/service-cargo' || '/github/home/.cargo' }}
+      env:
+        CARGO_HOME: ${{ github.repository == 'eas4ai/suprnova-lsp' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && matrix.vscode_target == 'linux-x64' && '/github/service-cargo' || '/github/home/.cargo' }}
+        RUSTUP_HOME: /github/home/.rustup
     timeout-minutes: 60
     env:
       RUSTUP_TOOLCHAIN: 1.98.1
@@ -59,8 +68,9 @@ jobs:
       - name: Install Rust in Linux compatibility container
         if: matrix.container
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUSTUP_TOOLCHAIN"
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          # Keep installer binaries separate from the shared Cargo cache.
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME="$HOME/.container-cargo-tools" sh -s -- -y --profile minimal --default-toolchain "$RUSTUP_TOOLCHAIN"
+          echo "$HOME/.container-cargo-tools/bin" >> "$GITHUB_PATH"
       - name: Install native Rust toolchain
         if: ${{ !matrix.container }}
         uses: ./.github/actions/setup-rust
