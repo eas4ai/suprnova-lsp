@@ -1,4 +1,0 @@
-interface:
-  display_name: "Suprnova LSP Debugging"
-  short_description: "Run bounded suprnova-lsp debugging workflows"
-  default_prompt: "Use $rust-glancer-debugging to reproduce and diagnose this suprnova-lsp issue safely."

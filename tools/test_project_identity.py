@@ -44,6 +44,17 @@ class ProjectIdentity(unittest.TestCase):
             self.assertEqual(len(failures), 1)
             self.assertIn("README.md:2:", failures[0])
 
+    def test_rejects_the_inherited_extension_icon(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            relative = "editors/code/images/icon.png"
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            path.write_bytes((ROOT / "editors/code/test/fixtures/upstream-identity/icon.png").read_bytes())
+            failures = identity.identity_failures(root, [relative])
+            self.assertEqual(len(failures), 1)
+            self.assertIn("upstream extension icon", failures[0])
+
     def test_keeps_attribution_history_and_upstream_isolation_controls(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
