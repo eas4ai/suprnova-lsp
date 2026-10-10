@@ -1,0 +1,20 @@
+target
+dist
+.DS_Store
+editors/code/dist
+editors/code/LICENSE
+editors/code/node_modules
+editors/code/out
+editors/code/out-unit
+editors/code/server
+editors/code/.vscode-test
+editors/zed/extension.wasm
+
+.codex
+__pycache__/
+
+# This folder is for extra repos I want to check out as a reference / local documentation only
+reference/
+
+# Local benchmark fixtures fetched on demand.
+test_targets/bench_fixtures/rust-analyzer/

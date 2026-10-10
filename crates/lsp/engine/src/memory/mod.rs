@@ -1,0 +1,236 @@
+mod report;
+
+use std::sync::Arc;
+
+use rg_project::{ProjectMemoryHooks, ProjectMemoryPurgePoint};
+
+pub(crate) use self::report::MemoryReporter;
+
+/// Runtime memory controls supplied by the executable.
+///
+/// The default implementation is intentionally empty. The binary can provide allocator-specific
+/// controls, while tests and builds using the system allocator keep server behavior deterministic.
+pub trait MemoryControl: std::fmt::Debug + Send + Sync {
+    fn allocator_name(&self) -> &'static str {
+        "unknown"
+    }
+
+    fn allocator_stats(&self) -> Option<AllocatorStats> {
+        None
+    }
+
+    /// Attempts allocator-specific release work, returning whether a purge path ran.
+    fn try_purge_allocator(&self) -> bool {
+        false
+    }
+}
+
+impl MemoryControl for () {}
+
+#[derive(Debug)]
+pub(crate) struct ProjectMemoryReporter {
+    memory_control: Arc<dyn MemoryControl>,
+}
+
+impl ProjectMemoryReporter {
+    pub(crate) fn new(memory_control: Arc<dyn MemoryControl>) -> Self {
+        Self { memory_control }
+    }
+}
+
+impl ProjectMemoryHooks for ProjectMemoryReporter {
+    fn purge(&self, point: ProjectMemoryPurgePoint) {
+        MemoryReporter::purge_and_report(self.memory_control.as_ref(), point.label());
+    }
+}
+
+/// Allocator counters collected by the executable that selected the allocator.
+///
+/// The LSP crate receives these through `MemoryControl`, so it can observe allocator behavior
+/// without depending on, or accidentally choosing, a concrete global allocator itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AllocatorStats {
+    /// Bytes held by live application allocations, when cheaply tracked by the allocator.
+    pub allocated_bytes: Option<usize>,
+    /// Bytes in allocator pages that are active or committed.
+    pub active_bytes: Option<usize>,
+    /// Resident bytes reported by the allocator or its process-memory integration.
+    pub resident_bytes: Option<usize>,
+    /// Virtual address space mapped or reserved by the allocator.
+    pub mapped_bytes: Option<usize>,
+    /// Reusable virtual address space retained by the allocator.
+    pub retained_bytes: Option<usize>,
+}
+
+#[derive(Clone, Copy, derive_more::Debug, derive_more::Display)]
+#[display("{:?}", self)]
+pub(crate) struct MemoryStats {
+    #[debug("{}", format_optional_bytes(*allocated))]
+    allocated: Option<usize>,
+    #[debug("{}", format_optional_bytes(*active))]
+    active: Option<usize>,
+    #[debug("{}", format_optional_bytes(*resident))]
+    resident: Option<usize>,
+    #[debug("{}", format_optional_bytes(*mapped))]
+    mapped: Option<usize>,
+    #[debug("{}", format_optional_bytes(*retained))]
+    retained: Option<usize>,
+}
+
+impl MemoryStats {
+    fn capture(memory_control: &dyn MemoryControl) -> Self {
+        let allocator = memory_control.allocator_stats();
+        Self {
+            allocated: allocator.and_then(|stats| stats.allocated_bytes),
+            active: allocator.and_then(|stats| stats.active_bytes),
+            resident: allocator.and_then(|stats| stats.resident_bytes),
+            mapped: allocator.and_then(|stats| stats.mapped_bytes),
+            retained: allocator.and_then(|stats| stats.retained_bytes),
+        }
+    }
+}
+
+/// Difference between two allocator snapshots, formatted for memory logs.
+#[derive(Clone, Copy, derive_more::Debug, derive_more::Display)]
+#[display("{:?}", self)]
+struct MemoryDelta {
+    #[debug("{}", format_optional_byte_delta(*allocated))]
+    allocated: Option<i64>,
+    #[debug("{}", format_optional_byte_delta(*active))]
+    active: Option<i64>,
+    #[debug("{}", format_optional_byte_delta(*resident))]
+    resident: Option<i64>,
+    #[debug("{}", format_optional_byte_delta(*mapped))]
+    mapped: Option<i64>,
+    #[debug("{}", format_optional_byte_delta(*retained))]
+    retained: Option<i64>,
+}
+
+impl MemoryDelta {
+    fn between(before: MemoryStats, after: MemoryStats) -> Self {
+        Self {
+            allocated: Self::byte_delta(after.allocated, before.allocated),
+            active: Self::byte_delta(after.active, before.active),
+            resident: Self::byte_delta(after.resident, before.resident),
+            mapped: Self::byte_delta(after.mapped, before.mapped),
+            retained: Self::byte_delta(after.retained, before.retained),
+        }
+    }
+
+    fn byte_delta(after: Option<usize>, before: Option<usize>) -> Option<i64> {
+        let after = i64::try_from(after?).ok()?;
+        let before = i64::try_from(before?).ok()?;
+        Some(after - before)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ByteFormatStyle {
+    Human,
+    Compact,
+}
+
+impl ByteFormatStyle {
+    fn format_bytes(self, bytes: usize) -> String {
+        const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+
+        let mut value = bytes as f64;
+        let mut unit = UNITS[0];
+        for next_unit in UNITS.iter().skip(1) {
+            if value < 1024.0 {
+                break;
+            }
+            value /= 1024.0;
+            unit = next_unit;
+        }
+
+        let separator = self.unit_separator();
+        if unit == "B" {
+            format!("{bytes}{separator}{unit}")
+        } else {
+            format!("{value:.1}{separator}{unit}")
+        }
+    }
+
+    fn format_delta(self, delta: Option<i64>) -> String {
+        let Some(delta) = delta else {
+            return "-".to_string();
+        };
+
+        let prefix = if delta >= 0 { "+" } else { "-" };
+        let bytes = delta.unsigned_abs();
+        let bytes = usize::try_from(bytes)
+            .ok()
+            .map(|bytes| self.format_bytes(bytes));
+        match bytes {
+            Some(bytes) => format!("{prefix}{bytes}"),
+            None => format!("{delta}{}B", self.unit_separator()),
+        }
+    }
+
+    fn unit_separator(self) -> &'static str {
+        match self {
+            Self::Human => " ",
+            Self::Compact => "",
+        }
+    }
+}
+
+pub(crate) fn format_bytes(bytes: usize) -> String {
+    ByteFormatStyle::Human.format_bytes(bytes)
+}
+
+fn format_bytes_compact(bytes: usize) -> String {
+    ByteFormatStyle::Compact.format_bytes(bytes)
+}
+
+// Used by `derive_more::Debug` field formatting above; dead-code analysis does not look inside
+// derive expansion.
+#[allow(dead_code)]
+fn format_optional_bytes(bytes: Option<usize>) -> String {
+    bytes.map(format_bytes).unwrap_or_else(|| "-".to_string())
+}
+
+// Used by `derive_more::Debug` field formatting above; dead-code analysis does not look inside
+// derive expansion.
+#[allow(dead_code)]
+fn format_optional_byte_delta(delta: Option<i64>) -> String {
+    ByteFormatStyle::Human.format_delta(delta)
+}
+
+fn format_optional_memory_delta(delta: Option<i64>) -> String {
+    ByteFormatStyle::Compact.format_delta(delta)
+}
+
+fn format_memory_report_field(bytes: Option<usize>, delta: Option<i64>) -> String {
+    if bytes.is_none() && delta.is_none() {
+        return "-".to_string();
+    }
+
+    let bytes = bytes
+        .map(format_bytes_compact)
+        .unwrap_or_else(|| "-".to_string());
+    let delta = format_optional_memory_delta(delta);
+    format!("{bytes}({delta})")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_memory_report_field, format_optional_byte_delta};
+
+    #[test]
+    fn byte_delta_formatting_keeps_human_spacing_for_debug() {
+        assert_eq!(format_optional_byte_delta(Some(1536)), "+1.5 KiB");
+        assert_eq!(format_optional_byte_delta(Some(-1536)), "-1.5 KiB");
+        assert_eq!(format_optional_byte_delta(None), "-");
+    }
+
+    #[test]
+    fn memory_report_field_is_compact_for_log_rendering() {
+        assert_eq!(
+            format_memory_report_field(Some(12 * 1024 * 1024), Some(-2 * 1024 * 1024)),
+            "12.0MiB(-2.0MiB)",
+        );
+        assert_eq!(format_memory_report_field(None, None), "-");
+    }
+}

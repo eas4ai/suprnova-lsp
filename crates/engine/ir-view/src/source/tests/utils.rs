@@ -1,0 +1,150 @@
+use rg_ir_model::{CrateRef, PackageSlot, Span, identity::DeclarationRef};
+
+use crate::{
+    source::{IndexedSourceFact, IndexedSourceRole, IndexedSourceSurface, SourceOccurrenceView},
+    testonly::ViewFixture,
+};
+
+pub(super) fn check_source_occurrences(fixture: &str, cases: &[(&str, &str)]) {
+    let fixture = ViewFixture::build(fixture);
+    let package = fixture
+        .parse_db()
+        .packages()
+        .first()
+        .expect("fixture should contain one package");
+    let target = package
+        .targets()
+        .first()
+        .expect("fixture package should contain one target");
+    let file_id = package
+        .parsed_files()
+        .find(|file| file.path().ends_with("src/lib.rs"))
+        .expect("fixture should contain src/lib.rs")
+        .file_id();
+    let parsed_file = package
+        .parsed_file(file_id)
+        .expect("fixture source file should be parsed");
+    let crate_ref = CrateRef {
+        package: PackageSlot(0),
+        crate_id: rg_ir_model::CrateId(target.id.0),
+    };
+    let view_db = fixture.view_db();
+
+    let mut occurrences = Vec::new();
+    for occurrence in SourceOccurrenceView::new(&view_db)
+        .occurrences_in_crate(crate_ref, Some(file_id))
+        .expect("fixture source occurrences should scan")
+    {
+        let (fact, _, occurrence_file, span, role, surface) = occurrence.into_parts();
+        if occurrence_file != file_id {
+            continue;
+        }
+        let Some(text) = parsed_file
+            .text_for_span(span)
+            .expect("source occurrence text should load")
+        else {
+            continue;
+        };
+        occurrences.push((
+            text,
+            format!(
+                "{} @ {}",
+                render_occurrence(fact, role, surface),
+                render_span(
+                    span,
+                    parsed_file
+                        .line_index()
+                        .expect("fixture line index should load")
+                )
+            ),
+        ));
+    }
+
+    let mut mismatches = Vec::new();
+    for (ident, expected) in cases {
+        let mut matching = occurrences
+            .iter()
+            .filter(|(text, _)| text == ident)
+            .map(|(_, rendered)| rendered.as_str())
+            .collect::<Vec<_>>();
+        matching.sort();
+
+        let actual = if matching.is_empty() {
+            "<none>".to_string()
+        } else {
+            matching.join("\n")
+        };
+        let expected = expected
+            .trim()
+            .lines()
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join("\n");
+        if actual != expected {
+            mismatches.push(format!(
+                "unexpected occurrences for `{ident}`\nactual:\n{actual}\nexpected:\n{expected}"
+            ));
+        }
+    }
+
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n\n"));
+}
+
+fn render_span(span: Span, line_index: &rg_parse::LineIndex) -> String {
+    let line_column = line_index.line_column_span(span);
+    format!(
+        "{}:{}-{}:{}",
+        line_column.start.line + 1,
+        line_column.start.column + 1,
+        line_column.end.line + 1,
+        line_column.end.column + 1
+    )
+}
+
+fn render_occurrence(
+    fact: IndexedSourceFact,
+    role: IndexedSourceRole,
+    surface: IndexedSourceSurface,
+) -> String {
+    match surface {
+        IndexedSourceSurface::RecordExprShorthandFieldKey { .. }
+        | IndexedSourceSurface::RecordPatShorthandFieldKey { .. } => {
+            let IndexedSourceFact::RecordField { owner, key, .. } = fact else {
+                panic!("record field surface should carry a record field fact");
+            };
+            format!(
+                "record_shorthand_field {owner}::{}",
+                key.declaration_label()
+            )
+        }
+        IndexedSourceSurface::RecordExprShorthandValue { key, .. } => {
+            format!("record_shorthand_value {}", key.declaration_label())
+        }
+        IndexedSourceSurface::RecordPatShorthandBinding { key, .. } => {
+            format!("record_shorthand_binding {}", key.declaration_label())
+        }
+        IndexedSourceSurface::Plain | IndexedSourceSurface::RecordFieldKeyExplicit => match fact {
+            IndexedSourceFact::Declaration(declaration) => match declaration {
+                DeclarationRef::BodyBinding(_) => "binding".to_string(),
+                DeclarationRef::Field(_) => "field".to_string(),
+                DeclarationRef::EnumVariant(_) => "enum_variant".to_string(),
+                DeclarationRef::Item(_) => "item".to_string(),
+                DeclarationRef::LocalDef(_) if role == IndexedSourceRole::Reference => {
+                    "local_def_reference".to_string()
+                }
+                DeclarationRef::LocalDef(_) => "local_def".to_string(),
+                DeclarationRef::Module(_) => "module".to_string(),
+            },
+            IndexedSourceFact::FunctionBody(_) => "body".to_string(),
+            IndexedSourceFact::Expr(_) => "expr".to_string(),
+            IndexedSourceFact::TypePath(type_path) => {
+                format!("type_path {}", type_path.path())
+            }
+            IndexedSourceFact::ValuePath { path, .. } => format!("value_path {path}"),
+            IndexedSourceFact::RecordField { owner, key, .. } => {
+                format!("record_field {owner}::{}", key.declaration_label())
+            }
+            IndexedSourceFact::UsePath { path, .. } => format!("use_path {path}"),
+        },
+    }
+}

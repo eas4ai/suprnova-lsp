@@ -1,0 +1,1491 @@
+{
+  "identity": {
+    "purpose": "small diagnostic, not RSP acceptance",
+    "workload": "generated-settled",
+    "application": "/home/shawn/workspace2/devlist.app",
+    "openFileLimits": {
+      "inherited": [
+        1024,
+        524288
+      ],
+      "effective": [
+        4096,
+        524288
+      ]
+    },
+    "sources": {
+      "Cargo.lock": "ca1fae3f98efae0f4e88c6e405ff8c289e22a0116bc2d595ee508d94d88c1cf8",
+      "Cargo.toml": "db9e878d6cd3b47a069485ede9ab485be9defe8d847779017a893459e205d54e",
+      "build.rs": "e6c3ee48605ec061d5fb07213247c38fa10211e0ce5383d283611ae824422777",
+      "cmd/main.rs": "da86b85d331f68d5f39416ae65a52c93cb70159ef5c0c12763e6f24f1e47d1bc",
+      "src/audit.rs": "7f30da1bf57428ee7d26d2a3801eb32de4d13a6350ad2291a80731e3b54de892",
+      "src/bootstrap.rs": "3e5099ff7a040d336d3d3765516e4e754001fcefc4329b7f31bd1ad7851b17bf",
+      "src/consent.rs": "de6c5ae7284d32db5e25e9c441edb1180304e0d2c9a017963f92612500bb272b",
+      "src/demo.rs": "2eabf76ede2cdaedc3f6cc40ec89795a3d4421844df40c6a26ea07d1141e66a5",
+      "src/lib.rs": "00cfbf7a4e6d7e3fc0adef4bd01109ef3750a491a22f518b910c2fb16c4f7aaa",
+      "src/page_views.rs": "c5e98de41384535ad37ad6484a49f1409a2af202314e9c4d4aeba17c0f249c6e",
+      "src/public_pages.rs": "11917dabf86faf3e7ca99565142a220b26ee2703443ffb44a07cd70dd3b18cea",
+      "src/routes.rs": "513c89f6c588462d3ee50e2bd8f6cf2738801c618ce5e8e32035335442a40530",
+      "src/schedules.rs": "90ecd3413470c92f7485d4a87ad7dcadc20ae382f7ba9ef2733ff198f02d9e18",
+      "src/accounts/entity.rs": "e468eaa0e5933a16aedb941de9d37ce4e5bcff532af1f38896e8f03a617db1f7",
+      "src/accounts/mod.rs": "2520f8e485f36d19d0b46337652e804eb1673afa72b72cc087fec62110980c77",
+      "src/accounts/provider.rs": "9071e5dee122d4f1c1b1e076b2f83b538680b73dcaa286b20e29b46fc3eda325",
+      "src/accounts/queries.rs": "70c96037e6997b879c6ecfd472f30b030f2cfd60b341cb8afaae6a9bfdbc7ea0",
+      "src/accounts/roles.rs": "635a463c3a05f3fe37e479aeb0252ac6f6c7b293f56a4e3a24ff876e7037a5ba",
+      "src/actions/example_action.rs": "68d084d9c2eb35b206b037a3e764dad44018ddc851753354c4cf3d006228c9f0",
+      "src/actions/mod.rs": "cdd58c30cbeddf3f26a858bfd97848f033c7ed858232b3d5b549001b8eb9334a",
+      "src/articles/entities.rs": "b2db1213339334f0437d6bb7da881762d6e32055480e044d29724f1c4640acd9",
+      "src/articles/mod.rs": "f129605158a4ab614e2282cab510b08e759fa26c114064ba7255f795ad3e8f35",
+      "src/articles/queries.rs": "02113a77d47ec6837d5942e8d30cf60922ae4dc77e98c6653e205ed6b284f7a8",
+      "src/articles/taxonomy.rs": "a1058934d405c886b0c01a30d54e05b6061f52a2bce430fd9787e1b765301a87",
+      "src/articles/validation.rs": "bcda814d8492f4aad94d3000a82865d8f1f51016e7144908a52b1b0cb2ce2734",
+      "src/articles/workflow.rs": "5fa3e99dfcdc8c6bf7b31a9e95d3a6358b53969141e249139a3e73eeabd719c2",
+      "src/billing/adapters.rs": "4a4094a4211f3822fd54faaf6c37e8d9151d49c6e6d57cb20b3ccfefb5f7a46d",
+      "src/billing/cancellation.rs": "7481bbda4c13103859bd9ce88596ad420b80c1a6db750bb0bb3cea176a83afd8",
+      "src/billing/checkout.rs": "20b30f25d782295e5c3731ac34f3f6b302623986350d1008ca013b4e0fb834f9",
+      "src/billing/collect.rs": "96b04eb94d3668a4bb378cdfc5d230ed4576eed4564796033a0a85b4b0e9e61c",
+      "src/billing/entity.rs": "4d75e90ba25e9ede3dc9c30c78de2dd7f94c10acf5e4a8ed934eef4389371904",
+      "src/billing/events.rs": "593745fb3bf1d65e55a06b8208b7c632e88dd257a077d946eb05bbbbbef0c1c1",
+      "src/billing/evidence.rs": "d8fa9c4f53f44d36fbf2c2d4c55c8727e322c775cdfc1e5ed011b9d877a4e06e",
+      "src/billing/fulfillment.rs": "908e3e1527e1db503f098d4972c9a858561c7287b10c0ec22621a27681be70e2",
+      "src/billing/gateway.rs": "be1df2b5f3bc01bc11ac2ecf0678ffd9822dbc4766393684b1087f9c6f396d63",
+      "src/billing/lifecycle_entities.rs": "277b10a637eacfa17fc7627910683cbceeb7b60aa93b1cf1e54193e63bbf4083",
+      "src/billing/mod.rs": "a94a04c932c83c1a0168759085faf6a76552d008639c217999de061d9c628174",
+      "src/billing/nowpayments_evidence.rs": "23eb4d92f8094300d1e4d46da8a3f199ade291ac35f771139430486b6986c300",
+      "src/billing/paddle_evidence.rs": "825276345f305fb84de334c7aace0161df4729cffb9801b06cf1021bbba08c9d",
+      "src/billing/plans.rs": "518cac3aa3bd9c1c7211b93822c6fbe3a8f6c430764b9691b9a90e840ae8409a",
+      "src/billing/reconcile.rs": "99622883ecbb844c6aa8518edd8b723967839899c461d061954fe65dd8744e3a",
+      "src/billing/secrets.rs": "76c75e0d06ca755ef448b04953a53e7cae0238b84a1380c0e3f08434e22cdb64",
+      "src/billing/settings.rs": "e83c6b9bdfb65c78707955a17fcc072e7531999f2021c3bfb17f63f0474de991",
+      "src/billing/stripe_evidence.rs": "e733284e84495ed9adbe5553918eb0712119ce8816d49d990d768fdb95687dbe",
+      "src/billing/stripe_evidence_tests.rs": "9be3b461a53b27c00bc2d39c9dad2cd797833bff393b747c0d01b6870f43c313",
+      "src/billing/validation.rs": "9ae85a57bae02d0ac0ecc22e2eab17112dde764dd2b2dd27414a879291f6d162",
+      "src/bin/console.rs": "08c528efa3c726070383dca97f615f8e3a96c0a03da289b16c91aa5ce257abaa",
+      "src/brands/entities.rs": "932d8fd0d5f9ccafb798d099a58e5a6cbc6c4b7600e50ad5990e3710447fb7ce",
+      "src/brands/mod.rs": "d3834247d3b64da404fc437ae56b06ead6c979c44ea9e8819a08e8c6c850a310",
+      "src/commands/admin_access.rs": "49eb0b93728bfb435acd7ea5e4289f2c2ebc991be0f90361de6985cf8d2d8bd9",
+      "src/commands/billing_reconcile.rs": "5e0ee90974f0206e9fe9056b4bc05740a425307fe16a8482b5dee4c6322a4691",
+      "src/commands/demo_seed.rs": "3b06538682a140ee360736fabf19cf06735cda8dcf5fe73b3c648bb3886b854a",
+      "src/commands/directory_categories.rs": "7b8b0eecae66b4c003b399b43213d81da666f8cfaef37e666b8296881e70f26f",
+      "src/commands/directory_import.rs": "2b51b9b8a43207f6155c0c8a1f86833578fb2857b41cec1001ce0bd3ea3898d8",
+      "src/commands/directory_page_views.rs": "0f07e2eccb1c45b11d7e7181139caf734d89f87c775ba8a7429edd1e66a034a4",
+      "src/commands/intake_discover.rs": "ae0e07d215eb488f1fc886608ee00e4983195993ce5631787c4d206a0ab743b4",
+      "src/commands/intake_dispatch.rs": "98b2ef592632e2c3acf6eda5ff0da0d60673bcea3002c1ce996cc5e59f9daad3",
+      "src/commands/mod.rs": "eb9a870af98b8ff934e53bd4a299ab303ad26fb78670f1c0e7ce5bec0d1b6a2d",
+      "src/commands/notifications_deliver.rs": "b78ab6dff5a459484f11f9f11c4b562d58b66a2635de32bdfa92ce98d36ec033",
+      "src/commands/supporters_check.rs": "9ee37f796c984a5c86879f4470477278460dca32b53b412b3794c02c1a0cb0d4",
+      "src/config/database.rs": "8903537ed70aebb7294a7351ceaa2ea3645501a0151e0aea5608d2b1d187c9f1",
+      "src/config/mail.rs": "fdd28185f49773c62c6592a16a100eaa29411630d103157cc4cc06bec6c54f94",
+      "src/config/mod.rs": "5bc45cc22b511d3a9efe4daad11bb36bb49da406160ffd1ae548830cbbb8884b",
+      "src/config/site.rs": "436dbca89c0401e19bccf708d6f97c738bcc397ceb2e6e3a393ff8c526015589",
+      "src/controllers/account_links.rs": "0fba4ce48339cb964cbf827b8941b3d0dc3d981fcdf2a747a2be62957a1ac756",
+      "src/controllers/accounts.rs": "e4d4002395595e0ba270acd98554f14357dc0a7b34411824b167b35e6481311d",
+      "src/controllers/admin.rs": "55ca3a31bd28e8d46c4ca3ef7cc1a5e73ded5f5c427a98722fd1502d5bf326cb",
+      "src/controllers/articles.rs": "0c76135a2ee52ca3b9ea121071743ccb7a77ebba908f4543bd27dbdd032b494e",
+      "src/controllers/auth.rs": "4d939230fd4026d6290c8528979a570d40395844d89d69113cbd431bffb4aab7",
+      "src/controllers/billing.rs": "7f788ab2109ac28f098f1af2a40db47797f1bb1e125cf8a592930cc6dc7f9685",
+      "src/controllers/brands.rs": "e36da8ffc3fee801cef12267c17395da24cfee21c46c7dc749be2922bba75b31",
+      "src/controllers/claims.rs": "41865633408c6115dd4f968bc031640e4e4394c9babbb884a1243deb5ac983f0",
+      "src/controllers/dashboard.rs": "f078ef8ddaca315dba0d612f13e317b63816b2b7ba56ef7f3816979bef445afb",
+      "src/controllers/errors.rs": "b56a344c934882285afddcf7b4d49d33fdf9864eeec30dc4216f70b9a7051358",
+      "src/controllers/feeds.rs": "22e98863f4e3afe24dbca6e73bcc96a7696dc9022e98442bc1ed3b98dbab593b",
+      "src/controllers/home.rs": "459e65b09880d5f14f40023dbecde0a7f4d0d60df0dbd9f3c00b95f67a49ae8a",
+      "src/controllers/intake.rs": "9b85da81a1fe2df538cd6965ddd094cb179acacb574a382b0ce85920e5037fa0",
+      "src/controllers/legal.rs": "38d24bdc5975a35c1ceb847ddffe2d847844a5da1b0777a6d225861e8a292250",
+      "src/controllers/listings.rs": "868e74561be9e66a8a8f72e7c58e0b9228e5eba78fafd0b150d44f67224c3fc8",
+      "src/controllers/mod.rs": "fcd9e9cf58e40c38939e7e77d95d7a9571d929a143ac517e236e38f09f22f628",
+      "src/controllers/publishing.rs": "235e11d6625f2430b773a253c0aa12cc524dae5893b189c18cff575f12471c62",
+      "src/controllers/seo.rs": "5ba100e66440cddca5cca120c8ab52da724e3af8566d192dcd7b0758f2b9f02d",
+      "src/controllers/submission_hook.rs": "1c5dc617a99ddb94a0c1391022b1a7adde2083d52f86cb7d666de43c05caa330",
+      "src/intake/dispatch.rs": "bf320bfa65f4eeb7e0c59e4b2af84181e7af0362d596d0930e1e2bafbbc06550",
+      "src/intake/entities.rs": "f0ea01038ca1f3186add7993e25b5285649677ed00603b90b30535f2be30f685",
+      "src/intake/mod.rs": "52386007bbbcdc8330e410172421c384c4b3d14e24c205a5c573f3dc409b6065",
+      "src/intake/queries.rs": "44ea03748f366eddfa8043edc43b25cb5ac0766b19c3a7e4c9f2cb8d96290874",
+      "src/intake/settings.rs": "1ddbe99bf42cdcb9b9be67423ef1a44443c675c03df1ed40f3a26e06ca7e29b5",
+      "src/intake/suggest.rs": "c6871952a5d11f90e6556b21e282fa886bf9884ec3e6e8a3a0378c1c3873c642",
+      "src/intake/webhook.rs": "bf119db81f7a7c820a03d6f41fa4a424f3712562c38125f0b7b70b30d07e87f1",
+      "src/intake/workflow.rs": "452dd33f60deda2f8ad14c026f7e80bf9a6c1edebd8ca5c744a4b36e0106298b",
+      "src/legal/mod.rs": "331f6f21ff9f62058035f22c69486a2fcf70c5b0cdf30bf63ba6001db5315cb2",
+      "src/listings/badges.rs": "7641863c292076a3afab051dcbce90da08766c4c22c0e8b1e295538642f928ca",
+      "src/listings/claims.rs": "6e38c31d48f26a3127a5c6c3a07db934b0958d1f8f346324a659a31aedc6dfff",
+      "src/listings/entities.rs": "580fad4f03f47b83b04e745443d322562fb2c259edacb5bd40497dfde30d64ae",
+      "src/listings/fetch.rs": "c78fbd704ca881a9c0b64c5598a6a6bbf5aa3ffedab16576d75b5d7832a3a25a",
+      "src/listings/import.rs": "f47c3ad7aaad9c021cb769f1d40fd84fe1fe0e725f295af7562468ef1f9501e0",
+      "src/listings/media.rs": "eea6a42e56735acddffb947cec65362f40f3b04af996eb9d9c8763f645fd34d5",
+      "src/listings/mod.rs": "97da4ad7fbad9eeb57700703b828e36840232aac2377fe1561d6853e0ac3f0d5",
+      "src/listings/proof.rs": "f7b1dc0598d3b244e3e77fc7e85ea613942da62fa57bb7a4e121e580b1170827",
+      "src/listings/queries.rs": "e04a84a6a35ba44809c2b82e69c0d2a6c56464e1d28deddc55f6387dce5ee129",
+      "src/listings/social_card.rs": "8b1cb0b7df9accd9250c6fc1b9685b882a83111e80e81cdbe75966f836588028",
+      "src/listings/supporters.rs": "f4620d27b10a600739ece5a854564d38b2ca906695aa4b34653568f0de09a188",
+      "src/listings/validation.rs": "8c6cfd32883f7bf781087e9ac4ddd583943fe18ee83016863ad59cf629202130",
+      "src/listings/workflow.rs": "d325430c7f4fb0c70d1f8bf7a186d7c559fa5c4100395e818c8d0b859deb2180",
+      "src/middleware/auth_share.rs": "3bfe2d33f63b6c388128afd8d2f86f94ea8ea63cdcbcf5fb9ee24e42c8ed96f6",
+      "src/middleware/authenticate.rs": "a42ae8e79b7d8f2280f346e10483c2d52180a9d38863712e320b8bb00f6bf4a1",
+      "src/middleware/consent.rs": "a4260dfd30694b1e1e6da0cad065ab8bf67d07cb2afb2b635be4fdb3a830dd6f",
+      "src/middleware/logging.rs": "7f3f0f2716de567bd6c32ed3a5075afe4a51f58f900643e7b7387efe788dd661",
+      "src/middleware/mod.rs": "8491c38c1381974cb15e8de8b670f1fba10a088be545e7f8a05c72823f9255a6",
+      "src/middleware/theme.rs": "0f781a04f5781609deb707eae6d511945e1083183370ac4afdc35b6e9eb2522f",
+      "src/migrations/m20240101_000001_create_users_table.rs": "3bf7aae9384fef9bc133806f3418f2acf94d44bb3b5f98924b512fc7033c8f6f",
+      "src/migrations/m20240101_000002_create_sessions_table.rs": "ae50d763a3d1e81c065ba585fc38c010d5c2a68baa341441cb9daa72aa7f2812",
+      "src/migrations/m20240101_000003_create_remember_tokens_table.rs": "3288fdbbc3fc2c845c090592ac4dff7083523502a50d8b0a07fe8ee56f0e85b3",
+      "src/migrations/m20240101_000004_create_auth_flow_tokens_table.rs": "ccd226b14941bd6a890d2c8775e98b7d9953f6a22ad44f8247bd1aaf5ebce874",
+      "src/migrations/m20260909_000005_create_billing_settings.rs": "72288fe7d00b754b313fb020ae931fbaad02723b4f711498c39a26c76e2a733e",
+      "src/migrations/m20260909_000006_create_directory.rs": "5d9bf4b6c6d4d54505b26626014776fbbf645f4c2d74de77f78caed559ffb429",
+      "src/migrations/m20260909_000007_create_publishing.rs": "cc85669794c33626f7fef267f7a27168547b229b1f4424b5c0f0f17f9554aa5e",
+      "src/migrations/m20260909_000008_create_articles.rs": "6c94bd43ce7888fe3e209671bf83cd104f03be9308878b71c4bec9f469f5efd3",
+      "src/migrations/m20260909_000009_create_account_access.rs": "9f203f4ceab969960380c9063610531512de27cc0faa54a52dcba7103a395dc1",
+      "src/migrations/m20260909_000010_preserve_moderation_reason.rs": "a9ad4bee5f6e67b33fae1bf331d8e20b0a2b330476900097038595bdb54d3b00",
+      "src/migrations/m20260909_000011_create_owner_notifications.rs": "cc8c26da61a454506a11f0265f19857dd4732ac78b94ea154102c68467ab4bca",
+      "src/migrations/m20260909_000012_create_demo_seed.rs": "6ccfc4f4d8f95c93eba38239d50bb797e3a3a4db27758df039a3dc56e7a58a1c",
+      "src/migrations/m20260910_000013_create_seo_controls.rs": "323d7ad0a038739844eba2ef8853a9fe1bff7783fb2c5e5b29618c0a2526c469",
+      "src/migrations/m20260925_000014_add_plan_placement.rs": "f8fd13ad9eaf894421223ff6910e61f620d4367744e00cc88c15ea0617a0f6a3",
+      "src/migrations/m20260925_000015_add_plan_duration.rs": "57074ded1432168edaf7b04e4d93b32360e0e97bf471db421c5ac65f11c7cd50",
+      "src/migrations/m20260926_000016_add_plan_mode.rs": "a4ee8e22b635840f1c4b3f631096fa8062ff6ad9db3d15fb22e4f5bf904babf6",
+      "src/migrations/m20260926_000017_add_listing_screenshot.rs": "263bddc5ba24f9d92e369779c1cfb0f1efb364cec06ad742053944aaf53b66e8",
+      "src/migrations/m20260927_000018_create_listing_fetches.rs": "fc32dbc1978c2d030ad559c7f67777de005e6a52365ff44e52812317c43763aa",
+      "src/migrations/m20260929_000019_create_page_views.rs": "b52f71a74ea8f70b095d48c173590c503824a592b6eed9bc8727e4ed8ba3cc5f",
+      "src/migrations/m20260929_000020_add_purchase_managed_payments.rs": "3c9db65203838ac3b3aba597ada53f41bd0f9e03a06ff5ebf61f5a1ceef6eea7",
+      "src/migrations/m20260930_000021_create_directory_imports.rs": "dd3808121877b56426b80c63d293dc5572093b93b9b8d8f95b0bb6025d7f48d7",
+      "src/migrations/m20260930_000022_widen_listing_media_storage_key.rs": "ace4ddd6be1f073cf1709ccadb76d145282d05082bb0445becffcb482cf648f0",
+      "src/migrations/m20260930_000023_create_listing_supporters.rs": "3255b05e60035b8ba7cdcbede1454634ac51d31939481cccb85d2200f793d513",
+      "src/migrations/m20260930_000024_create_listing_claims.rs": "e568a78dc9c227f6d4364f0f35dea12f8523b08a730fbd1b585f6a7bb46c4260",
+      "src/migrations/m20261001_000025_create_brand_links.rs": "53e298dbfae5626b6456c10237b8ee43aebd6c3d74fbd005b44a6a5626269c8f",
+      "src/migrations/m20261001_000026_create_intake.rs": "b53a5e018372a7756f7e1231c801991aeaba97f0816bc4ce2eee4a77bb35d79e",
+      "src/migrations/m20261001_000027_add_intake_github_timing.rs": "2a3c163827ed4aba8d3c4cb4679273383ec8361cc271acc0f8a08ba56e81493e",
+      "src/migrations/m20261002_000028_create_scheduled_runs.rs": "63eb61194ae4303f5f86e92c0e5b5807b1c549563011141ef82a690a957aa62d",
+      "src/migrations/m20261002_000029_add_intake_suggestions.rs": "013ef19918960d648aa1f1e9073bb2aa216c8ade88871905163e885434fa6fe5",
+      "src/migrations/mod.rs": "6d5c4cf07af7d9b0b3d69b096f2807d142463311b058f333587764e6a7860f3f",
+      "src/models/mod.rs": "b34292a5aef3b6d3996010451e50f70413f1dac58199eef3aff5b1b5a6526147",
+      "src/models/user.rs": "05db1243f7ecc43df58aa49eddf87f9f9f17c8332f9e2115b149e421cbf4e50a",
+      "src/notifications/delivery.rs": "06c9f3241c4f349c7b3ec8b21fe5d97fa3587e97ac3644b5a57b7c6142a0c3cf",
+      "src/notifications/entity.rs": "7515c21f473bea6366c521df0fc1f3dc24562a7f408f1e5d18dbe843571861c1",
+      "src/notifications/mod.rs": "5c40c7e0510bc579d5d5a96e92dbc596eb3e463ee3b9c45c5346174bc0774706",
+      "src/notifications/payment.rs": "c80607819346fe62b6be06eea70c7112e6870a4b69984234f9e9cfea11314b24",
+      "src/seo/discovery.rs": "32074d972425f1aed6d737c9922cef6e0dc7689f8b93c084227d6910a8a67f06",
+      "src/seo/entities.rs": "7614087147fd4334b32179e77b470e9667199936fc1237f8163f7243fc764711",
+      "src/seo/markdown.rs": "daeed36572486aaa31358da5114fe13f5cc373f33f4dcec3d27a4f677b0241a2",
+      "src/seo/middleware.rs": "35281d48f2bc2fde032c521ad068d8b6dee25fed9c7371b186f9451f88905827",
+      "src/seo/mod.rs": "333d145871384ccd710c3a5e44663f09304c30bf9c226d78276a15989319e296",
+      "src/seo/not_found.rs": "83c4bc575042eff6670c9873b418531949a583d51ef06ce8f21651e7cde8cb4d",
+      "src/seo/redirects.rs": "f845e229d0ba6831d7facbe175231aab622357da94a16e1fe1becc2b86c5038c",
+      "src/seo/report.rs": "2aa17ea5f8e2d7f0911fdf7532957efb0e3783603fa06c57334103f46687f37f",
+      "src/seo/settings.rs": "6c01e178dd1f3d94b7eadefe82caa3006f2e1a503eece44313388763af576fad",
+      "tests/account_design_fixture.rs": "47adf7747471e3585b926aa36fecf1aadd82e3cb39d964706c805bf8cb521efb",
+      "tests/admin_content_fixture.rs": "8d49e00dadd3ff9ada420f64aa797499dfec94310256702752ac307abbf8476d",
+      "tests/admin_content_props.rs": "8a611df7dbdea3e55cc14266182d1b5e5ff24af62661c5a3d78c4b0759addb15",
+      "tests/admin_design_fixture.rs": "51641eda512d9513ba3353c615e397c2a0644e418806f3ce928b7738555b5b3c",
+      "tests/admin_filters.rs": "47ab688ebb59a4c9687f6b64ddf49246650a05872eda4b5855cd7d3099e76686",
+      "tests/administration_workflows.rs": "56d937fa4a084babb110f99a8716e6cdb4c2994121936d02f6a05f75a6e9c592",
+      "tests/adoption_workflows.rs": "268b6dbccab64ba4803275f67a57a5a55857cc7d90108f0aa0982ddece397ab1",
+      "tests/ai_brands.rs": "f1a0b42a3b9e1744ba829ec15a123c8b2ded3f55f5cd90bfdc33c101ac6477f0",
+      "tests/ai_tools_pages.rs": "b1751fc54640b059850b86dacb9a4fb033aaca36eb05c4b1aa9f0f8b43ac2487",
+      "tests/backlink_badges.rs": "b49dc54d441c1cefed147b62d880effad67b0106d195166bbfbc5b89d4b389ba",
+      "tests/claim_access.rs": "843d7b84084af1ce0fbac053692ec8bbe7930a8ea63318e764c3fd933b26348d",
+      "tests/demo_seed.rs": "644d1451d5089e29eb021bd77d84a7f127ff018d151ef12583ae79b18cb7837d",
+      "tests/directory_workflows.rs": "545168734cde3e6b8d44e85d0cc955ebdee0a9eb57cf6cc6df654c66038ca09e",
+      "tests/draft_suggestions.rs": "8d55ba06c0a4412cb5a8a184261969490f1a69f766b68f494810ed39cf74f1a9",
+      "tests/draft_suggestions_fixture.rs": "c003c5903c43b24670d39f5cc2c800fe2c6d186bccfb0cfc0eb76f1bfea7f84d",
+      "tests/editorial_workflows.rs": "df80bebe1f8e3953ebf2a0cbb5f815a15d76ce7347aad8b316b29c213a78a921",
+      "tests/featured_placement.rs": "ff85020df992766c933ad67ffc2d4c56519ecb6476986571e816970870f2a826",
+      "tests/foundation_accounts.rs": "d7b04d575258eb69550ceddcd489c5b14b09c9ff137d2c51198e50f70552db09",
+      "tests/foundation_ui.rs": "ccffaec4ab4d94a6a3cfee8d538f3d8685faab9445397212b4f0d07704a40b7f",
+      "tests/intake_actions.rs": "bc0cf3173f265c40debd65eb877f64205a180787bf070f3254823e0077f03f2d",
+      "tests/intake_batches.rs": "1b4fe8e50660d843d3bc85297d731da33c1be15234fc2aa64d84f604a90170f6",
+      "tests/intake_batches_fixture.rs": "cdb1115be763c9a528a4e98b8c7323023652e4b4a2367f8d72afd4f83e17936d",
+      "tests/intake_filters.rs": "735dd79dab8a0fbe2a0337649b8bad76bbf0d06c2e9bfc60cac24c1e916a4723",
+      "tests/intake_filters_fixture.rs": "11978218af078c8d4f3381d06d0e1291f738ad9bb0c00e8f57395a5244faa4a3",
+      "tests/legal_pages.rs": "3e4963af4a906424af838285e5e212490aec303b90c5e069e19140bed5023795",
+      "tests/listing_claims.rs": "a9cfbef1a3035df33e4aa1e1af806f82f2134d421e75f733542178f227fc267a",
+      "tests/listing_covers_fixture.rs": "881def4f3323ec8fb4ff99446fb059c0b28606694ba5cfc41953f711a2c6c030",
+      "tests/listing_fetch.rs": "bb5b8d311d2f349d236ef2c2bd5c992745eaa096cfaba6a66dad0624e9b3089a",
+      "tests/overview_workflows.rs": "ee9267378974fec212080a4fa0b72356c4634a253b857c67817ef0942c3d9b01",
+      "tests/page_views.rs": "1fc7a5d9030a609a06c0e02e1f5d39b4546d034e9827555f4e813982fe83f0d1",
+      "tests/paid_lifecycle.rs": "f8dbac901e0f6e16bcac9d563e61020b2ae32aa5078447be1e3bf90439fdc472",
+      "tests/payment_providers.rs": "d4a98ffa57df2b3a9525b36aef29e1f76be864523b9f1bb11c02d6b5ad264360",
+      "tests/payment_sdk_wire.rs": "7069fcbf1085f917d7884fedd6181d0482461b4c72d2e3246d76a993e340a3ce",
+      "tests/plan_duration.rs": "fd9ad2032111eac1d2a3829f7434e8d09647ff66f579d6af7c03d7e263eb669a",
+      "tests/plan_modes.rs": "03791df9837f9539f5ba3d5d68c55ad68102d8ad09e268ab636ae940afab919d",
+      "tests/plan_placement.rs": "152a381d0f7bc549b70b3a4ab31a889d7e825c22a146ef84ad5f1a551d13a2e6",
+      "tests/provider_administration.rs": "9920a5948ba49c72d2a188fa22e9eae489f025264a0f4c7e771d1b7196bdeb05",
+      "tests/provider_key_policy.rs": "26520bbece291e240e372adf572f5148ff8085ea68876b9dc146d016a53633b1",
+      "tests/public_design_fixture.rs": "d123aada140d42ca928e9590bcff37c80d8b587376b33a9707199a061e239e63",
+      "tests/register_mail_failure.rs": "b2b8fda2544f52cdac4b9f147008c4949554cdcf0b40d97b29ea481e606f0d71",
+      "tests/schedule_status.rs": "094a9d3099d5c7d7c981fe4e541e1c609718762f42548f548eb074d41ac6e3fe",
+      "tests/schedule_status_fixture.rs": "8a265df1fdd4038034f8dde8c6a9aab60b55f0f42f51562d4e91d2953ebcc7e2",
+      "tests/scheduled_recording.rs": "ccfa1c344f024b8c88a7d205938e157dc246385267b7fc4acb9bf51b7b8d2cdc",
+      "tests/search_ranking.rs": "9c3321d9bc62e43c364cfc794bd7556355d0d404b1c98a0b6af5158bae0cd14f",
+      "tests/seed_dataset.rs": "ba49b180bf5abb9ab3641df18f13eadee6f5cda396ebf82d52a360527d9740d8",
+      "tests/seo_workflows.rs": "85030cc8370daac05e706684e73eb55760810cbdfbc41e45db41fce6d63349de",
+      "tests/site_intake.rs": "6b0baf23f5a3053932e130e2a9c94421bbd1f784ab7fac641f9dfb381050162e",
+      "tests/supporter_checks.rs": "1bbee72e97c982880728f56cd8aa9dcde813e2d92db884dc0ca02e1ae31bdf8f",
+      "tests/common/mod.rs": "eb04743c0027fb32b953bdd48b133e98bd6e01c61e99f1a20be9265a2d8aee18",
+      "tests/common/paid_browser.rs": "4ee1b24734663eabfe17faec7b7eeee52b750afc5212041b5ed4c596f4263f18",
+      "tests/common/payments.rs": "7bd827b2f200386da9f3b034825841c8c22f192a76b491a4ffa1d8bec1bbb766",
+      ".cargo/config.toml": "80ad7dfb1c43a5a8217eefafb833db91a3bc6182158d7c7eb740f26c13da61e3"
+    },
+    "frameworkRevision": "3229aa9af542c991196274fa3c235cdce88a68e2",
+    "buildProfile": "release",
+    "producerToolchain": "nightly-2026-08-19",
+    "cacheState": "existing LSP/compiler caches; fresh owned export artifact root",
+    "observers": {
+      "lsp-query.py": "7f692927656f4daf75682e82ccd901c16dee2150da10ee02b4f596ae7b36f65e",
+      "sudus-responsiveness.py": "752c59c479748a62dfac312c7dfa279f80381fda037b9c1ae54037bf6065df9d",
+      "agent-debug.py": "7c6aac11fa567210e74f30d1193e76d1bd54ec519cd35de92ffd3ace99ece46a"
+    },
+    "metadataSha256": "3f12034b1998b4f6f727a042bbcc0e0a472e453be696d647189584bff9e45db6",
+    "buildCompiler": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+    "producerCompiler": "rustc 1.100.0-nightly (e71c0f1e3 2026-08-18)\nbinary: rustc\ncommit-hash: e71c0f1e3395b10a8c331317be1a5c107bdf7b2e\ncommit-date: 2026-08-18\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0-nightly\nLLVM version: 23.1.0\n",
+    "commit": "b489c2c8c362056a0737d0d193956224c4e7d41b",
+    "binary": "/home/shawn/workspace2/rust-glancer/target/agent-debug/build/x86_64-unknown-linux-gnu/release/suprnova-lsp",
+    "binarySha256": "728d66ad6e02247b006f1160566c746ad9bceeb3ed47c162ecbf2ae477642e74"
+  },
+  "reports": {
+    "faster-builds": {
+      "raw": {
+        "file": "src/models/user.rs",
+        "binary": "target/agent-debug/build/x86_64-unknown-linux-gnu/release/suprnova-lsp",
+        "barriers": {
+          "readiness": "ready",
+          "deferred": "before-queries",
+          "rustdoc": "before-queries"
+        },
+        "results": [
+          {
+            "kind": "hover",
+            "label": "rsp_query",
+            "position": {
+              "line": 61,
+              "col": 13
+            },
+            "elapsedMs": 297.672,
+            "transport": {
+              "id": 2,
+              "method": "textDocument/hover",
+              "status": "success",
+              "writtenNs": 1054035010860259,
+              "receivedNs": 1054035308465990,
+              "durationNs": 297605731,
+              "finishedNs": 1054035308501042
+            },
+            "text": "```rust\nlet rsp_query: Builder<User>\n```",
+            "raw": {
+              "contents": {
+                "kind": "markdown",
+                "value": "```rust\nlet rsp_query: Builder<User>\n```"
+              },
+              "range": {
+                "end": {
+                  "character": 21,
+                  "line": 60
+                },
+                "start": {
+                  "character": 12,
+                  "line": 60
+                }
+              }
+            }
+          },
+          {
+            "kind": "hover",
+            "label": "rsp_without",
+            "position": {
+              "line": 62,
+              "col": 13
+            },
+            "elapsedMs": 295.655,
+            "transport": {
+              "id": 3,
+              "method": "textDocument/hover",
+              "status": "success",
+              "writtenNs": 1054035308547591,
+              "receivedNs": 1054035604143093,
+              "durationNs": 295595502,
+              "finishedNs": 1054035604182067
+            },
+            "text": "```rust\nlet rsp_without: Builder<User>\n```",
+            "raw": {
+              "contents": {
+                "kind": "markdown",
+                "value": "```rust\nlet rsp_without: Builder<User>\n```"
+              },
+              "range": {
+                "end": {
+                  "character": 23,
+                  "line": 61
+                },
+                "start": {
+                  "character": 12,
+                  "line": 61
+                }
+              }
+            }
+          },
+          {
+            "kind": "hover",
+            "label": "rsp_filter",
+            "position": {
+              "line": 63,
+              "col": 13
+            },
+            "elapsedMs": 294.587,
+            "transport": {
+              "id": 4,
+              "method": "textDocument/hover",
+              "status": "success",
+              "writtenNs": 1054035604228412,
+              "receivedNs": 1054035898767569,
+              "durationNs": 294539157,
+              "finishedNs": 1054035898794276
+            },
+            "text": "```rust\nlet rsp_filter: Builder<User>\n```",
+            "raw": {
+              "contents": {
+                "kind": "markdown",
+                "value": "```rust\nlet rsp_filter: Builder<User>\n```"
+              },
+              "range": {
+                "end": {
+                  "character": 22,
+                  "line": 62
+                },
+                "start": {
+                  "character": 12,
+                  "line": 62
+                }
+              }
+            }
+          }
+        ],
+        "idleMemory": {
+          "indexingComplete": true,
+          "metric": "sum-of-process-RSS",
+          "samples": [
+            {
+              "processRssBytes": {
+                "1962625": 29515776,
+                "1962669": 354021376
+              },
+              "aggregateRssBytes": 383537152
+            },
+            {
+              "processRssBytes": {
+                "1962625": 29515776,
+                "1962669": 335958016
+              },
+              "aggregateRssBytes": 365473792
+            },
+            {
+              "processRssBytes": {
+                "1962625": 29515776,
+                "1962669": 335958016
+              },
+              "aggregateRssBytes": 365473792
+            },
+            {
+              "processRssBytes": {
+                "1962625": 29515776,
+                "1962669": 335958016
+              },
+              "aggregateRssBytes": 365473792
+            },
+            {
+              "processRssBytes": {
+                "1962625": 29515776,
+                "1962669": 335958016
+              },
+              "aggregateRssBytes": 365473792
+            }
+          ],
+          "indexingPeakRssBytes": 4807090176,
+          "indexingSamples": 8460,
+          "samplingIntervalMs": 100
+        },
+        "transport": [
+          {
+            "id": 1,
+            "method": "initialize",
+            "status": "success",
+            "writtenNs": 1053174607326673,
+            "receivedNs": 1053174871431960,
+            "durationNs": 264105287,
+            "finishedNs": 1053174871505488
+          },
+          {
+            "id": 2,
+            "method": "textDocument/hover",
+            "status": "success",
+            "writtenNs": 1054035010860259,
+            "receivedNs": 1054035308465990,
+            "durationNs": 297605731,
+            "finishedNs": 1054035308501042
+          },
+          {
+            "id": 3,
+            "method": "textDocument/hover",
+            "status": "success",
+            "writtenNs": 1054035308547591,
+            "receivedNs": 1054035604143093,
+            "durationNs": 295595502,
+            "finishedNs": 1054035604182067
+          },
+          {
+            "id": 4,
+            "method": "textDocument/hover",
+            "status": "success",
+            "writtenNs": 1054035604228412,
+            "receivedNs": 1054035898767569,
+            "durationNs": 294539157,
+            "finishedNs": 1054035898794276
+          },
+          {
+            "id": 5,
+            "method": "shutdown",
+            "status": "success",
+            "writtenNs": 1054036409568310,
+            "receivedNs": 1054036600159987,
+            "durationNs": 190591677,
+            "finishedNs": 1054036600194743
+          }
+        ],
+        "lifecycle": [
+          {
+            "method": "suprnova-lsp/activeWorkspaceChanged",
+            "receivedNs": 1053174887841838,
+            "params": {
+              "root": "/home/shawn/workspace2/devlist.app",
+              "state": "indexing"
+            }
+          },
+          {
+            "method": "experimental/serverStatus",
+            "receivedNs": 1053174888688300,
+            "params": {
+              "health": "ok",
+              "quiescent": false
+            }
+          },
+          {
+            "method": "suprnova-lsp/deferredIndexingStarted",
+            "receivedNs": 1053176489214122,
+            "params": {
+              "root": "/home/shawn/workspace2/devlist.app"
+            }
+          },
+          {
+            "method": "suprnova-lsp/activeWorkspaceChanged",
+            "receivedNs": 1053176490617084,
+            "params": {
+              "root": "/home/shawn/workspace2/devlist.app",
+              "state": "ready"
+            }
+          },
+          {
+            "method": "suprnova-lsp/rustdocStatus",
+            "receivedNs": 1053176514131285,
+            "params": {
+              "generation": 1,
+              "message": "Waiting to generate library and binary model APIs",
+              "state": "pending",
+              "workspaceRoot": "/home/shawn/workspace2/devlist.app"
+            }
+          },
+          {
+            "method": "suprnova-lsp/rustdocStatus",
+            "receivedNs": 1053176514228048,
+            "params": {
+              "generation": 1,
+              "message": "Generating library and binary model APIs",
+              "state": "running",
+              "workspaceRoot": "/home/shawn/workspace2/devlist.app"
+            }
+          },
+          {
+            "method": "experimental/serverStatus",
+            "receivedNs": 1053178833447911,
+            "params": {
+              "health": "ok",
+              "quiescent": true
+            }
+          },
+          {
+            "method": "suprnova-lsp/deferredIndexingFinished",
+            "receivedNs": 1053178833578926,
+            "params": {
+              "outcome": "succeeded",
+              "root": "/home/shawn/workspace2/devlist.app"
+            }
+          },
+          {
+            "method": "experimental/serverStatus",
+            "receivedNs": 1054020132202809,
+            "params": {
+              "health": "ok",
+              "quiescent": false
+            }
+          },
+          {
+            "method": "suprnova-lsp/activeWorkspaceChanged",
+            "receivedNs": 1054020132300141,
+            "params": {
+              "root": "/home/shawn/workspace2/devlist.app",
+              "state": "indexing"
+            }
+          },
+          {
+            "method": "suprnova-lsp/deferredIndexingStarted",
+            "receivedNs": 1054032678414627,
+            "params": {
+              "root": "/home/shawn/workspace2/devlist.app"
+            }
+          },
+          {
+            "method": "suprnova-lsp/rustdocStatus",
+            "receivedNs": 1054032682256887,
+            "params": {
+              "generation": 1,
+              "message": "Generated library and binary model APIs are current",
+              "state": "current",
+              "workspaceRoot": "/home/shawn/workspace2/devlist.app"
+            }
+          },
+          {
+            "method": "suprnova-lsp/activeWorkspaceChanged",
+            "receivedNs": 1054032682285541,
+            "params": {
+              "root": "/home/shawn/workspace2/devlist.app",
+              "state": "ready"
+            }
+          },
+          {
+            "method": "experimental/serverStatus",
+            "receivedNs": 1054034991038762,
+            "params": {
+              "health": "ok",
+              "quiescent": true
+            }
+          },
+          {
+            "method": "suprnova-lsp/deferredIndexingFinished",
+            "receivedNs": 1054034991074196,
+            "params": {
+              "outcome": "succeeded",
+              "root": "/home/shawn/workspace2/devlist.app"
+            }
+          }
+        ],
+        "stages": [
+          {
+            "message": "editor document analysis route published",
+            "fields": {
+              "method": "didOpen",
+              "path": "/home/shawn/workspace2/devlist.app/src/models/user.rs",
+              "ready": true,
+              "session": "OpenDocumentSession(1)",
+              "uri": "file:///home/shawn/workspace2/devlist.app/src/models/user.rs"
+            },
+            "observedNs": 1053176514511843
+          },
+          {
+            "message": "analysis query started",
+            "fields": {
+              "label": "hover",
+              "queued_ms": "0"
+            },
+            "observedNs": 1054035011985094
+          },
+          {
+            "message": "document analysis prepared",
+            "fields": {
+              "elapsed_us": "255431",
+              "query": "hover",
+              "selection": "AtOffset(2158)",
+              "source": "current",
+              "target_count": 1
+            },
+            "observedNs": 1054035267587264
+          },
+          {
+            "message": "analysis query completed",
+            "fields": {
+              "elapsed_ms": "295",
+              "query": "hover",
+              "queued_ms": "0",
+              "status": "ok"
+            },
+            "observedNs": 1054035308084716
+          },
+          {
+            "message": "analysis query started",
+            "fields": {
+              "label": "hover",
+              "queued_ms": "0"
+            },
+            "observedNs": 1054035310574975
+          },
+          {
+            "message": "document analysis prepared",
+            "fields": {
+              "elapsed_us": "253622",
+              "query": "hover",
+              "selection": "AtOffset(2197)",
+              "source": "current",
+              "target_count": 1
+            },
+            "observedNs": 1054035564390858
+          },
+          {
+            "message": "analysis query completed",
+            "fields": {
+              "elapsed_ms": "292",
+              "query": "hover",
+              "queued_ms": "0",
+              "status": "ok"
+            },
+            "observedNs": 1054035603633204
+          },
+          {
+            "message": "analysis query started",
+            "fields": {
+              "label": "hover",
+              "queued_ms": "0"
+            },
+            "observedNs": 1054035605626382
+          },
+          {
+            "message": "document analysis prepared",
+            "fields": {
+              "elapsed_us": "253897",
+              "query": "hover",
+              "selection": "AtOffset(2254)",
+              "source": "current",
+              "target_count": 1
+            },
+            "observedNs": 1054035859648874
+          },
+          {
+            "message": "analysis query completed",
+            "fields": {
+              "elapsed_ms": "292",
+              "query": "hover",
+              "queued_ms": "0",
+              "status": "ok"
+            },
+            "observedNs": 1054035898370723
+          }
+        ]
+      },
+      "summary": {
+        "firstNs": 297605731,
+        "repeatedNs": [
+          295595502,
+          294539157
+        ],
+        "stages": [
+          {
+            "id": 2,
+            "transportNs": 297605731,
+            "queuedNs": 0,
+            "executionNs": 295000000,
+            "preparationNs": 255431000,
+            "correlation": "one outstanding hover; all three lifecycle/preparation observations in request order"
+          },
+          {
+            "id": 3,
+            "transportNs": 295595502,
+            "queuedNs": 0,
+            "executionNs": 292000000,
+            "preparationNs": 253622000,
+            "correlation": "one outstanding hover; all three lifecycle/preparation observations in request order"
+          },
+          {
+            "id": 4,
+            "transportNs": 294539157,
+            "queuedNs": 0,
+            "executionNs": 292000000,
+            "preparationNs": 253897000,
+            "correlation": "one outstanding hover; all three lifecycle/preparation observations in request order"
+          }
+        ],
+        "diagnosticP95Ns": 297605731,
+        "maxNs": 297605731,
+        "acceptance": "unverified: diagnostic counts are below the RSP minimum",
+        "idleRssBytes": [
+          383537152,
+          365473792,
+          365473792,
+          365473792,
+          365473792
+        ]
+      },
+      "plan": {
+        "file": "src/models/user.rs",
+        "format": "json",
+        "readinessBarrier": "ready",
+        "documentReadinessBarrier": true,
+        "deferredBarrier": "before-queries",
+        "idleMemory": true,
+        "queries": [
+          {
+            "kind": "hover",
+            "label": "rsp_query",
+            "marker": "rsp_query"
+          },
+          {
+            "kind": "hover",
+            "label": "rsp_without",
+            "marker": "rsp_without"
+          },
+          {
+            "kind": "hover",
+            "label": "rsp_filter",
+            "marker": "rsp_filter"
+          }
+        ],
+        "initializationOptions": {
+          "cfg": {
+            "test": false
+          },
+          "cache": {
+            "packageResidency": "workspace"
+          },
+          "indexing": {
+            "performancePreference": "faster-builds"
+          },
+          "rustdoc": {
+            "automatic": {
+              "artifactRoot": "/home/shawn/workspace2/rust-glancer/target/agent-debug/runs/20261006T233656243Z-rsp-diagnostic-1962525-9c1ed3/faster-builds/compiler",
+              "toolchain": "nightly-2026-08-19",
+              "jobs": 2
+            }
+          }
+        },
+        "text": "//! User model.\n//!\n//! Defined with the `#[suprnova::model]` macro: the struct below *is* the\n//! Eloquent model. The macro emits the SeaORM `Entity` / `Column` /\n//! `ActiveModel` in an inner `user` module and gives `User` the query surface\n//! (`User::query()`, `User::find()`, the `Model::create` mass-assignment entry\n//! point, `save`, timestamps). `Authenticatable` is implemented on the struct\n//! so the auth stack (session middleware, user providers, `Auth::user()`)\n//! resolves users without touching SeaORM directly.\n\nuse std::any::Any;\n\nuse chrono::{DateTime, Utc};\nuse suprnova::{\n    Authenticatable, CanResetPassword, FrameworkError, MustVerifyEmail, attrs, hashing, model,\n};\n\n#[model(\n    table = \"users\",\n    fillable = [\"name\", \"email\", \"password\"],\n    hidden = [\"password\", \"remember_token\"],\n    timestamps,\n)]\npub struct User {\n    pub id: i64,\n    pub name: String,\n    pub email: String,\n    pub password: String,\n    pub remember_token: Option<String>,\n    // Nullable verification timestamp. The model macro auto-injects the\n    // `AsOptionalDateTime` cast for `Option<DateTime<Utc>>` fields, so no\n    // explicit `casts = {}` entry is needed. `NULL` means unverified.\n    pub email_verified_at: Option<DateTime<Utc>>,\n    pub created_at: DateTime<Utc>,\n    pub updated_at: DateTime<Utc>,\n}\n\n// Re-export the SeaORM types the macro emits in the inner `user` module so\n// call sites referencing `crate::models::user::{Entity, Column, ActiveModel}`\n// keep resolving.\npub use user::{ActiveModel, Column, Entity};\n\nimpl suprnova::rbac::HasRoles for User {\n    fn rbac_model_type(&self) -> String {\n        \"directory.user\".to_owned()\n    }\n}\n\nimpl User {\n    /// Find a user by their email address.\n    pub async fn find_by_email(email: &str) -> Result<Option<Self>, FrameworkError> {\n        <Self as suprnova::eloquent::Model>::query()\n            .filter(\"email\", email)\n            .first()\n            .await\n    }\n\n    /// Verify a plaintext password against this user's stored hash.\n    pub fn verify_password(&self, password: &str) -> Result<bool, FrameworkError> {\n        use suprnova::eloquent::Model as _;\n        let rsp_query = User::query();\n        let rsp_without = User::without_global_scopes();\n        let rsp_filter = User::filter(\"email\", \"member@example.test\");\n\n        hashing::verify(password, &self.password)\n    }\n\n    /// Create a new user, hashing the password before insert. Values are\n    /// mass-assigned through the model's `fillable` set.\n    pub async fn create(\n        name: impl Into<String>,\n        email: impl Into<String>,\n        password: &str,\n    ) -> Result<Self, FrameworkError> {\n        let name: String = name.into();\n        let email: String = email.into();\n        let hashed = hashing::hash(password)?;\n        <Self as suprnova::eloquent::Model>::create(attrs! {\n            name: name,\n            email: email,\n            password: hashed,\n        })\n        .await\n    }\n\n    /// Set (or clear) the remember-me token and persist it. `remember_token`\n    /// is deliberately outside `fillable` (it is never set from request\n    /// input), so this writes the whole row via `save` rather than a\n    /// mass-assignment update.\n    pub async fn update_remember_token(&self, token: Option<String>) -> Result<(), FrameworkError> {\n        let mut updated = self.clone();\n        updated.remember_token = token;\n        <Self as suprnova::eloquent::Model>::save(&updated).await\n    }\n}\n\nimpl Authenticatable for User {\n    fn get_auth_identifier(&self) -> String {\n        self.id.to_string()\n    }\n\n    fn auth_identifier_name(&self) -> &'static str {\n        \"id\"\n    }\n\n    // Returning the stored hash is what lets the registered\n    // `EloquentUserProvider<User>` verify credentials. The trait default\n    // returns `None` (for models that authenticate by other means -\n    // OAuth, passkeys), which makes `Auth::attempt` reject every\n    // password.\n    fn get_auth_password(&self) -> Option<&str> {\n        Some(&self.password)\n    }\n\n    fn as_any(&self) -> &dyn Any {\n        self\n    }\n\n    fn into_arc_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn Any + Send + Sync> {\n        self\n    }\n}\n\n// The email-verification flow reads the address + verification timestamp\n// through this trait, and writes the timestamp back when a verification link\n// is consumed. Implementing it on `User` is what lets the configured\n// `EloquentUserProvider<User>` (registered in `bootstrap.rs`) drive\n// `EmailVerification::resend` / `verify`.\nimpl MustVerifyEmail for User {\n    fn email(&self) -> &str {\n        &self.email\n    }\n\n    fn email_verified_at(&self) -> Option<DateTime<Utc>> {\n        self.email_verified_at\n    }\n\n    fn set_email_verified_at(&mut self, v: Option<DateTime<Utc>>) {\n        self.email_verified_at = v;\n    }\n\n    fn name(&self) -> Option<&str> {\n        Some(&self.name)\n    }\n}\n\n// The password-reset flow addresses the reset / password-changed mail through\n// `email_for_reset()` and persists the rotated (already-hashed) password\n// through `set_password_hash()`. Implementing it on `User` lets the configured\n// `EloquentUserProvider<User>` drive `PasswordReset::send_link` / `complete`.\nimpl CanResetPassword for User {\n    fn email_for_reset(&self) -> &str {\n        &self.email\n    }\n\n    fn set_password_hash(&mut self, hash: &str) {\n        self.password = hash.to_string();\n    }\n}\n",
+        "rustdocBarrier": "before-queries",
+        "rustdocTimeoutMs": 900000
+      }
+    },
+    "lower-peak-memory": {
+      "raw": {
+        "file": "src/models/user.rs",
+        "binary": "target/agent-debug/build/x86_64-unknown-linux-gnu/release/suprnova-lsp",
+        "barriers": {
+          "readiness": "ready",
+          "deferred": "before-queries",
+          "rustdoc": "before-queries"
+        },
+        "results": [
+          {
+            "kind": "hover",
+            "label": "rsp_query",
+            "position": {
+              "line": 61,
+              "col": 13
+            },
+            "elapsedMs": 309.409,
+            "transport": {
+              "id": 2,
+              "method": "textDocument/hover",
+              "status": "success",
+              "writtenNs": 1054861943780477,
+              "receivedNs": 1054862253078890,
+              "durationNs": 309298413,
+              "finishedNs": 1054862253142865
+            },
+            "text": "```rust\nlet rsp_query: Builder<User>\n```",
+            "raw": {
+              "contents": {
+                "kind": "markdown",
+                "value": "```rust\nlet rsp_query: Builder<User>\n```"
+              },
+              "range": {
+                "end": {
+                  "character": 21,
+                  "line": 60
+                },
+                "start": {
+                  "character": 12,
+                  "line": 60
+                }
+              }
+            }
+          },
+          {
+            "kind": "hover",
+            "label": "rsp_without",
+            "position": {
+              "line": 62,
+              "col": 13
+            },
+            "elapsedMs": 306.062,
+            "transport": {
+              "id": 3,
+              "method": "textDocument/hover",
+              "status": "success",
+              "writtenNs": 1054862253226496,
+              "receivedNs": 1054862559206904,
+              "durationNs": 305980408,
+              "finishedNs": 1054862559257286
+            },
+            "text": "```rust\nlet rsp_without: Builder<User>\n```",
+            "raw": {
+              "contents": {
+                "kind": "markdown",
+                "value": "```rust\nlet rsp_without: Builder<User>\n```"
+              },
+              "range": {
+                "end": {
+                  "character": 23,
+                  "line": 61
+                },
+                "start": {
+                  "character": 12,
+                  "line": 61
+                }
+              }
+            }
+          },
+          {
+            "kind": "hover",
+            "label": "rsp_filter",
+            "position": {
+              "line": 63,
+              "col": 13
+            },
+            "elapsedMs": 300.52,
+            "transport": {
+              "id": 4,
+              "method": "textDocument/hover",
+              "status": "success",
+              "writtenNs": 1054862559321538,
+              "receivedNs": 1054862859763590,
+              "durationNs": 300442052,
+              "finishedNs": 1054862859813094
+            },
+            "text": "```rust\nlet rsp_filter: Builder<User>\n```",
+            "raw": {
+              "contents": {
+                "kind": "markdown",
+                "value": "```rust\nlet rsp_filter: Builder<User>\n```"
+              },
+              "range": {
+                "end": {
+                  "character": 22,
+                  "line": 62
+                },
+                "start": {
+                  "character": 12,
+                  "line": 62
+                }
+              }
+            }
+          }
+        ],
+        "idleMemory": {
+          "indexingComplete": true,
+          "metric": "sum-of-process-RSS",
+          "samples": [
+            {
+              "processRssBytes": {
+                "2052917": 35266560,
+                "2052988": 224747520
+              },
+              "aggregateRssBytes": 260014080
+            },
+            {
+              "processRssBytes": {
+                "2052917": 35262464,
+                "2052988": 217145344
+              },
+              "aggregateRssBytes": 252407808
+            },
+            {
+              "processRssBytes": {
+                "2052917": 35262464,
+                "2052988": 217145344
+              },
+              "aggregateRssBytes": 252407808
+            },
+            {
+              "processRssBytes": {
+                "2052917": 35262464,
+                "2052988": 217145344
+              },
+              "aggregateRssBytes": 252407808
+            },
+            {
+              "processRssBytes": {
+                "2052917": 35262464,
+                "2052988": 217145344
+              },
+              "aggregateRssBytes": 252407808
+            }
+          ],
+          "indexingPeakRssBytes": 1512742912,
+          "indexingSamples": 8129,
+          "samplingIntervalMs": 100
+        },
+        "transport": [
+          {
+            "id": 1,
+            "method": "initialize",
+            "status": "success",
+            "writtenNs": 1054036973681899,
+            "receivedNs": 1054037255218475,
+            "durationNs": 281536576,
+            "finishedNs": 1054037255274743
+          },
+          {
+            "id": 2,
+            "method": "textDocument/hover",
+            "status": "success",
+            "writtenNs": 1054861943780477,
+            "receivedNs": 1054862253078890,
+            "durationNs": 309298413,
+            "finishedNs": 1054862253142865
+          },
+          {
+            "id": 3,
+            "method": "textDocument/hover",
+            "status": "success",
+            "writtenNs": 1054862253226496,
+            "receivedNs": 1054862559206904,
+            "durationNs": 305980408,
+            "finishedNs": 1054862559257286
+          },
+          {
+            "id": 4,
+            "method": "textDocument/hover",
+            "status": "success",
+            "writtenNs": 1054862559321538,
+            "receivedNs": 1054862859763590,
+            "durationNs": 300442052,
+            "finishedNs": 1054862859813094
+          },
+          {
+            "id": 5,
+            "method": "shutdown",
+            "status": "success",
+            "writtenNs": 1054863365715000,
+            "receivedNs": 1054863536529817,
+            "durationNs": 170814817,
+            "finishedNs": 1054863536556185
+          }
+        ],
+        "lifecycle": [
+          {
+            "method": "suprnova-lsp/activeWorkspaceChanged",
+            "receivedNs": 1054037268465496,
+            "params": {
+              "root": "/home/shawn/workspace2/devlist.app",
+              "state": "indexing"
+            }
+          },
+          {
+            "method": "experimental/serverStatus",
+            "receivedNs": 1054037268727439,
+            "params": {
+              "health": "ok",
+              "quiescent": false
+            }
+          },
+          {
+            "method": "experimental/serverStatus",
+            "receivedNs": 1054041158946710,
+            "params": {
+              "health": "ok",
+              "quiescent": true
+            }
+          },
+          {
+            "method": "suprnova-lsp/activeWorkspaceChanged",
+            "receivedNs": 1054041159144273,
+            "params": {
+              "root": "/home/shawn/workspace2/devlist.app",
+              "state": "ready"
+            }
+          },
+          {
+            "method": "suprnova-lsp/rustdocStatus",
+            "receivedNs": 1054041173036120,
+            "params": {
+              "generation": 1,
+              "message": "Waiting to generate library and binary model APIs",
+              "state": "pending",
+              "workspaceRoot": "/home/shawn/workspace2/devlist.app"
+            }
+          },
+          {
+            "method": "suprnova-lsp/rustdocStatus",
+            "receivedNs": 1054041173073746,
+            "params": {
+              "generation": 1,
+              "message": "Generating library and binary model APIs",
+              "state": "running",
+              "workspaceRoot": "/home/shawn/workspace2/devlist.app"
+            }
+          },
+          {
+            "method": "experimental/serverStatus",
+            "receivedNs": 1054857225345436,
+            "params": {
+              "health": "ok",
+              "quiescent": false
+            }
+          },
+          {
+            "method": "suprnova-lsp/activeWorkspaceChanged",
+            "receivedNs": 1054857225452199,
+            "params": {
+              "root": "/home/shawn/workspace2/devlist.app",
+              "state": "indexing"
+            }
+          },
+          {
+            "method": "suprnova-lsp/rustdocStatus",
+            "receivedNs": 1054861882889842,
+            "params": {
+              "generation": 1,
+              "message": "Generated library and binary model APIs are current",
+              "state": "current",
+              "workspaceRoot": "/home/shawn/workspace2/devlist.app"
+            }
+          },
+          {
+            "method": "experimental/serverStatus",
+            "receivedNs": 1054861882934541,
+            "params": {
+              "health": "ok",
+              "quiescent": true
+            }
+          },
+          {
+            "method": "suprnova-lsp/activeWorkspaceChanged",
+            "receivedNs": 1054861882952682,
+            "params": {
+              "root": "/home/shawn/workspace2/devlist.app",
+              "state": "ready"
+            }
+          }
+        ],
+        "stages": [
+          {
+            "message": "editor document analysis route published",
+            "fields": {
+              "method": "didOpen",
+              "path": "/home/shawn/workspace2/devlist.app/src/models/user.rs",
+              "ready": true,
+              "session": "OpenDocumentSession(1)",
+              "uri": "file:///home/shawn/workspace2/devlist.app/src/models/user.rs"
+            },
+            "observedNs": 1054041173467649
+          },
+          {
+            "message": "analysis query started",
+            "fields": {
+              "label": "hover",
+              "queued_ms": "0"
+            },
+            "observedNs": 1054861944986527
+          },
+          {
+            "message": "document analysis prepared",
+            "fields": {
+              "elapsed_us": "266544",
+              "query": "hover",
+              "selection": "AtOffset(2158)",
+              "source": "current",
+              "target_count": 1
+            },
+            "observedNs": 1054862211354375
+          },
+          {
+            "message": "analysis query completed",
+            "fields": {
+              "elapsed_ms": "307",
+              "query": "hover",
+              "queued_ms": "0",
+              "status": "ok"
+            },
+            "observedNs": 1054862252674594
+          },
+          {
+            "message": "analysis query started",
+            "fields": {
+              "label": "hover",
+              "queued_ms": "0"
+            },
+            "observedNs": 1054862255290511
+          },
+          {
+            "message": "document analysis prepared",
+            "fields": {
+              "elapsed_us": "264155",
+              "query": "hover",
+              "selection": "AtOffset(2197)",
+              "source": "current",
+              "target_count": 1
+            },
+            "observedNs": 1054862519555244
+          },
+          {
+            "message": "analysis query completed",
+            "fields": {
+              "elapsed_ms": "303",
+              "query": "hover",
+              "queued_ms": "0",
+              "status": "ok"
+            },
+            "observedNs": 1054862558905525
+          },
+          {
+            "message": "analysis query started",
+            "fields": {
+              "label": "hover",
+              "queued_ms": "0"
+            },
+            "observedNs": 1054862560701892
+          },
+          {
+            "message": "document analysis prepared",
+            "fields": {
+              "elapsed_us": "259708",
+              "query": "hover",
+              "selection": "AtOffset(2254)",
+              "source": "current",
+              "target_count": 1
+            },
+            "observedNs": 1054862820435300
+          },
+          {
+            "message": "analysis query completed",
+            "fields": {
+              "elapsed_ms": "298",
+              "query": "hover",
+              "queued_ms": "0",
+              "status": "ok"
+            },
+            "observedNs": 1054862859513650
+          }
+        ]
+      },
+      "summary": {
+        "firstNs": 309298413,
+        "repeatedNs": [
+          305980408,
+          300442052
+        ],
+        "stages": [
+          {
+            "id": 2,
+            "transportNs": 309298413,
+            "queuedNs": 0,
+            "executionNs": 307000000,
+            "preparationNs": 266544000,
+            "correlation": "one outstanding hover; all three lifecycle/preparation observations in request order"
+          },
+          {
+            "id": 3,
+            "transportNs": 305980408,
+            "queuedNs": 0,
+            "executionNs": 303000000,
+            "preparationNs": 264155000,
+            "correlation": "one outstanding hover; all three lifecycle/preparation observations in request order"
+          },
+          {
+            "id": 4,
+            "transportNs": 300442052,
+            "queuedNs": 0,
+            "executionNs": 298000000,
+            "preparationNs": 259708000,
+            "correlation": "one outstanding hover; all three lifecycle/preparation observations in request order"
+          }
+        ],
+        "diagnosticP95Ns": 309298413,
+        "maxNs": 309298413,
+        "acceptance": "unverified: diagnostic counts are below the RSP minimum",
+        "idleRssBytes": [
+          260014080,
+          252407808,
+          252407808,
+          252407808,
+          252407808
+        ]
+      },
+      "plan": {
+        "file": "src/models/user.rs",
+        "format": "json",
+        "readinessBarrier": "ready",
+        "documentReadinessBarrier": true,
+        "deferredBarrier": "before-queries",
+        "idleMemory": true,
+        "queries": [
+          {
+            "kind": "hover",
+            "label": "rsp_query",
+            "marker": "rsp_query"
+          },
+          {
+            "kind": "hover",
+            "label": "rsp_without",
+            "marker": "rsp_without"
+          },
+          {
+            "kind": "hover",
+            "label": "rsp_filter",
+            "marker": "rsp_filter"
+          }
+        ],
+        "initializationOptions": {
+          "cfg": {
+            "test": false
+          },
+          "cache": {
+            "packageResidency": "workspace"
+          },
+          "indexing": {
+            "performancePreference": "lower-peak-memory"
+          },
+          "rustdoc": {
+            "automatic": {
+              "artifactRoot": "/home/shawn/workspace2/rust-glancer/target/agent-debug/runs/20261006T233656243Z-rsp-diagnostic-1962525-9c1ed3/lower-peak-memory/compiler",
+              "toolchain": "nightly-2026-08-19",
+              "jobs": 2
+            }
+          }
+        },
+        "text": "//! User model.\n//!\n//! Defined with the `#[suprnova::model]` macro: the struct below *is* the\n//! Eloquent model. The macro emits the SeaORM `Entity` / `Column` /\n//! `ActiveModel` in an inner `user` module and gives `User` the query surface\n//! (`User::query()`, `User::find()`, the `Model::create` mass-assignment entry\n//! point, `save`, timestamps). `Authenticatable` is implemented on the struct\n//! so the auth stack (session middleware, user providers, `Auth::user()`)\n//! resolves users without touching SeaORM directly.\n\nuse std::any::Any;\n\nuse chrono::{DateTime, Utc};\nuse suprnova::{\n    Authenticatable, CanResetPassword, FrameworkError, MustVerifyEmail, attrs, hashing, model,\n};\n\n#[model(\n    table = \"users\",\n    fillable = [\"name\", \"email\", \"password\"],\n    hidden = [\"password\", \"remember_token\"],\n    timestamps,\n)]\npub struct User {\n    pub id: i64,\n    pub name: String,\n    pub email: String,\n    pub password: String,\n    pub remember_token: Option<String>,\n    // Nullable verification timestamp. The model macro auto-injects the\n    // `AsOptionalDateTime` cast for `Option<DateTime<Utc>>` fields, so no\n    // explicit `casts = {}` entry is needed. `NULL` means unverified.\n    pub email_verified_at: Option<DateTime<Utc>>,\n    pub created_at: DateTime<Utc>,\n    pub updated_at: DateTime<Utc>,\n}\n\n// Re-export the SeaORM types the macro emits in the inner `user` module so\n// call sites referencing `crate::models::user::{Entity, Column, ActiveModel}`\n// keep resolving.\npub use user::{ActiveModel, Column, Entity};\n\nimpl suprnova::rbac::HasRoles for User {\n    fn rbac_model_type(&self) -> String {\n        \"directory.user\".to_owned()\n    }\n}\n\nimpl User {\n    /// Find a user by their email address.\n    pub async fn find_by_email(email: &str) -> Result<Option<Self>, FrameworkError> {\n        <Self as suprnova::eloquent::Model>::query()\n            .filter(\"email\", email)\n            .first()\n            .await\n    }\n\n    /// Verify a plaintext password against this user's stored hash.\n    pub fn verify_password(&self, password: &str) -> Result<bool, FrameworkError> {\n        use suprnova::eloquent::Model as _;\n        let rsp_query = User::query();\n        let rsp_without = User::without_global_scopes();\n        let rsp_filter = User::filter(\"email\", \"member@example.test\");\n\n        hashing::verify(password, &self.password)\n    }\n\n    /// Create a new user, hashing the password before insert. Values are\n    /// mass-assigned through the model's `fillable` set.\n    pub async fn create(\n        name: impl Into<String>,\n        email: impl Into<String>,\n        password: &str,\n    ) -> Result<Self, FrameworkError> {\n        let name: String = name.into();\n        let email: String = email.into();\n        let hashed = hashing::hash(password)?;\n        <Self as suprnova::eloquent::Model>::create(attrs! {\n            name: name,\n            email: email,\n            password: hashed,\n        })\n        .await\n    }\n\n    /// Set (or clear) the remember-me token and persist it. `remember_token`\n    /// is deliberately outside `fillable` (it is never set from request\n    /// input), so this writes the whole row via `save` rather than a\n    /// mass-assignment update.\n    pub async fn update_remember_token(&self, token: Option<String>) -> Result<(), FrameworkError> {\n        let mut updated = self.clone();\n        updated.remember_token = token;\n        <Self as suprnova::eloquent::Model>::save(&updated).await\n    }\n}\n\nimpl Authenticatable for User {\n    fn get_auth_identifier(&self) -> String {\n        self.id.to_string()\n    }\n\n    fn auth_identifier_name(&self) -> &'static str {\n        \"id\"\n    }\n\n    // Returning the stored hash is what lets the registered\n    // `EloquentUserProvider<User>` verify credentials. The trait default\n    // returns `None` (for models that authenticate by other means -\n    // OAuth, passkeys), which makes `Auth::attempt` reject every\n    // password.\n    fn get_auth_password(&self) -> Option<&str> {\n        Some(&self.password)\n    }\n\n    fn as_any(&self) -> &dyn Any {\n        self\n    }\n\n    fn into_arc_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn Any + Send + Sync> {\n        self\n    }\n}\n\n// The email-verification flow reads the address + verification timestamp\n// through this trait, and writes the timestamp back when a verification link\n// is consumed. Implementing it on `User` is what lets the configured\n// `EloquentUserProvider<User>` (registered in `bootstrap.rs`) drive\n// `EmailVerification::resend` / `verify`.\nimpl MustVerifyEmail for User {\n    fn email(&self) -> &str {\n        &self.email\n    }\n\n    fn email_verified_at(&self) -> Option<DateTime<Utc>> {\n        self.email_verified_at\n    }\n\n    fn set_email_verified_at(&mut self, v: Option<DateTime<Utc>>) {\n        self.email_verified_at = v;\n    }\n\n    fn name(&self) -> Option<&str> {\n        Some(&self.name)\n    }\n}\n\n// The password-reset flow addresses the reset / password-changed mail through\n// `email_for_reset()` and persists the rotated (already-hashed) password\n// through `set_password_hash()`. Implementing it on `User` lets the configured\n// `EloquentUserProvider<User>` drive `PasswordReset::send_link` / `complete`.\nimpl CanResetPassword for User {\n    fn email_for_reset(&self) -> &str {\n        &self.email\n    }\n\n    fn set_password_hash(&mut self, hash: &str) {\n        self.password = hash.to_string();\n    }\n}\n",
+        "rustdocBarrier": "before-queries",
+        "rustdocTimeoutMs": 900000
+      }
+    }
+  },
+  "commands": [
+    {
+      "command": "cargo",
+      "args": [
+        "metadata",
+        "--manifest-path",
+        "/home/shawn/workspace2/devlist.app/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--format-version",
+        "1",
+        "--filter-platform",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "pid": 1962536,
+      "code": 0,
+      "signal": null,
+      "elapsedMs": 416,
+      "timedOut": false,
+      "interruptedBy": null,
+      "metrics": null,
+      "cleanup": {
+        "status": "verified-empty",
+        "processGroupId": 1962536,
+        "initialPids": [],
+        "termSent": false,
+        "killSent": false,
+        "verifiedEmpty": true,
+        "remainingPids": [],
+        "inspectionError": null
+      },
+      "phase": "metadata"
+    },
+    {
+      "command": "rustc",
+      "args": [
+        "-vV"
+      ],
+      "pid": 1962570,
+      "code": 0,
+      "signal": null,
+      "elapsedMs": 136,
+      "timedOut": false,
+      "interruptedBy": null,
+      "metrics": null,
+      "cleanup": {
+        "status": "verified-empty",
+        "processGroupId": 1962570,
+        "initialPids": [],
+        "termSent": false,
+        "killSent": false,
+        "verifiedEmpty": true,
+        "remainingPids": [],
+        "inspectionError": null
+      },
+      "phase": "build-compiler"
+    },
+    {
+      "command": "rustc",
+      "args": [
+        "-vV"
+      ],
+      "pid": 1962582,
+      "code": 0,
+      "signal": null,
+      "elapsedMs": 130,
+      "timedOut": false,
+      "interruptedBy": null,
+      "metrics": null,
+      "cleanup": {
+        "status": "verified-empty",
+        "processGroupId": 1962582,
+        "initialPids": [],
+        "termSent": false,
+        "killSent": false,
+        "verifiedEmpty": true,
+        "remainingPids": [],
+        "inspectionError": null
+      },
+      "phase": "producer-compiler"
+    },
+    {
+      "command": "git",
+      "args": [
+        "rev-parse",
+        "HEAD"
+      ],
+      "pid": 1962594,
+      "code": 0,
+      "signal": null,
+      "elapsedMs": 124,
+      "timedOut": false,
+      "interruptedBy": null,
+      "metrics": null,
+      "cleanup": {
+        "status": "verified-empty",
+        "processGroupId": 1962594,
+        "initialPids": [],
+        "termSent": false,
+        "killSent": false,
+        "verifiedEmpty": true,
+        "remainingPids": [],
+        "inspectionError": null
+      },
+      "phase": "commit"
+    },
+    {
+      "command": "git",
+      "args": [
+        "diff",
+        "--exit-code",
+        "HEAD",
+        "--",
+        "crates",
+        "Cargo.lock",
+        "Cargo.toml",
+        "rust-toolchain.toml"
+      ],
+      "pid": 1962597,
+      "code": 0,
+      "signal": null,
+      "elapsedMs": 124,
+      "timedOut": false,
+      "interruptedBy": null,
+      "metrics": null,
+      "cleanup": {
+        "status": "verified-empty",
+        "processGroupId": 1962597,
+        "initialPids": [],
+        "termSent": false,
+        "killSent": false,
+        "verifiedEmpty": true,
+        "remainingPids": [],
+        "inspectionError": null
+      },
+      "phase": "runtime-inputs"
+    },
+    {
+      "command": "just",
+      "args": [
+        "agent-debug",
+        "--no-build",
+        "--timeout",
+        "17m",
+        "--measure",
+        "--log",
+        "rg_lsp_engine=trace,rg_lsp_server=debug",
+        "lsp-query",
+        "--workspace-root",
+        "/home/shawn/workspace2/devlist.app",
+        "--query-file",
+        "/home/shawn/workspace2/rust-glancer/target/agent-debug/runs/20261006T233656243Z-rsp-diagnostic-1962525-9c1ed3/faster-builds-plan.json",
+        "--timeout-ms",
+        "300000",
+        "--json"
+      ],
+      "pid": 1962608,
+      "code": 0,
+      "signal": null,
+      "elapsedMs": 862370,
+      "timedOut": false,
+      "interruptedBy": null,
+      "metrics": null,
+      "cleanup": {
+        "status": "verified-empty",
+        "processGroupId": 1962608,
+        "initialPids": [],
+        "termSent": false,
+        "killSent": false,
+        "verifiedEmpty": true,
+        "remainingPids": [],
+        "inspectionError": null
+      },
+      "phase": "faster-builds"
+    },
+    {
+      "command": "just",
+      "args": [
+        "agent-debug",
+        "--no-build",
+        "--timeout",
+        "17m",
+        "--measure",
+        "--log",
+        "rg_lsp_engine=trace,rg_lsp_server=debug",
+        "lsp-query",
+        "--workspace-root",
+        "/home/shawn/workspace2/devlist.app",
+        "--query-file",
+        "/home/shawn/workspace2/rust-glancer/target/agent-debug/runs/20261006T233656243Z-rsp-diagnostic-1962525-9c1ed3/lower-peak-memory-plan.json",
+        "--timeout-ms",
+        "300000",
+        "--json"
+      ],
+      "pid": 2052891,
+      "code": 0,
+      "signal": null,
+      "elapsedMs": 826935,
+      "timedOut": false,
+      "interruptedBy": null,
+      "metrics": null,
+      "cleanup": {
+        "status": "verified-empty",
+        "processGroupId": 2052891,
+        "initialPids": [],
+        "termSent": false,
+        "killSent": false,
+        "verifiedEmpty": true,
+        "remainingPids": [],
+        "inspectionError": null
+      },
+      "phase": "lower-peak-memory"
+    }
+  ],
+  "observationComplete": true,
+  "applicationInputsUnchanged": true,
+  "processCleanup": {
+    "status": "verified",
+    "runs": 7,
+    "verifiedRuns": 7
+  },
+  "requirements": {
+    "RSP-001": "unverified",
+    "RSP-002": "unverified",
+    "RSP-003": "unverified",
+    "RSP-004": "unverified",
+    "RSP-005": "unverified",
+    "RSP-006": "unverified"
+  }
+}
