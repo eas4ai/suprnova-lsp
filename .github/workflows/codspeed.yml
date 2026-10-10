@@ -1,0 +1,79 @@
+name: CodSpeed
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+# Superseded PR commits no longer need runners. Keep every main-branch run so
+# cache refreshes and performance baselines can finish independently.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  benchmarks:
+    name: Run benchmarks
+    runs-on: ubuntu-latest
+    env:
+      SUPRNOVA_LSP_BENCH_TARGETS: small_app
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: ./.github/actions/cargo-cache
+        with:
+          scope: codspeed
+          target-dir: target
+          dependency-key: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
+
+      - name: Install cargo-codspeed
+        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+        with:
+          tool: cargo-codspeed@4.6.0
+
+      - name: Build benchmark targets
+        run: cargo codspeed build -p rg_project --bench analysis_pipeline
+
+      - name: Run benchmarks
+        uses: CodSpeedHQ/action@9d332c4d90b43981c3e55ae8e38e68709996240f # v4
+        with:
+          mode: simulation
+          run: cargo codspeed run -p rg_project --bench analysis_pipeline
+
+  query-benchmarks:
+    name: Query benchmarks
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: ./.github/actions/cargo-cache
+        with:
+          scope: codspeed-query
+          target-dir: target
+          dependency-key: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
+
+      - name: Install cargo-codspeed
+        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+        with:
+          tool: cargo-codspeed@4.6.0
+
+      - name: Build query benchmark
+        run: cargo codspeed build -p rg_lsp_engine --bench query_latency
+
+      - name: Run query benchmark
+        uses: CodSpeedHQ/action@9d332c4d90b43981c3e55ae8e38e68709996240f # v4
+        with:
+          mode: simulation
+          run: cargo codspeed run -p rg_lsp_engine --bench query_latency
