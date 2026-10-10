@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -17,6 +18,40 @@ spec.loader.exec_module(observer)
 
 
 class ResponsivenessCheck:
+    @staticmethod
+    async def build_candidate(runner, directory):
+        """Build current source with the same Cargo layout as the measured executable."""
+        runner.install_signal_handlers()
+        before = observer.Diagnostic.runtime_fingerprint()
+        environment = dict(os.environ, RUSTUP_TOOLCHAIN="1.98.1", CARGO_BUILD_JOBS="2",
+            CARGO_NET_OFFLINE="true", CARGO_TARGET_DIR=str(runner.BUILD_ROOT),
+            CARGO_BUILD_BUILD_DIR=str(runner.BUILD_ROOT))
+        build = runner.build_spec(runner.RunnerOptions(build_profile="release"))
+        command = runner.CommandSpec(build.command, [*build.args, "--locked", "--offline"])
+        report_path = directory / "native-build.json"
+        commands = []
+        proof = None
+        try:
+            outcome, _ = await runner.observe_command(command, ROOT, environment,
+                directory / "native-build", 20 * 60_000)
+            commands.append(outcome)
+            cleanup = outcome.get("cleanup", {})
+            if (outcome.get("code") != 0 or outcome.get("timedOut") is not False
+                or cleanup.get("verifiedEmpty") is not True or cleanup.get("remainingPids") != []):
+                raise ValueError("current native build failed or process cleanup was not verified")
+            after = observer.Diagnostic.runtime_fingerprint()
+            if after != before:
+                raise ValueError("native source changed during the current build")
+            binary = runner.rust_glancer_binary("release")
+            proof = {"runtimeSourcesSha256": after,
+                "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "report": str(report_path)}
+            return proof
+        finally:
+            runner.write_json(report_path, {"commands": commands,
+                "processCleanup": runner.summarize_cleanup(commands), "runtimeSourcesBefore": before,
+                "identity": proof, "buildEnvironment": {name: environment[name] for name in
+                    ("RUSTUP_TOOLCHAIN", "CARGO_BUILD_JOBS", "CARGO_NET_OFFLINE", "CARGO_TARGET_DIR", "CARGO_BUILD_BUILD_DIR")}})
+
     @staticmethod
     def invariant_evidence(requirement):
         try:
@@ -181,12 +216,15 @@ class ResponsivenessCheck:
         try:
             baseline = cls.baseline()
             print("Frozen baseline readiness, transport, stages and input identities verified.", flush=True)
-            # This collector builds the actual current source and owns every
-            # compiler/LSP process. A report from an earlier binary cannot stand
-            # in for the candidate after the implementation changes.
-            candidate_path = await observer.SourceSeries().run(observer.MODES, False, 4096)
+            # Build once with explicit intermediate paths. Let the frozen
+            # collector own fresh LSP sessions without switching Cargo layouts.
+            build = await cls.build_candidate(runner, directory)
+            candidate_path = await observer.SourceSeries().run(observer.MODES, True, 4096)
             candidate = cls.read_report(candidate_path)
             identity = cls.report_identity(candidate)
+            for field in ("binarySha256", "runtimeSourcesSha256"):
+                if identity.get(field) != build[field]:
+                    raise ValueError("candidate differs from the current native build: " + field)
             for field in ("sources", "metadataSha256", "buildCompiler", "producerCompiler", "cacheState"):
                 if identity[field] != baseline[field]:
                     raise ValueError("baseline/candidate measurement conditions differ: " + field)
@@ -200,7 +238,7 @@ class ResponsivenessCheck:
             if candidate.get("runtimeSourcesUnchanged") is not True or identity.get("runtimeSourcesSha256") != observer.Diagnostic.runtime_fingerprint():
                 raise ValueError("candidate measurements do not describe current native source")
             results["RSP-001"] = {"passed": True, "baseline": "tools/fixtures/responsiveness/baseline-source.json",
-                "candidate": str(candidate_path), "binarySha256": identity["binarySha256"]}
+                "candidate": str(candidate_path), "binarySha256": identity["binarySha256"], "nativeBuild": build}
             source = {mode: observer.SourceSeries.assess(candidate["reports"][mode]["sessions"], mode)
                       for mode in observer.MODES}
             slow = [f"{mode}/{cohort}: {series[cohort]['p95Ns']} ns"
