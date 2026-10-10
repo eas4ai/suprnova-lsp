@@ -22,6 +22,12 @@ class ResponsivenessCheck:
         try:
             binding = observer.helpers.module("rsp_evidence_binding", ROOT / "tools/responsiveness-evidence.py")
             evidence = binding.Evidence(EVIDENCE)
+            if requirement == "RSP-005":
+                policy = observer.helpers.module("rsp_policy_binding", ROOT / "tools/responsiveness-policy.py")
+                return {"passed": True, "policy": policy.PolicyEvidence.assess(evidence)}
+            if requirement == "RSP-006":
+                idle = observer.helpers.module("rsp_idle_binding", ROOT / "tools/responsiveness-idle.py")
+                return {"passed": True, "idle": idle.IdleEvidence.assess(evidence)}
             # Check deterministic races first so a genuine failed invariant remains
             # the reason for rejection even when other observations are unavailable.
             invariants = evidence.native(requirement)
@@ -36,7 +42,10 @@ class ResponsivenessCheck:
             return {"passed": True, "native": invariants, "progress": progress.ProgressEvidence.assess(evidence),
                     "editor": delivery.EditorEvidence.assess(evidence, "cancellation", cancellation=True)}
         except (ValueError, KeyError, OSError, TypeError, StopIteration) as error:
-            return {"passed": False, "reason": str(error)}
+            result = {"passed": False, "reason": str(error)}
+            if hasattr(error, "observations"):
+                result["observations"] = error.observations
+            return result
 
     @staticmethod
     def read_report(path):
@@ -214,6 +223,8 @@ class ResponsivenessCheck:
             results["RSP-001"] = {"passed": False, "reason": str(error)}
         results["RSP-003"] = cls.invariant_evidence("RSP-003")
         results["RSP-004"] = cls.invariant_evidence("RSP-004")
+        results["RSP-005"] = cls.invariant_evidence("RSP-005")
+        results["RSP-006"] = cls.invariant_evidence("RSP-006")
         (directory / "observations.json").write_text(json.dumps(results, indent=2) + "\n")
         for requirement, result in results.items():
             print(json.dumps({"requirement": requirement, **result}), flush=True)
