@@ -30,6 +30,13 @@ runs:
         LOCAL_RUNNER: ${{ runner.environment }}
       run: |
         $ErrorActionPreference = 'Stop'
+        if ($env:LOCAL_RUNNER -eq 'self-hosted') {
+          # Git Bash cannot infer a writable home for the NetworkService account.
+          # Cargo and Rustup retain their explicitly configured service homes.
+          $jobHome = Join-Path $env:RUNNER_TEMP 'home'
+          New-Item -ItemType Directory -Force $jobHome | Out-Null
+          [IO.File]::AppendAllText($env:GITHUB_ENV, 'HOME=' + $jobHome.Replace('\', '/') + [Environment]::NewLine, (New-Object Text.UTF8Encoding($false)))
+        }
         # Git for Windows installs Bash outside the machine's Git command PATH.
         # Add it to this job only; the service and owner PATH stay unchanged.
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
