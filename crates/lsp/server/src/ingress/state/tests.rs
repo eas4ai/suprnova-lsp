@@ -76,6 +76,33 @@ fn close_and_reopen_establishes_a_new_session_boundary() {
     };
 
     assert_ne!(first_session, second_session);
+    let revision_before_old_publication = state
+        .document(Some(path.clone()))
+        .unwrap()
+        .open_documents_revision();
+    // A late route from the closed session must neither advance the new revision
+    // nor tell a readiness observer that the reopened document's route is current.
+    assert!(
+        !state
+            .state
+            .lock()
+            .unwrap()
+            .route_published(&path, first_session)
+    );
+    assert_eq!(
+        state
+            .document(Some(path.clone()))
+            .unwrap()
+            .open_documents_revision(),
+        revision_before_old_publication,
+    );
+    assert!(
+        state
+            .state
+            .lock()
+            .unwrap()
+            .route_published(&path, second_session)
+    );
     assert!(matches!(closed.event(), LifecycleEvent::Close { .. }));
     assert_eq!(
         state

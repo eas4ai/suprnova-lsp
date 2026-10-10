@@ -80,6 +80,11 @@ class HoverFixture {
     // The whole extension suite already owns these IDs. The dedicated grep run starts
     // in test_targets with plaintext documents, so these cases must run without skips.
     if (ids.some((id) => registered.includes(id))) {
+      assert.notEqual(
+        process.env.SUPRNOVA_LSP_EXTENSION_TEST_GREP,
+        "Hover actions boundaries",
+        "the isolated hover test host must own its command handlers",
+      );
       return false;
     }
     this.commands = this.actions.registerCommands();

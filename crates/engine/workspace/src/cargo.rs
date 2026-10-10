@@ -92,7 +92,7 @@ impl CargoMetadataConfig {
     ) -> WorkspaceMetadataResult<LoadedCargoMetadata> {
         let target = self.resolved_target()?;
         let target_cfg = target.cfg_options()?;
-        let mut command = self.metadata_command_for_target(manifest_path.as_ref(), &target);
+        let mut command = self.metadata_command_for_target(manifest_path.as_ref(), &target)?;
         self.apply_configured_features(&mut command);
         let metadata = command
             .exec()
@@ -114,7 +114,7 @@ impl CargoMetadataConfig {
     ) -> WorkspaceMetadataResult<Vec<PathBuf>> {
         let target = self.resolved_target()?;
         let metadata = self
-            .metadata_command_for_target(manifest_path.as_ref(), &target)
+            .metadata_command_for_target(manifest_path.as_ref(), &target)?
             .no_deps()
             .exec()
             .map_err(WorkspaceMetadataError::CargoMetadata)?;
@@ -139,15 +139,19 @@ impl CargoMetadataConfig {
         &self,
         manifest_path: &Path,
         target: &RustcTarget,
-    ) -> cargo_metadata::MetadataCommand {
+    ) -> WorkspaceMetadataResult<cargo_metadata::MetadataCommand> {
+        // Cargo embeds the manifest's spelling in opaque path package IDs. Normalize before
+        // asking Cargo so startup, captured rustdoc metadata, and later rebuilds share IDs.
+        let manifest_path =
+            canonicalize_path(manifest_path).map_err(WorkspaceMetadataError::Path)?;
         let mut command = cargo_metadata::MetadataCommand::new();
-        command.manifest_path(manifest_path.to_path_buf());
+        command.manifest_path(manifest_path);
         let mut options = vec!["--filter-platform".to_string(), target.as_str().to_string()];
         if self.locked {
             options.push("--locked".to_owned());
         }
         command.other_options(options);
-        command
+        Ok(command)
     }
 
     fn apply_configured_features(&self, command: &mut cargo_metadata::MetadataCommand) {
@@ -198,4 +202,47 @@ pub enum CargoMetadataTarget {
 pub struct LoadedCargoMetadata {
     pub metadata: cargo_metadata::Metadata,
     pub target_cfg: CfgOptions,
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manifest_aliases_preserve_cargo_package_identities() {
+        let fixture = test_fixture::fixture_crate(
+            r#"
+            //- /Cargo.toml
+            [package]
+            name = "manifest_alias_fixture"
+            version = "0.1.0"
+            edition = "2024"
+
+            //- /src/lib.rs
+            pub struct Account;
+            "#,
+        );
+        let root = fixture.path("").canonicalize().unwrap();
+        let alias = fixture.path("workspace-alias");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let config = CargoMetadataConfig::default();
+        let canonical = config
+            .load_metadata_with_target_cfg(root.join("Cargo.toml"))
+            .unwrap()
+            .metadata;
+        let aliased = config
+            .locked(true)
+            .load_metadata_with_target_cfg(alias.join("Cargo.toml"))
+            .unwrap()
+            .metadata;
+
+        // Startup and later graph rebuilds must name the same package even when the editor
+        // opened an alias. Cargo's opaque IDs must come from one canonical manifest spelling.
+        assert_eq!(canonical.workspace_members, aliased.workspace_members);
+        assert_eq!(canonical.packages[0].id, aliased.packages[0].id);
+        assert_eq!(
+            canonical.resolve.unwrap().nodes[0].id,
+            aliased.resolve.unwrap().nodes[0].id,
+        );
+    }
 }

@@ -3,6 +3,10 @@ use std::{io, time::Duration};
 use anyhow::Context as _;
 use tokio::process::{Child, Command};
 
+#[cfg(test)]
+#[path = "tests/mod.rs"]
+mod tests;
+
 /// A dedicated process group. Reaping is restricted to this group, never unrelated engine children.
 #[derive(Debug)]
 pub(crate) struct OwnedProcessTree {
@@ -56,15 +60,36 @@ impl OwnedProcessTree {
     }
 
     pub(crate) async fn drain(&mut self, child: &mut Child) -> anyhow::Result<()> {
-        self.signal(libc::SIGTERM)
-            .context("terminate compiler process group")?;
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        let termination = self.signal(libc::SIGTERM);
+        // On macOS a group containing only the unreaped leader can report EPERM. Reap the
+        // direct child during the grace period so the next group signal sees its actual members.
+        let grace_deadline = tokio::time::Instant::now() + Duration::from_millis(100);
+        let reaped = match tokio::time::timeout_at(grace_deadline, child.wait()).await {
+            Ok(status) => {
+                status.context("reap compiler command during termination grace")?;
+                true
+            }
+            Err(_) => false,
+        };
+        if let Err(error) = termination {
+            if error.raw_os_error() != Some(libc::EPERM) || !reaped {
+                return Err(error).context("terminate compiler process group");
+            }
+            // Retry only after proving the leader exited. A permission error from surviving
+            // descendants must still fail cleanup rather than being treated as an empty group.
+            self.signal(libc::SIGTERM)
+                .context("terminate compiler process group after reaping command")?;
+        }
+        tokio::time::sleep_until(grace_deadline).await;
+        // The leader can exit while descendants remain, so always signal the entire group.
         self.signal(libc::SIGKILL)
             .context("kill remaining compiler descendants")?;
-        tokio::time::timeout(Duration::from_secs(5), child.wait())
-            .await
-            .context("timeout reaping compiler command")?
-            .context("reap compiler command")?;
+        if !reaped {
+            tokio::time::timeout(Duration::from_secs(5), child.wait())
+                .await
+                .context("timeout reaping compiler command")?
+                .context("reap compiler command")?;
+        }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         loop {
             #[cfg(target_os = "linux")]
@@ -95,7 +120,13 @@ impl OwnedProcessTree {
                     self.drained = true;
                     return Ok(());
                 }
-                return Err(error).context("observe compiler process cleanup");
+                if error.raw_os_error() != Some(libc::EPERM)
+                    || tokio::time::Instant::now() >= deadline
+                {
+                    return Err(error).context("observe compiler process cleanup");
+                }
+                // An orphaned descendant may be a zombie until the host reaps it. EPERM is
+                // never proof of cleanup: keep observing until ESRCH or the bounded deadline.
             }
             anyhow::ensure!(
                 tokio::time::Instant::now() < deadline,

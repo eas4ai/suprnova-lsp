@@ -194,8 +194,8 @@ impl WorkspaceWatcher {
                 // Filter before the async queue so target-directory churn cannot keep extending
                 // the workspace settle window. Rescan events have no useful paths and must always
                 // reach the snapshot recovery path.
-                events.retain(|event| {
-                    if event.need_rescan() || Self::needs_directory_rescan(root, event) {
+                events.retain_mut(|event| {
+                    if event.need_rescan() {
                         return true;
                     }
 
@@ -209,8 +209,31 @@ impl WorkspaceWatcher {
                         EventKind::Access(_) => false,
                         _ => true,
                     };
-                    may_change_saved_input
-                        && event.event.paths.iter().any(|path| {
+                    if !may_change_saved_input {
+                        return false;
+                    }
+
+                    // Native backends may report an alias such as macOS /var while the workspace
+                    // root is canonical. Normalize mutations before filtering; missing paths keep
+                    // their canonical existing ancestor so removals can still trigger recovery.
+                    event.event.paths.retain_mut(|path| {
+                        match NormalizedPathBuf::from_absolute(&*path) {
+                            Ok(normalized) => {
+                                *path = normalized.into_path_buf();
+                                true
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    path = %path.display(),
+                                    error = %error,
+                                    "failed to normalize project watcher event path"
+                                );
+                                false
+                            }
+                        }
+                    });
+                    Self::needs_directory_rescan(root, event)
+                        || event.event.paths.iter().any(|path| {
                             WatchedProjectPath::is_watched_project_input(root.as_path(), path)
                         })
                 });
@@ -546,6 +569,59 @@ mod tests {
 
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn watcher_ingress_normalizes_aliases_before_filtering_mutations() {
+        let fixture = fixture_crate("//- /real-workspace/src/lib.rs\npub struct Account;\n");
+        let root = NormalizedPathBuf::from_absolute(fixture.path("real-workspace")).unwrap();
+        let alias = fixture.path("workspace-alias");
+        std::os::unix::fs::symlink(root.as_path(), &alias).unwrap();
+        let mut snapshot = ProjectPathSnapshot::scan(&root, Default::default());
+
+        std::fs::write(alias.join("src/lib.rs"), "pub struct SavedAccount;\n").unwrap();
+        let result = WorkspaceWatcher::project_result(
+            &root,
+            Ok(vec![changed_event(alias.join("src/lib.rs"))]),
+        )
+        .expect("an aliased source mutation must reach the snapshot");
+        let changed =
+            WorkspaceWatcher::changed_paths_for_results(&mut snapshot, &root, vec![result]);
+        assert_eq!(
+            changed,
+            vec![NormalizedPathBuf::from_absolute(root.as_path().join("src/lib.rs")).unwrap()]
+        );
+
+        let directory = alias.join(".cargo");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::write(directory.join("config.toml"), "[build]\njobs=1\n").unwrap();
+        let result = WorkspaceWatcher::project_result(
+            &root,
+            Ok(vec![watcher_event(
+                directory.clone(),
+                EventKind::Create(CreateKind::Folder),
+            )]),
+        )
+        .expect("an aliased folder creation must trigger a rescan");
+        let changed =
+            WorkspaceWatcher::changed_paths_for_results(&mut snapshot, &root, vec![result]);
+        let config =
+            NormalizedPathBuf::from_absolute(root.as_path().join(".cargo/config.toml")).unwrap();
+        assert_eq!(changed, vec![config.clone()]);
+
+        std::fs::remove_dir_all(&directory).unwrap();
+        let result = WorkspaceWatcher::project_result(
+            &root,
+            Ok(vec![watcher_event(
+                directory,
+                EventKind::Remove(RemoveKind::Folder),
+            )]),
+        )
+        .expect("an aliased removed folder must trigger a rescan");
+        let changed =
+            WorkspaceWatcher::changed_paths_for_results(&mut snapshot, &root, vec![result]);
+        assert_eq!(changed, vec![config]);
+    }
+
     #[test]
     fn a_new_directory_event_rescans_inputs_created_before_recursive_watching() {
         let fixture = fixture_crate("//- /src/lib.rs\npub struct Post;\n");
@@ -563,7 +639,10 @@ mod tests {
         let changed =
             WorkspaceWatcher::changed_paths_for_results(&mut snapshot, &root, vec![result]);
         assert_eq!(changed.len(), 1);
-        assert_eq!(changed[0].as_path(), config);
+        assert_eq!(
+            changed[0],
+            NormalizedPathBuf::from_absolute(config).unwrap()
+        );
     }
 
     #[test]

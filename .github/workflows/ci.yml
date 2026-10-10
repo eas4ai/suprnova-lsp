@@ -88,6 +88,15 @@ jobs:
           tool: cargo-nextest@0.9.132
       - name: Run tests
         run: cargo nextest run --workspace
+      # Debug tests use a checked token buffer. Miri exercises its raw-pointer implementation.
+      - name: Install token-buffer memory checker
+        if: runner.os == 'Linux'
+        run: rustup toolchain install nightly-2026-08-19 --profile minimal --no-self-update --component miri,rust-src
+      - name: Check token-buffer memory ownership
+        if: runner.os == 'Linux'
+        env:
+          CARGO_TARGET_DIR: target/tt-miri
+        run: cargo +nightly-2026-08-19 miri test -p rg_tt --locked
 
   test-targets:
     name: test-targets

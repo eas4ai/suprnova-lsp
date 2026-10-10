@@ -139,11 +139,12 @@ impl SessionRoute {
         let ready = matches!(&resolved, SessionRouteState::Ready(_));
         *state = resolved;
         drop(state);
-        self.publication.finish();
+        let current = self.publication.finish();
         tracing::debug!(
             path = %self.publication.path.display(),
             session = ?self.publication.session,
             ready,
+            current,
             "editor document analysis route published"
         );
     }
@@ -185,14 +186,14 @@ struct RoutePublication {
 }
 
 impl RoutePublication {
-    fn finish(&self) {
+    fn finish(&self) -> bool {
         let Some(editor) = self.editor.upgrade() else {
-            return;
+            return false;
         };
         editor
             .lock()
             .expect("editor state mutex should not be poisoned")
-            .route_published(&self.path, self.session);
+            .route_published(&self.path, self.session)
     }
 }
 

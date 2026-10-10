@@ -34,6 +34,7 @@ PINS = {
 COLLECTOR_STATES = {
     'e97400b628526f3c6cb5567742565ccf3e2c0ce5fb6726928f00bcf9e10443f3': 'pending',
     '7264c678b1c7cd8c7950601350e1c71f590925b6c597889ca3e482516184d362': 'running',
+    '1ae8cabc61fe1cda0dddab74451d4cab25783a4497c4ac544478f84486babd2c': 'running',
 }
 
 

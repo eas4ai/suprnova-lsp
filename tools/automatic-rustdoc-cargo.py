@@ -2,6 +2,7 @@
 """Observe Cargo argv and provide explicitly selected compiler-process controls."""
 
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -20,11 +21,55 @@ class CargoProbe:
 
     def record(self, event, **values):
         record = {"event": event, "monotonicNs": time.monotonic_ns(),
-                  "pid": os.getpid(), "pgid": os.getpgrp(), "cwd": os.getcwd(),
+                  "pid": os.getpid(), "platform": sys.platform, "cwd": os.getcwd(),
                   "args": self.args, "toolchain": os.environ.get("RUSTUP_TOOLCHAIN"),
                   "buildDirectory": os.environ.get("CARGO_BUILD_BUILD_DIR"), **values}
+        if sys.platform != "win32":
+            record.update(pgid=os.getpgrp(), sessionId=os.getsid(0))
         with self.events.open("a") as stream:
             stream.write(json.dumps(record) + "\n")
+
+    @staticmethod
+    def alive(pid):
+        if sys.platform == "win32":
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel.WaitForSingleObject.restype = wintypes.DWORD
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel.CloseHandle.restype = wintypes.BOOL
+            handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE, read-only observation.
+            if not handle:
+                if ctypes.get_last_error() == 87:  # PID no longer exists.
+                    return False
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                state = kernel.WaitForSingleObject(handle, 0)
+                if state == 0xFFFFFFFF:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                return state == 258  # WAIT_TIMEOUT means the process has not exited.
+            finally:
+                kernel.CloseHandle(handle)
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+
+    def compiler_command(self, metrics):
+        if sys.platform == "win32":
+            return [self.real_cargo, *self.args]
+        # Reuse the runner's platform-specific time flags rather than assuming GNU time.
+        path = Path(__file__).resolve().with_name("agent-debug.py")
+        spec = importlib.util.spec_from_file_location("automatic_cargo_measurement", path)
+        runner = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = runner
+        spec.loader.exec_module(runner)
+        measured = runner.measurement_command(self.real_cargo, self.args, metrics)
+        return [measured.command, *measured.args]
 
     def run(self):
         if "rustdoc" not in self.args:
@@ -38,7 +83,7 @@ class CargoProbe:
         mode = config.get("mode", "real")
         prior = [json.loads(line) for line in self.events.read_text().splitlines()] if self.events.exists() else []
         live = [entry["childPid"] for entry in prior if entry["event"] == "child"
-                and Path(f"/proc/{entry['childPid']}").exists()]
+                and self.alive(entry["childPid"])]
         self.record("started", mode=mode, livePriorChildren=live)
         if mode in {"hold", "late-failure"}:
             ready = self.events.parent / f"child-ready-{os.getpid()}"
@@ -74,7 +119,7 @@ class CargoProbe:
             return 42
 
         metrics = self.events.parent / f"compiler-{os.getpid()}.time.txt"
-        child = subprocess.Popen(["/usr/bin/time", "-v", "-o", str(metrics), self.real_cargo, *self.args])
+        child = subprocess.Popen(self.compiler_command(metrics))
         self.record("compiler", childPid=child.pid)
         code = child.wait()
         exports = []
@@ -121,7 +166,8 @@ class CargoProbe:
                 if time.monotonic() >= deadline:
                     raise TimeoutError("controlled compiler release deadline exceeded")
                 time.sleep(0.02)
-        self.record("finished", code=code, exports=exports, mutations=mutations, metrics=str(metrics))
+        self.record("finished", code=code, exports=exports, mutations=mutations,
+                    metrics=str(metrics) if sys.platform != "win32" else None)
         return code
 
 

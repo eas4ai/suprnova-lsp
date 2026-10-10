@@ -55,11 +55,40 @@ jobs:
         run: npm run check:unit
       - name: Run client unit tests
         run: npm run test:unit
+      - name: Check compiler fixture portability
+        shell: bash
+        working-directory: .
+        run: python tools/test_automatic_editor_fixture.py
+      - name: Install compiler fixture toolchain
+        shell: bash
+        run: rustup toolchain install nightly-2026-08-19 --profile minimal --no-self-update --component rust-src
       - name: Run client end-to-end tests on Linux
         if: runner.os == 'Linux'
-        run: xvfb-run -a npm run test:e2e:prebuilt
+        env:
+          SUPRNOVA_LSP_FIXTURE_FETCH: '1'
+        run: >-
+          env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET
+          ELECTRON_OZONE_PLATFORM_HINT=x11 XDG_SESSION_TYPE=x11 GDK_BACKEND=x11
+          xvfb-run -a npm run test:e2e:prebuilt
       - name: Run client end-to-end tests natively
         if: runner.os != 'Linux'
+        env:
+          SUPRNOVA_LSP_FIXTURE_FETCH: '1'
+        run: npm run test:e2e:prebuilt
+      - name: Run hover boundary tests on Linux
+        if: runner.os == 'Linux'
+        env:
+          SUPRNOVA_LSP_FIXTURE_FETCH: '1'
+          SUPRNOVA_LSP_EXTENSION_TEST_GREP: Hover actions boundaries
+        run: >-
+          env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET
+          ELECTRON_OZONE_PLATFORM_HINT=x11 XDG_SESSION_TYPE=x11 GDK_BACKEND=x11
+          xvfb-run -a npm run test:e2e:prebuilt
+      - name: Run hover boundary tests natively
+        if: runner.os != 'Linux'
+        env:
+          SUPRNOVA_LSP_FIXTURE_FETCH: '1'
+          SUPRNOVA_LSP_EXTENSION_TEST_GREP: Hover actions boundaries
         run: npm run test:e2e:prebuilt
 
   build-editor-packages:
