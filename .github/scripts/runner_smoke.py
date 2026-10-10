@@ -12,6 +12,7 @@ SOURCES = [".github/workflows/ci.yml", ".github/workflows/build-server.yml",
            ".github/workflows/platform-checks.yml", ".github/workflows/github-release.yml",
            ".github/workflows/runner-smoke.yml", ".github/actions/setup-rust/action.yml",
            ".github/actions/setup-python/action.yml",
+           ".github/runner-tools.json",
            ".github/actions/cargo-cache/action.yml", ".github/scripts/runner_smoke.py"]
 
 
@@ -40,6 +41,7 @@ def main():
     observation = {"role": role, "host": host, "runnerName": os.environ["RUNNER_NAME"],
                    "runId": os.environ["GITHUB_RUN_ID"], "sha": os.environ["GITHUB_SHA"],
                    "toolchain": toolchain, "cargoTestExit": result.returncode, "sourceDigest": digest,
+                   "pythonVersion": __import__('sys').version.split()[0],
                    "cargoBuildJobs": os.environ.get("CARGO_BUILD_JOBS"), "cargoHomeConfigured": bool(os.environ.get("CARGO_HOME"))}
     output = Path(".ci/runner-smoke") / (role + ".json")
     output.parent.mkdir(parents=True, exist_ok=True)
