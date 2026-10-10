@@ -66,21 +66,24 @@ describe("hover action model", () => {
       EXTENSION_COMMANDS.goToTypeFromHover,
       EXTENSION_COMMANDS.goToImplementationFromHover,
     ]);
-    assert.equal(
-      actual.markdown,
-      `Go to ${commandLink("type", EXTENSION_COMMANDS.goToTypeFromHover, origin)} | ${commandLink(
-        "implementation",
-        EXTENSION_COMMANDS.goToImplementationFromHover,
-        origin,
-      )}`,
+    const links = [
+      ...actual.markdown.matchAll(/\[(type|implementation)\]\((command:[^\s]+) "([^"]+)"\)/g),
+    ];
+    assert.deepEqual(
+      links.map((link) => [link[1], link[3]]),
+      [
+        ["type", "Go to type"],
+        ["implementation", "Go to implementation"],
+      ],
     );
+    for (const [index, link] of links.entries()) {
+      const target = new URL(link[2]);
+      assert.equal(target.protocol, "command:");
+      assert.equal(target.pathname, actions[index].command);
+      assert.deepEqual(JSON.parse(decodeURIComponent(target.search.slice(1))), [origin]);
+    }
   });
 });
-
-function commandLink(label: string, command: string, origin: HoverOrigin): string {
-  const args = encodeURIComponent(JSON.stringify([origin]));
-  return `[${label}](command:${command}?${args})`;
-}
 
 function location(
   uri: string,

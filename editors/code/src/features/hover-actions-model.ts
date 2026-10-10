@@ -123,7 +123,7 @@ export function locationsExcludingCurrentHover(
 
 function commandLink(action: HoverAction): string {
   const args = encodeURIComponent(JSON.stringify([action.origin]));
-  return `[${action.label}](command:${action.command}?${args})`;
+  return `[${action.label}](command:${action.command}?${args} "Go to ${action.label}")`;
 }
 
 function sameRange(left: SerializedRange, right: SerializedRange): boolean {
