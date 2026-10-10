@@ -29,68 +29,17 @@ pub struct SemanticIrReadTxn<'db> {
 
 impl Drop for SemanticIrReadTxn<'_> {
     fn drop(&mut self) {
-        let started = tracing::enabled!(tracing::Level::TRACE).then(std::time::Instant::now);
-        let decoded_count = self
-            .packages
-            .iter()
-            .filter(|entry| entry.has_unique_decoded_values())
-            .count();
-        // Broad visibility lookup can leave hundreds of request-owned indexes to destroy. Only
-        // decoded cells move to scoped workers; every loader and resident owner stays on the caller.
-        let mut panic = None;
-        if decoded_count >= 64 {
-            let chunk_size = self.packages.len().div_ceil(8);
-            panic = std::thread::scope(|scope| {
-                let mut workers = Vec::new();
-                for entries in self.packages.chunks_mut(chunk_size) {
-                    if !entries
-                        .iter()
-                        .any(PackageReadEntry::has_unique_decoded_values)
-                    {
-                        continue;
-                    }
-                    match std::thread::Builder::new()
-                        .name("release-semantic".to_owned())
-                        .spawn_scoped(scope, move || {
-                            entries
-                                .iter_mut()
-                                .for_each(PackageReadEntry::release_decoded_values);
-                        }) {
-                        Ok(worker) => workers.push(worker),
-                        Err(error) => {
-                            // A failed spawn leaves the cells untouched for the caller below.
-                            tracing::warn!(%error, "semantic release worker unavailable; releasing on caller");
-                        }
-                    }
-                }
-                let mut panic = None;
-                for worker in workers {
-                    if let Err(payload) = worker.join() {
-                        // Join every worker before releasing the remaining cells or propagating
-                        // the first panic. A response must never outlive its release workers.
-                        let _ = panic.get_or_insert(payload);
-                    }
-                }
-                panic
-            });
+        if !tracing::enabled!(tracing::Level::TRACE) {
+            return;
         }
-        // This covers small/shared sets and unsuccessful starts. Release payloads before loaders
-        // in both paths so their final reader cleanup always happens on the caller.
-        self.packages
-            .iter_mut()
-            .for_each(PackageReadEntry::release_decoded_values);
+        // Time the ordinary serial release, including any loader released by the last entry.
+        let started = std::time::Instant::now();
         drop(std::mem::take(&mut self.packages));
-        if let Some(started) = started {
-            tracing::trace!(
-                thread_id = ?std::thread::current().id(),
-                decoded_count,
-                elapsed_us = started.elapsed().as_micros(),
-                "semantic read entries released"
-            );
-        }
-        if let Some(panic) = panic {
-            std::panic::resume_unwind(panic);
-        }
+        tracing::trace!(
+            thread_id = ?std::thread::current().id(),
+            elapsed_us = started.elapsed().as_micros(),
+            "semantic read entries released"
+        );
     }
 }
 
