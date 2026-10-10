@@ -38,7 +38,8 @@ def main() -> None:
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
 
-    with args.report.open(encoding="utf-8") as file:
+    # JSON detects the encoding, including PowerShell's UTF-16 redirected output.
+    with args.report.open("rb") as file:
         report = json.load(file)
     failures = liveness_failures(report)
     if failures:

@@ -1,10 +1,10 @@
 {
   "compiler": "rustc 1.100.0-nightly (e71c0f1e3 2026-08-18)\nbinary: rustc\ncommit-hash: e71c0f1e3395b10a8c331317be1a5c107bdf7b2e\ncommit-date: 2026-08-18\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0-nightly\nLLVM version: 23.1.0\n",
-  "compilerPeakRssBytes": 3249446912,
-  "compilerRun": "target/agent-debug/runs/20261007T152858816Z-suprnova-user-514328-68dbf9",
+  "compilerPeakRssBytes": 1253031936,
+  "compilerRun": "target/agent-debug/runs/20261010T211648621Z-suprnova-user-2907913-aaa1fd",
   "configuration": {
     "cargoConfig": {
-      "/home/shawn/.cargo/config.toml": "4c95efa242af6479eba64f93e620b80c0633bc439372490db445291a98f947b1",
+      "/home/shawn/.cargo/config.toml": "20a888a983f5e2c1186139ce6d233a0d24e29352c6dc713b3f4f541af8b0ea94",
       "/home/shawn/workspace2/devlist.app/.cargo/config.toml": "80ad7dfb1c43a5a8217eefafb833db91a3bc6182158d7c7eb740f26c13da61e3"
     },
     "environment": {
