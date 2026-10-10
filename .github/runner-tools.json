@@ -1,0 +1,16 @@
+{
+  "pythonVersion": "3.13.16",
+  "source": "astral-sh/python-build-standalone",
+  "release": "20261009",
+  "serviceVariable": "SUPRNOVA_LSP_CI_PYTHON",
+  "platforms": {
+    "macos": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.13.16%2B20261009-aarch64-apple-darwin-install_only.tar.gz",
+      "sha256": "3338fcd572a670ec45ac9ef75480b95595ea9b6b5dd320952fcf5df185089941"
+    },
+    "windows": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.13.16%2B20261009-x86_64-pc-windows-msvc-install_only.tar.gz",
+      "sha256": "286285f159bc711e4f0d89bd3d01993d3a321b84bd6593bd66dc816c23609388"
+    }
+  }
+}

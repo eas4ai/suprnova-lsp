@@ -19,6 +19,10 @@ no existing Agreed requirement, working-agreement text or Sudus setting changes.
 3. Install/select explicit Rust versions on local job paths and respect the
    configured Cargo home in `.github/actions/cargo-cache/action.yml`. Retain the
    Linux manylinux release container. Other hosted-only jobs remain hosted.
+   Windows jobs add Git Bash to their job PATH. Mac and Windows select portable
+   Python under their consumer runner's `tools/` directory through the service
+   variable `SUPRNOVA_LSP_CI_PYTHON`; `.github/runner-tools.json` pins the archives
+   and hashes. This avoids hosted-user paths and machine-wide Python installers.
 4. Enable Actions and require approval for all external fork contributors. Disable
    the legacy `release.yml` marketplace automation before enabling owner pushes.
    Keep GitHub tag releases available without marketplace credentials.

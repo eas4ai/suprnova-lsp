@@ -29,6 +29,7 @@ SOURCE_FILES = [".github/workflows/ci.yml", ".github/workflows/build-server.yml"
                 ".github/workflows/platform-checks.yml", ".github/workflows/github-release.yml",
                 ".github/workflows/runner-smoke.yml", ".github/actions/setup-rust/action.yml",
                 ".github/actions/setup-python/action.yml",
+                ".github/runner-tools.json",
                 ".github/actions/cargo-cache/action.yml", ".github/scripts/runner_smoke.py"]
 
 
