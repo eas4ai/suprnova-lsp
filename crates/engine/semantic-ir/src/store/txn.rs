@@ -29,17 +29,77 @@ pub struct SemanticIrReadTxn<'db> {
 
 impl Drop for SemanticIrReadTxn<'_> {
     fn drop(&mut self) {
-        if !tracing::enabled!(tracing::Level::TRACE) {
-            return;
+        let started = tracing::enabled!(tracing::Level::TRACE).then(std::time::Instant::now);
+        let decoded_packages = self
+            .packages
+            .iter()
+            .filter(
+                |entry| matches!(entry, PackageReadEntry::Lazy(lazy) if lazy.has_decoded_values()),
+            )
+            .count();
+        let worker_count = if decoded_packages >= 64 { 8 } else { 0 };
+        let mut release_workers = 0;
+        let panic = if worker_count == 0 {
+            None
+        } else {
+            let chunk_size = self.packages.len().div_ceil(worker_count).max(1);
+            std::thread::scope(|scope| {
+                let mut workers = Vec::new();
+                // Workers release decoded cells in place. Every loader stays in its entry,
+                // so the last loader cannot start artifact-reader cleanup inside a release worker.
+                for chunk in self.packages.chunks_mut(chunk_size) {
+                    match std::thread::Builder::new()
+                        .name("release-semantic".to_owned())
+                        .spawn_scoped(scope, move || {
+                            for entry in chunk {
+                                if let PackageReadEntry::Lazy(lazy) = entry {
+                                    lazy.release_decoded_values();
+                                }
+                            }
+                        }) {
+                        Ok(worker) => {
+                            release_workers += 1;
+                            workers.push(worker);
+                        }
+                        Err(error) => tracing::warn!(
+                            %error,
+                            "could not start a semantic release worker; releasing its entries on the query lane"
+                        ),
+                    }
+                }
+                // Join every successful worker before releasing any loader, even if a worker
+                // unwinds. Keep its panic until untouched cells and loaders have been released.
+                let mut panic = None;
+                for worker in workers {
+                    if let Err(payload) = worker.join()
+                        && panic.is_none()
+                    {
+                        panic = Some(payload);
+                    }
+                }
+                panic
+            })
+        };
+        // Failed spawns leave their cells untouched. Small and manifest-only transactions also
+        // release here, without threads; loaders remain alive until every cell has been cleared.
+        for entry in &mut self.packages {
+            if let PackageReadEntry::Lazy(lazy) = entry {
+                lazy.release_decoded_values();
+            }
         }
-        // Time the ordinary serial release, including any loader released by the last entry.
-        let started = std::time::Instant::now();
         drop(std::mem::take(&mut self.packages));
-        tracing::trace!(
-            thread_id = ?std::thread::current().id(),
-            elapsed_us = started.elapsed().as_micros(),
-            "semantic read entries released"
-        );
+        if let Some(started) = started {
+            tracing::trace!(
+                thread_id = ?std::thread::current().id(),
+                elapsed_us = started.elapsed().as_micros(),
+                decoded_packages,
+                release_workers,
+                "semantic read entries released"
+            );
+        }
+        if let Some(panic) = panic {
+            std::panic::resume_unwind(panic);
+        }
     }
 }
 

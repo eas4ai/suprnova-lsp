@@ -44,6 +44,23 @@ impl<'db> LazyPackage<'db> {
         }
     }
 
+    /// Whether this request decoded crate data rather than only its small manifest.
+    pub(super) fn has_decoded_values(&self) -> bool {
+        self.loaded.get().is_some_and(|loaded| {
+            loaded.package.get().is_some()
+                || loaded.items.iter().any(|cell| cell.get().is_some())
+                || loaded
+                    .lookup_indexes
+                    .iter()
+                    .any(|cell| cell.get().is_some())
+        })
+    }
+
+    /// Release decoded data while keeping the artifact loader alive on the query lane.
+    pub(super) fn release_decoded_values(&mut self) {
+        drop(self.loaded.take());
+    }
+
     /// Returns the package's dense crate directory, loading it on first access.
     pub(super) fn manifest(
         &self,
