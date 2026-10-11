@@ -1,7 +1,6 @@
 mod builtin_derives;
 mod lookup_prefetch;
 mod trait_impl_lookup;
-mod txn_release;
 mod utils;
 
 use std::fmt::Write as _;
